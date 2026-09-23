@@ -1,0 +1,10 @@
+.env
+.merget/
+__pycache__/
+*.pyc
+commands.json
+dispositivos.json
+jarvis.pid
+jarvis.log
+sounds/*.mp3
+sounds/*.wav
