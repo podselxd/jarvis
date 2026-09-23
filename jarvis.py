@@ -1913,7 +1913,7 @@ def _pid_is_running(pid: int) -> bool:
 # --- Auto-actualizacion del .exe (solo empaquetado; el script se actualiza
 # solo via setup.bat/git pull, esto es la contraparte para el .exe) --------
 
-JARVIS_VERSION = "1.0.3"  # subir a mano en cada release, junto con el tag de git
+JARVIS_VERSION = "1.0.4"  # subir a mano en cada release, junto con el tag de git
 GITHUB_REPO = "podselxd/jarvis"
 
 
