@@ -4,11 +4,15 @@ Asistente de voz personal para Windows. Se activa diciendo **"Hey Jarvis"**, cor
 
 ## Instalación (1 clic)
 
-1. Instala [Python](https://python.org/downloads) si no lo tienes (marca "Add to PATH" al instalar).
-2. Descarga este repo y haz doble clic en **`setup.bat`**.
+1. Instala [Python](https://python.org/downloads) si no lo tienes (marca "Add to PATH" al instalar) y [Git](https://git-scm.com/downloads) si no lo tienes.
+2. Cloná este repo (`git clone https://github.com/podselxd/jarvis`) — mejor que bajar el ZIP, porque así `setup.bat` puede auto-actualizarse solo más adelante — y hacé doble clic en **`setup.bat`**.
 3. La primera vez te va a pedir: una API key gratis de [console.groq.com](https://console.groq.com) (sin tarjeta), tu nombre (opcional, para que te reconozca desde el arranque), y una palabra de apagado (opcional, ver Seguridad abajo).
 4. Te pregunta si quieres conectarlo a tus otros dispositivos (Tailscale) y si quieres que inicie con Windows.
 5. Listo, arranca.
+
+### Actualizar
+
+Si clonaste con git, volvé a correr **`setup.bat`** cuando quieras — antes de instalar nada, baja solo los cambios nuevos del repo (`git pull`) y sigue de ahí. Tu `.env`, memoria y configuración personal nunca se tocan.
 
 ## Uso
 

@@ -15,6 +15,21 @@ if errorlevel 1 (
     exit /b 1
 )
 
+if exist ".git" (
+    echo Buscando actualizaciones...
+    git pull --ff-only
+    if errorlevel 1 (
+        echo.
+        echo No se pudo actualizar solo ^(puede que hayas tocado algun archivo del repo
+        echo a mano^). Arranca igual con lo que ya tenes; si queres forzar la
+        echo actualizacion, corre "git pull" vos mismo y revisa el conflicto.
+        pause
+    ) else (
+        echo Listo, al dia.
+    )
+    echo.
+)
+
 echo Instalando dependencias, puede tardar un minuto...
 python -m pip install -r requirements.txt --quiet
 if errorlevel 1 (
