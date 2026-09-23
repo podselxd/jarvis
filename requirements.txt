@@ -12,3 +12,4 @@ beautifulsoup4
 send2trash
 Pillow
 customtkinter
+pystray

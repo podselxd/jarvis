@@ -39,6 +39,8 @@ from openwakeword.model import Model as WakeWordModel
 from openwakeword.utils import download_models as download_wakeword_models
 from playsound import playsound
 
+from sphere import SphereRenderer, IDLE_PARAMS
+from tray import JarvisTray
 from ui import JarvisUI
 
 # Sin esto, Windows trata el proceso como "no DPI-aware" y estira/recorta a
@@ -83,6 +85,11 @@ _load_dotenv()
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 STOP_WORD = os.environ.get("JARVIS_STOP_WORD", "").strip()  # nunca se manda a Groq: se revisa localmente antes
 USER_NAME = os.environ.get("JARVIS_USER_NAME", "").strip()
+DISPLAY_MODE = os.environ.get("JARVIS_DISPLAY_MODE", "fullscreen_borderless").strip()
+try:
+    MASTER_VOLUME = max(0, min(100, int(os.environ.get("JARVIS_VOLUME", "100"))))
+except ValueError:
+    MASTER_VOLUME = 100
 MESH_SECRET = os.environ.get("JARVIS_MESH_SECRET", "").strip()
 MESH_PORT = 8765
 DEVICES_FILE = os.path.join(PROJECT_DIR, "dispositivos.json")
@@ -1559,6 +1566,13 @@ def _mci(command: str, warn: bool = True) -> bool:
     return error == 0
 
 
+def _apply_volume(alias: str) -> None:
+    """MASTER_VOLUME es 0-100 (lo que ajusta Configuración); MCI espera
+    0-1000. Se ignora el error si el dispositivo MCI que abrió ese alias no
+    soporta "setaudio" — el volumen es una comodidad, no algo crítico."""
+    _mci(f"setaudio {alias} volume to {MASTER_VOLUME * 10}", warn=False)
+
+
 def loop_sound_start(path: str, alias: str, start_range: tuple[float, float] | None = None) -> None:
     """Arranca un sonido en loop en segundo plano (no bloquea). No-op si el archivo no existe.
 
@@ -1569,6 +1583,7 @@ def loop_sound_start(path: str, alias: str, start_range: tuple[float, float] | N
         return
     _mci(f'close {alias}', warn=False)  # por si quedó una instancia previa sin cerrar; normal que "falle"
     _mci(f'open "{path}" alias {alias}')
+    _apply_volume(alias)
     if start_range and start_range[1] > start_range[0]:
         start_ms = int(random.uniform(*start_range) * 1000)
         _mci(f'play {alias} from {start_ms} repeat')
@@ -1589,6 +1604,7 @@ def play_sound_capped(path: str, max_ms: int) -> None:
     alias = "jarvis_activacion"
     if not _mci(f'open "{path}" alias {alias}'):
         return  # sin poder abrirlo por MCI no hay forma de acotar la duracion; se salta el sonido
+    _apply_volume(alias)
     _mci(f"play {alias}")
     time.sleep(max_ms / 1000)
     _mci(f"stop {alias}", warn=False)
@@ -1609,6 +1625,7 @@ def _play_interruptible(path: str) -> None:
         playsound(path)  # respaldo: sin stream activo o si MCI falla, reproducción normal
         return
     try:
+        _apply_volume(alias)
         _mci(f"play {alias}")
         while _mci_status(alias) == "playing":
             chunk, _ = ACTIVE_STREAM.read(FRAME_SAMPLES)
@@ -2136,6 +2153,45 @@ def start_mesh_server() -> None:
     print(f"Servidor de malla escuchando en {ip}:{MESH_PORT} (solo alcanzable por tu Tailscale).")
 
 
+_TRAY: JarvisTray | None = None
+
+
+def _on_settings_saved(values: dict) -> None:
+    global GROQ_API_KEY, USER_NAME, STOP_WORD, DISPLAY_MODE, MASTER_VOLUME
+    GROQ_API_KEY = values["GROQ_API_KEY"]
+    USER_NAME = values["JARVIS_USER_NAME"]
+    STOP_WORD = values["JARVIS_STOP_WORD"]
+    DISPLAY_MODE = values["display_mode"]
+    MASTER_VOLUME = values["volume"]
+    if UI:
+        UI.set_display_mode(DISPLAY_MODE)
+
+
+def _open_settings() -> None:
+    import settings
+
+    settings.open_settings_window(DISPLAY_MODE, MASTER_VOLUME, _on_settings_saved)
+
+
+def _start_tray() -> None:
+    """Ícono en la bandeja del sistema — la forma "normal" de apagar Jarvis
+    o abrir Configuración sin depender de la consola. Si falla (por ejemplo
+    sin backend de bandeja disponible), Jarvis sigue andando igual sin él,
+    como ya pasa si la ventana de la esfera no abre."""
+    global _TRAY
+    try:
+        icon_image = SphereRenderer(size=64).render(2.0, IDLE_PARAMS)
+        _TRAY = JarvisTray(
+            icon_image,
+            on_toggle_visibility=lambda: UI.toggle_visible() if UI else None,
+            on_open_settings=_open_settings,
+            on_quit=SHUTDOWN_EVENT.set,
+        )
+    except Exception as exc:
+        print(f"No pude abrir el ícono de la bandeja, sigo sin él: {exc}")
+        _TRAY = None
+
+
 def main() -> None:
     if sys.stdout is None:
         # pythonw (autostart silencioso) no tiene consola: sys.stdout/stderr son None
@@ -2190,9 +2246,12 @@ def main() -> None:
         global UI
         try:
             UI = JarvisUI()
+            UI.set_display_mode(DISPLAY_MODE)
         except Exception as exc:
             print(f"No pude abrir la interfaz visual, sigo sin ventana: {exc}")
             UI = None
+
+        _start_tray()
 
         global ACTIVE_STREAM
         stream = sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="int16", blocksize=FRAME_SAMPLES)
