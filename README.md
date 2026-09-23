@@ -4,15 +4,16 @@ Asistente de voz personal para Windows. Se activa diciendo **"Hey Jarvis"**, cor
 
 ## Instalación (1 clic)
 
-1. Instala [Python](https://python.org/downloads) si no lo tienes (marca "Add to PATH" al instalar) y [Git](https://git-scm.com/downloads) si no lo tienes.
-2. Cloná este repo (`git clone https://github.com/podselxd/jarvis`) — mejor que bajar el ZIP, porque así `setup.bat` puede auto-actualizarse solo más adelante — y hacé doble clic en **`setup.bat`**.
-3. La primera vez te va a pedir: una API key gratis de [console.groq.com](https://console.groq.com) (sin tarjeta), tu nombre (opcional, para que te reconozca desde el arranque), y una palabra de apagado (opcional, ver Seguridad abajo).
-4. Te pregunta si quieres conectarlo a tus otros dispositivos (Tailscale) y si quieres que inicie con Windows.
-5. Listo, arranca.
+1. Instala [Python](https://python.org/downloads) si no lo tienes (marca "Add to PATH" al instalar).
+2. Descargá este repo — con el botón verde **Code → Download ZIP** de GitHub, o clonándolo con git si preferís — y descomprimilo.
+3. Hacé doble clic en **`setup.bat`**.
+4. La primera vez te va a pedir: una API key gratis de [console.groq.com](https://console.groq.com) (sin tarjeta), tu nombre (opcional, para que te reconozca desde el arranque), y una palabra de apagado (opcional, ver Seguridad abajo).
+5. Te pregunta si quieres conectarlo a tus otros dispositivos (Tailscale) y si quieres que inicie con Windows.
+6. Listo, arranca.
 
 ### Actualizar
 
-Si clonaste con git, volvé a correr **`setup.bat`** cuando quieras — antes de instalar nada, baja solo los cambios nuevos del repo (`git pull`) y sigue de ahí. Tu `.env`, memoria y configuración personal nunca se tocan.
+Volvé a correr **`setup.bat`** cuando quieras — antes de instalar nada, baja solo los cambios nuevos (con git si clonaste así, o bajando el último ZIP de GitHub si no) y sigue de ahí. Tu `.env`, memoria y configuración personal nunca se tocan. Excepción: `setup.bat` no se actualiza a sí mismo por seguridad (un .bat modificándose mientras corre puede romperse) — si algún día cambia, hay que bajarlo a mano una vez.
 
 ## Uso
 

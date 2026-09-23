@@ -28,6 +28,9 @@ if exist ".git" (
         echo Listo, al dia.
     )
     echo.
+) else if exist "update.py" (
+    python update.py
+    echo.
 )
 
 echo Instalando dependencias, puede tardar un minuto...
