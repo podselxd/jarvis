@@ -92,7 +92,7 @@ LISTEN_TIMEOUT_SECONDS = 5  # cuanto espera a que empieces a hablar antes de vol
 MAX_HISTORY_MESSAGES = 24
 MEMORY_WINDOW_SECONDS = 12 * 3600  # 12 horas
 REMINDER_CHECK_FRAMES = int(20 / (FRAME_SAMPLES / SAMPLE_RATE))  # revisa recordatorios vencidos ~cada 20s
-INTERRUPT_ENERGY_MULTIPLIER = 2.5  # que tan mas fuerte que el silencio de fondo cuenta como "me estan interrumpiendo"
+INTERRUPT_ENERGY_MULTIPLIER = 4.5  # que tan mas fuerte que el silencio de fondo cuenta como "me estan interrumpiendo" (2.5 se disparaba con solo moverse)
 
 SOUNDS_DIR = os.path.join(PROJECT_DIR, "sounds")
 SOUND_ACTIVATION = os.path.join(SOUNDS_DIR, "activacion.mp3")
@@ -1680,7 +1680,7 @@ def calibrate_silence_threshold(stream: sd.InputStream) -> int:
         chunk, _ = stream.read(FRAME_SAMPLES)
         energies.append(_frame_energy(chunk.flatten()))
     noise_floor = float(np.percentile(energies, 10))
-    fresh = max(int(noise_floor * 4), 150)
+    fresh = max(int(noise_floor * 2.2), 90)  # antes x4/mínimo 150: muy lento para reconocer que empezaste a hablar
 
     if previous_threshold:
         SILENCE_RMS = round((fresh + previous_threshold * runs) / (runs + 1))
