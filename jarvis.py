@@ -1632,6 +1632,7 @@ CALIBRATION_FILE = os.path.join(MEMORY_DIR, "calibracion.json")
 CALIBRATION_SECONDS = 2.0
 MIN_CALIBRATION_SECONDS = 0.4
 CALIBRATION_SHRINK_PER_RUN = 0.15  # cuanto se acorta la calibración por cada corrida previa
+CALIBRATION_VERSION = 2  # subir esto invalida calibraciones viejas guardadas (ver _load_calibration)
 
 
 def _load_calibration() -> tuple[int | None, int]:
@@ -1640,6 +1641,8 @@ def _load_calibration() -> tuple[int | None, int]:
     try:
         with open(CALIBRATION_FILE, "r", encoding="utf-8") as f:
             saved = json.load(f)
+        if saved.get("version") != CALIBRATION_VERSION:
+            return None, 0  # calibracion de una version vieja de la formula: no la arrastramos
         threshold = saved.get("threshold")
         runs = int(saved.get("runs", 0))
         if not isinstance(threshold, (int, float)) or runs < 0:
@@ -1653,7 +1656,7 @@ def _save_calibration(threshold: int, runs: int) -> None:
     try:
         os.makedirs(MEMORY_DIR, exist_ok=True)
         with open(CALIBRATION_FILE, "w", encoding="utf-8") as f:
-            json.dump({"threshold": threshold, "runs": runs}, f)
+            json.dump({"version": CALIBRATION_VERSION, "threshold": threshold, "runs": runs}, f)
     except OSError as exc:
         print(f"No pude guardar la calibración: {exc}")
 
