@@ -36,6 +36,7 @@ import win32process
 from bs4 import BeautifulSoup
 from ddgs import DDGS
 from openwakeword.model import Model as WakeWordModel
+from openwakeword.utils import download_models as download_wakeword_models
 from playsound import playsound
 
 from ui import JarvisUI
@@ -2048,6 +2049,8 @@ def main() -> None:
         f.write(str(os.getpid()))
 
     try:
+        print("Verificando modelo de wake word (se descarga solo la primera vez)...")
+        download_wakeword_models([WAKE_WORD_NAME])  # openwakeword no lo trae incluido en el paquete
         print("Cargando modelo de wake word (Hey Jarvis)...")
         wake_model = WakeWordModel(wakeword_models=[WAKE_WORD_NAME], inference_framework="onnx")
         history = load_recent_history()
