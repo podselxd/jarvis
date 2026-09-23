@@ -41,7 +41,14 @@ from playsound import playsound
 
 from ui import JarvisUI
 
-PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
+# Empaquetado (PyInstaller), __file__ apunta a una carpeta temporal que se
+# borra al cerrar — .env/memoria/sonidos tienen que vivir junto al .exe real,
+# no ahí. Como script normal, junto a este archivo, como siempre.
+if getattr(sys, "frozen", False):
+    PROJECT_DIR = os.path.dirname(sys.executable)
+else:
+    PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
+
 UI = None  # se crea recién en main(): importar jarvis.py para pruebas no debe abrir una ventana
 
 
@@ -1856,6 +1863,39 @@ def handle_command(audio: np.ndarray, history: list) -> bool:
 
 
 PID_FILE = os.path.join(PROJECT_DIR, "jarvis.pid")
+WAKEWORD_MODELS_DIR = os.path.join(os.environ.get("LOCALAPPDATA", PROJECT_DIR), "Jarvis", "models")
+
+
+def _load_wake_word_model() -> WakeWordModel:
+    """Descarga los modelos a una carpeta propia y persistente en vez de la
+    carpeta del paquete de openwakeword: empaquetado como .exe, esa carpeta
+    vive en un directorio temporal que se borra al cerrar, así que cada
+    arranque tendría que volver a bajar todo. Además pasa rutas explícitas
+    (wakeword + melspectrogram + embedding) en vez de solo el nombre corto,
+    porque openwakeword por defecto busca esos dos últimos siempre en la
+    carpeta del paquete sin importar de dónde venga el modelo de wake word.
+
+    Si una descarga queda corrupta (pasó una vez en pruebas: mismo tamaño,
+    contenido distinto — parece un corte de red a mitad de escritura),
+    reintenta una vez borrando todo y volviendo a bajar antes de rendirse."""
+    paths = {
+        "wake": os.path.join(WAKEWORD_MODELS_DIR, "hey_jarvis_v0.1.onnx"),
+        "mel": os.path.join(WAKEWORD_MODELS_DIR, "melspectrogram.onnx"),
+        "emb": os.path.join(WAKEWORD_MODELS_DIR, "embedding_model.onnx"),
+    }
+    for intento in range(2):
+        download_wakeword_models([WAKE_WORD_NAME], target_directory=WAKEWORD_MODELS_DIR)
+        try:
+            return WakeWordModel(
+                wakeword_models=[paths["wake"]],
+                melspec_model_path=paths["mel"],
+                embedding_model_path=paths["emb"],
+                inference_framework="onnx",
+            )
+        except Exception as exc:
+            print(f"Modelo de wake word con problemas (intento {intento + 1}/2): {exc}")
+            shutil.rmtree(WAKEWORD_MODELS_DIR, ignore_errors=True)
+    raise SystemExit("No pude preparar el modelo de wake word después de reintentar. Revisa tu conexión.")
 
 
 def _pid_is_running(pid: int) -> bool:
@@ -2027,11 +2067,16 @@ def main() -> None:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
+    global GROQ_API_KEY, USER_NAME, STOP_WORD
     if not GROQ_API_KEY:
-        raise SystemExit(
-            "Falta GROQ_API_KEY. Ejecuta setup.bat, o crea un archivo .env con "
-            'GROQ_API_KEY=tu-clave junto a jarvis.py.'
-        )
+        import instalador
+
+        if not instalador.run_setup_if_needed():
+            raise SystemExit("Configuración cancelada, no arranco sin una API key de Groq.")
+        _load_dotenv()  # ahora hay .env recien escrito por el formulario: se relee
+        GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "").strip()
+        USER_NAME = os.environ.get("JARVIS_USER_NAME", "").strip()
+        STOP_WORD = os.environ.get("JARVIS_STOP_WORD", "").strip()
 
     if os.path.exists(PID_FILE):
         try:
@@ -2050,9 +2095,7 @@ def main() -> None:
 
     try:
         print("Verificando modelo de wake word (se descarga solo la primera vez)...")
-        download_wakeword_models([WAKE_WORD_NAME])  # openwakeword no lo trae incluido en el paquete
-        print("Cargando modelo de wake word (Hey Jarvis)...")
-        wake_model = WakeWordModel(wakeword_models=[WAKE_WORD_NAME], inference_framework="onnx")
+        wake_model = _load_wake_word_model()
         history = load_recent_history()
         if USER_NAME:
             identificarse(USER_NAME)  # perfil por defecto desde el arranque, sin esperar a que se presente por voz

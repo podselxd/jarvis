@@ -12,12 +12,17 @@ completa sin gastar memoria de más."""
 
 import os
 import queue
+import sys
 import threading
 
 import tkinter as tk
 from PIL import Image, ImageTk, ImageOps, ImageSequence
 
-ASSETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
+# Los gifs van empaquetados DENTRO del .exe (de solo lectura) — PyInstaller los
+# extrae a sys._MEIPASS en tiempo de ejecucion. Como script normal, junto a
+# este archivo, como siempre.
+_BASE_DIR = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+ASSETS_DIR = os.path.join(_BASE_DIR, "assets")
 IDLE_IMAGE = os.path.join(ASSETS_DIR, "idle_purple.gif")
 SPEAK_IMAGE = os.path.join(ASSETS_DIR, "speak_pink.gif")
 

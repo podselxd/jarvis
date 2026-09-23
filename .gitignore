@@ -8,3 +8,6 @@ jarvis.pid
 jarvis.log
 sounds/*.mp3
 sounds/*.wav
+build/
+dist/
+icono.ico
