@@ -1910,6 +1910,72 @@ def _pid_is_running(pid: int) -> bool:
     return False
 
 
+# --- Auto-actualizacion del .exe (solo empaquetado; el script se actualiza
+# solo via setup.bat/git pull, esto es la contraparte para el .exe) --------
+
+JARVIS_VERSION = "1.0.3"  # subir a mano en cada release, junto con el tag de git
+GITHUB_REPO = "podselxd/jarvis"
+
+
+def _schedule_exe_replacement(new_exe_path: str) -> None:
+    """Windows no deja que un .exe se reemplace a si mismo mientras esta
+    corriendo, asi que arma un .bat descartable que espera a que este
+    proceso cierre, pisa el .exe viejo con el nuevo ya descargado, y lo
+    vuelve a abrir. El propio jarvis.py dispara su apagado limpio despues
+    de llamar a esto (via SHUTDOWN_EVENT), el helper hace el resto."""
+    current_exe = sys.executable
+    pid = os.getpid()
+    helper_path = os.path.join(tempfile.gettempdir(), "jarvis_actualizar.bat")
+    script = (
+        "@echo off\r\n"
+        ":esperar\r\n"
+        f'tasklist /FI "PID eq {pid}" 2>nul | find "{pid}" >nul\r\n'
+        "if not errorlevel 1 (\r\n"
+        "    timeout /t 1 /nobreak >nul\r\n"
+        "    goto esperar\r\n"
+        ")\r\n"
+        f'move /y "{new_exe_path}" "{current_exe}" >nul\r\n'
+        f'start "" "{current_exe}"\r\n'
+        'del "%~f0"\r\n'
+    )
+    with open(helper_path, "w", encoding="utf-8") as f:
+        f.write(script)
+    subprocess.Popen(["cmd", "/c", helper_path], creationflags=subprocess.CREATE_NO_WINDOW, close_fds=True)
+
+
+def _check_for_exe_update() -> None:
+    """Si corre empaquetado y hay una version mas nueva publicada en GitHub
+    Releases, la descarga y deja lista para aplicarse al cerrar. No hace
+    nada corriendo como script (ahi ya esta el update.py/git pull)."""
+    if not getattr(sys, "frozen", False):
+        return
+    try:
+        resp = SESSION.get(f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest", timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        latest_tag = data.get("tag_name", "").lstrip("v")
+        if not latest_tag or latest_tag == JARVIS_VERSION:
+            return
+        asset = next((a for a in data.get("assets", []) if a.get("name") == "Jarvis.exe"), None)
+        if not asset:
+            return
+
+        print(f"Nueva versión disponible: {latest_tag} (actual: {JARVIS_VERSION}). Descargando...")
+        new_path = os.path.join(PROJECT_DIR, "Jarvis_nuevo.exe")
+        with SESSION.get(asset["browser_download_url"], stream=True, timeout=180) as r:
+            r.raise_for_status()
+            with open(new_path, "wb") as f:
+                for chunk in r.iter_content(chunk_size=1024 * 1024):
+                    f.write(chunk)
+
+        _schedule_exe_replacement(new_path)
+        print(f"Actualización a {latest_tag} lista, se aplica ahora.")
+        speak(f"Encontré una actualización, dame un segundo para instalarla.")
+        SHUTDOWN_EVENT.set()
+    except Exception as exc:
+        print(f"No pude revisar/bajar actualizaciones: {exc}")
+
+
 def _anunciar_recordatorios_vencidos() -> None:
     """Habla sola, sin que nadie haya dicho 'Hey Jarvis' — se llama periódicamente
     desde el loop principal mientras está en modo wake-word-only (nunca en medio
@@ -2097,6 +2163,11 @@ def main() -> None:
         f.write(str(os.getpid()))
 
     try:
+        print(f"Jarvis {JARVIS_VERSION} — revisando actualizaciones...")
+        _check_for_exe_update()
+        if SHUTDOWN_EVENT.is_set():
+            return  # version nueva ya descargada, el .bat ayudante hace el reemplazo al salir
+
         print("Verificando modelo de wake word (se descarga solo la primera vez)...")
         wake_model = _load_wake_word_model()
         history = load_recent_history()
