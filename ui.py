@@ -1,11 +1,14 @@
-"""Interfaz visual de Jarvis: ventana negra de pantalla completa, sin bordes, con
-una imagen que cambia entre estado "escuchando" (idle_purple) y "hablando"
-(speak_pink), con una transición difuminada (cross-fade) rápida entre las dos.
-Corre en su propio hilo con su propio mainloop de tkinter — jarvis.py solo le
-avisa cambios de estado via set_speaking().
+"""Interfaz visual de Jarvis: ventana negra de pantalla completa, sin bordes,
+con la animación real (GIF) que cambia entre estado "escuchando" (idle_purple)
+y "hablando" (speak_pink), con una transición difuminada (cross-fade) rápida
+entre las dos. Corre en su propio hilo con su propio mainloop de tkinter —
+jarvis.py solo le avisa cambios de estado via set_speaking().
 
-Si algún día se reemplazan los assets por versiones animadas de verdad (varios
-frames), esto ya los recorre solo — no hace falta tocar código."""
+Los frames se cargan a CONTENT_SIZE (no al tamaño de la pantalla completa):
+con 200+ frames por animación, guardarlos ya escalados a 1920x1080 usaría
+más de 1GB de RAM. Se centran sobre un lienzo negro del tamaño de la
+pantalla recién al mostrarlos, así la ventana sigue siendo pantalla
+completa sin gastar memoria de más."""
 
 import os
 import queue
@@ -15,29 +18,31 @@ import tkinter as tk
 from PIL import Image, ImageTk, ImageOps, ImageSequence
 
 ASSETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
-IDLE_IMAGE = os.path.join(ASSETS_DIR, "idle_purple.webp")
-SPEAK_IMAGE = os.path.join(ASSETS_DIR, "speak_pink.webp")
+IDLE_IMAGE = os.path.join(ASSETS_DIR, "idle_purple.gif")
+SPEAK_IMAGE = os.path.join(ASSETS_DIR, "speak_pink.gif")
 
-FRAME_DELAY_MS = 40  # ~25fps para animaciones multi-frame
+CONTENT_SIZE = (600, 600)  # tamano al que se cargan los frames, no el de la pantalla
+FRAME_DELAY_MS = 40  # coincide con el gif mas lento (25fps); tkinter no puede variar por frame facil
 TRANSITION_STEPS = 8
 TRANSITION_DELAY_MS = 18  # ~150ms total: rapida pero se nota
 
 
 def _load_frames(path: str, size: tuple[int, int]) -> list[Image.Image]:
-    """Achica/agranda cada frame manteniendo su proporción real (ImageOps.contain
-    en vez de un resize a lo bruto) y lo centra sobre un lienzo negro del tamaño
-    de la pantalla — así nunca queda estirado, con barras negras arriba/abajo o
-    a los costados si la proporción no coincide con la de la pantalla."""
+    """Cada frame se ajusta a `size` manteniendo su proporción real (nunca
+    estirado) y se centra sobre un lienzo negro de exactamente `size` —
+    fijo, no solo "contenido" — para que los frames de idle y de speak
+    midan siempre igual entre sí (Image.blend exige mismo tamaño para
+    hacer la transición entre las dos animaciones). El centrado sobre el
+    fondo de pantalla completa es un paso aparte, en _compose."""
     img = Image.open(path)
     frames = []
     for frame in ImageSequence.Iterator(img):
-        frame = frame.convert("RGBA")
-        fitted = ImageOps.contain(frame, size, Image.LANCZOS)
-        canvas = Image.new("RGBA", size, (0, 0, 0, 255))
+        fitted = ImageOps.contain(frame.convert("RGB"), size, Image.LANCZOS)
+        canvas = Image.new("RGB", size, (0, 0, 0))
         offset = ((size[0] - fitted.width) // 2, (size[1] - fitted.height) // 2)
-        canvas.paste(fitted, offset, fitted)
+        canvas.paste(fitted, offset)
         frames.append(canvas)
-    return frames or [Image.new("RGBA", size, (0, 0, 0, 255))]
+    return frames or [Image.new("RGB", size, (0, 0, 0))]
 
 
 class JarvisUI:
@@ -58,14 +63,14 @@ class JarvisUI:
         self.root.title("Jarvis")
         self.root.configure(bg="black")
 
-        size = (self.root.winfo_screenwidth(), self.root.winfo_screenheight())
-        self.root.geometry(f"{size[0]}x{size[1]}+0+0")
+        self.screen_size = (self.root.winfo_screenwidth(), self.root.winfo_screenheight())
+        self.root.geometry(f"{self.screen_size[0]}x{self.screen_size[1]}+0+0")
         self.root.overrideredirect(True)  # sin borde ni barra de titulo
         self.root.attributes("-topmost", False)  # no tapa otras ventanas cuando trabajas en otra cosa
         self.root.bind("<Escape>", lambda _e: self.root.destroy())  # forma de cerrarla sin boton de cerrar
 
-        self.idle_frames = _load_frames(IDLE_IMAGE, size)
-        self.speak_frames = _load_frames(SPEAK_IMAGE, size)
+        self.idle_frames = _load_frames(IDLE_IMAGE, CONTENT_SIZE)
+        self.speak_frames = _load_frames(SPEAK_IMAGE, CONTENT_SIZE)
 
         self.label = tk.Label(self.root, bg="black", bd=0, highlightthickness=0)
         self.label.pack(fill="both", expand=True)
@@ -80,8 +85,19 @@ class JarvisUI:
         self._poll_queue()
         self.root.mainloop()
 
-    def _show(self, frame: Image.Image) -> None:
-        photo = ImageTk.PhotoImage(frame)
+    def _compose(self, content: Image.Image) -> Image.Image:
+        """Centra el frame (a CONTENT_SIZE) sobre un lienzo negro del tamaño
+        real de la pantalla."""
+        canvas = Image.new("RGB", self.screen_size, (0, 0, 0))
+        offset = (
+            (self.screen_size[0] - content.width) // 2,
+            (self.screen_size[1] - content.height) // 2,
+        )
+        canvas.paste(content, offset)
+        return canvas
+
+    def _show(self, content: Image.Image) -> None:
+        photo = ImageTk.PhotoImage(self._compose(content))
         self.label.configure(image=photo)
         self.label.image = photo  # referencia, si no tkinter la recolecta y queda en negro
 
