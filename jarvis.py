@@ -41,6 +41,19 @@ from playsound import playsound
 
 from ui import JarvisUI
 
+# Sin esto, Windows trata el proceso como "no DPI-aware" y estira/recorta a
+# ojo la ventana de la esfera cuando hay escalado de pantalla (125%, 150%,
+# etc.) — se ve descentrada y con el frame cortado. Tiene que correr ANTES
+# de crear cualquier ventana (tk.Tk() vive en ui.py, en otro hilo, pero esto
+# es un ajuste por proceso, así que basta con que pase antes de main()).
+try:
+    ctypes.windll.shcore.SetProcessDpiAwareness(2)  # PROCESS_PER_MONITOR_DPI_AWARE
+except (AttributeError, OSError):
+    try:
+        ctypes.windll.user32.SetProcessDPIAware()
+    except (AttributeError, OSError):
+        pass
+
 # Empaquetado (PyInstaller), __file__ apunta a una carpeta temporal que se
 # borra al cerrar — .env/memoria/sonidos tienen que vivir junto al .exe real,
 # no ahí. Como script normal, junto a este archivo, como siempre.
@@ -1913,7 +1926,7 @@ def _pid_is_running(pid: int) -> bool:
 # --- Auto-actualizacion del .exe (solo empaquetado; el script se actualiza
 # solo via setup.bat/git pull, esto es la contraparte para el .exe) --------
 
-JARVIS_VERSION = "1.0.4"  # subir a mano en cada release, junto con el tag de git
+JARVIS_VERSION = "1.0.5"  # subir a mano en cada release, junto con el tag de git
 GITHUB_REPO = "podselxd/jarvis"
 
 

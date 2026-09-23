@@ -18,7 +18,7 @@ declara válidas (colorLow/colorHigh) más velocidad/ripple/glow más altos
 dentro de sus propios rangos — no son colores ni parámetros inventados."""
 
 import numpy as np
-from PIL import Image, ImageDraw
+from PIL import Image, ImageChops, ImageDraw, ImageEnhance
 
 MERIDIAN_COUNT = 140
 POINTS_PER_MERIDIAN = 60
@@ -144,32 +144,49 @@ class SphereRenderer:
         intensity = np.clip(fresnel * 0.5 + bulge * 0.75 + depth * 0.15, 0, 1)
         bucket_idx = np.minimum(BUCKETS - 1, np.floor(intensity * BUCKETS)).astype(int)
 
-        seg_x0, seg_y0 = sx[:, :-1].ravel(), sy[:, :-1].ravel()
-        seg_x1, seg_y1 = sx[:, 1:].ravel(), sy[:, 1:].ravel()
-        seg_bucket = bucket_idx[:, 1:].ravel()
+        # En vez de una línea de 2 puntos por segmento (8400 llamadas a PIL,
+        # el cuello de botella real), se juntan corridas consecutivas del
+        # mismo bucket dentro de cada meridiano en UNA sola polilínea —
+        # mismas líneas dibujadas, bastantes menos llamadas. Todo en listas
+        # de Python (no arrays numpy) porque para esta parte — un loop con
+        # muchas operaciones chiquitas — es más rápido que llamar a numpy
+        # miles de veces con arrays de 60 elementos.
+        sx_list = sx.tolist()
+        sy_list = sy.tolist()
+        bucket_list = bucket_idx[:, 1:].tolist()
+        runs_by_bucket: list[list[list[tuple]]] = [[] for _ in range(BUCKETS)]
+        for row, b in enumerate(bucket_list):
+            xs_row = sx_list[row]
+            ys_row = sy_list[row]
+            s = 0
+            cur = b[0]
+            for i in range(1, len(b)):
+                if b[i] != cur:
+                    runs_by_bucket[cur].append(list(zip(xs_row[s : i + 1], ys_row[s : i + 1])))
+                    s = i
+                    cur = b[i]
+            runs_by_bucket[cur].append(list(zip(xs_row[s:], ys_row[s:])))
 
-        # Ordenar por bucket y dibujar de menos a más intenso: al pintar el
+        # Se dibuja de menos a más intenso (bucket ascendente): al pintar el
         # más brillante al final imita el "lighter" del canvas en los cruces
         # de líneas, sin pagar el costo de 12 capas separadas de más.
-        order = np.argsort(seg_bucket, kind="stable")
-        seg_x0, seg_y0 = seg_x0[order], seg_y0[order]
-        seg_x1, seg_y1 = seg_x1[order], seg_y1[order]
-        seg_bucket = seg_bucket[order]
-
         colors = _bucket_colors(params["colorLow"], params["colorHigh"])
-
         img = Image.new("RGB", (size, size), (0, 0, 0))
         draw = ImageDraw.Draw(img)
-        for x0, y0, x1_, y1_, bk in zip(seg_x0, seg_y0, seg_x1, seg_y1, seg_bucket):
-            draw.line([(x0, y0), (x1_, y1_)], fill=colors[bk], width=self._widths[bk])
+        for bk in range(BUCKETS):
+            color = colors[bk]
+            width = self._widths[bk]
+            for pts_xy in runs_by_bucket[bk]:
+                draw.line(pts_xy, fill=color, width=width)
 
-        sharp = np.asarray(img, dtype=np.float32)
         if glow_blur > 0:
             # Blur barato: reducir y volver a agrandar (bilinear) en vez de
-            # un blur gaussiano de verdad — visualmente casi igual para un
-            # resplandor suave, y ~5x más rápido en cada frame.
-            small = img.resize((max(1, size // 6), max(1, size // 6)), Image.BILINEAR)
-            glow = np.asarray(small.resize((size, size), Image.BILINEAR), dtype=np.float32) * 0.9
-            sharp = np.clip(sharp + glow, 0, 255)
+            # un blur gaussiano de verdad, y sumar en PIL nativo (uint8, con
+            # saturación) en vez de pasar por numpy float — visualmente casi
+            # igual para un resplandor suave, y bastante más rápido.
+            small = img.resize((max(1, size // 8), max(1, size // 8)), Image.BILINEAR)
+            small = ImageEnhance.Brightness(small).enhance(0.9)
+            glow = small.resize((size, size), Image.BILINEAR)
+            img = ImageChops.add(img, glow)
 
-        return Image.fromarray(sharp.astype(np.uint8), "RGB")
+        return img
