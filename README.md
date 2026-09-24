@@ -131,9 +131,16 @@ En cada push, GitHub Actions compila en un Windows real (una advertencia del com
 ### Publicar una versión
 
 1. Sube la versión en `src/config.h` (`SOKARI_VERSION` y `SOKARI_VERSION_W`), en `res/sokari.rc` (las cuatro) y en `res/sokari.manifest`. `sh tests/check_version.sh` revisa que coincidan.
-2. Con eso ya en `master`: `git tag v2.3.0 && git push origin v2.3.0`.
-3. Actions compila, prueba, revisa que el tag coincida con el código y deja un **borrador** de release con `Sokari.exe`.
-4. Revisa el borrador y publícalo. Hasta que lo publiques, nadie se actualiza.
+2. Con eso ya en `master`, crea el release de una de estas dos formas:
+   - **En GitHub:** *Actions → Borrador de release → Run workflow*. Escribe la versión (`v2.3.0`) y marca **publicar** si quieres que salga de una vez; si no, queda como borrador.
+   - **Desde tu PC:** `git tag v2.3.0 && git push origin v2.3.0`. Queda como borrador.
+3. Actions:
+   - compila y prueba el exe y la app;
+   - revisa que la versión coincida con el código;
+   - crea el release con `Sokari.exe` y `Sokari.apk` (la app del celular, con la misma versión).
+   
+   El APK necesita los secretos de su llave de firma (ver [`movil/README.md`](movil/README.md)). Sin ellos, el release sale solo con `Sokari.exe` y lo avisa en sus notas.
+4. Si quedó como borrador, revísalo y publícalo. Hasta que lo publiques, nadie se actualiza.
 
 No crees el release a mano desde GitHub: te saltas las pruebas, y si el tag no coincide con la versión del código, el exe se vuelve a descargar cada 6 horas.
 
@@ -161,6 +168,10 @@ Si editas `tools.json` o `system_prompt.txt`, el siguiente `mingw32-make` los me
 | `sphere.c`, `ui_main.c` | Esfera animada, modos de pantalla y subtítulos |
 | `ui_settings.c`, `tray.c` | Ventana de Inicio y de configuración, e ícono de la bandeja |
 | `memory.c`, `config.c`, `mesh.c`, `update.c` | Memoria, configuración, otras PCs y actualizaciones |
+
+## Desde el celular
+
+La app de Android de `movil/` te deja hablarle a tu Sokari de la PC desde el celular, en casa o fuera, por Tailscale. Instalación y límites en [`movil/README.md`](movil/README.md).
 
 ## Entrenar "Hey Sokari"
 
