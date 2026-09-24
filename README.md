@@ -10,33 +10,52 @@ Es **un solo `Jarvis.exe`** de unos 4 MB, escrito en C. No necesita Python ni in
 2. Ábrelo. La primera vez te pide tu API key de Groq, que es gratis y no pide tarjeta: sácala en [console.groq.com/keys](https://console.groq.com/keys). Tu nombre y lo demás son opcionales.
 3. Listo. Aparece la esfera y un ícono en la bandeja, junto al reloj.
 
+Cuando lo abres a mano después de la primera vez, sale la **ventana de Inicio** (abajo). Si lo pusiste a iniciar con Windows, al prender la PC arranca directo, sin esa ventana.
+
 Se actualiza solo. Revisa GitHub al arrancar y cada 6 horas, y solo instala la versión nueva cuando no le estás hablando. Antes de reemplazarse comprueba la huella SHA-256 del archivo.
 
 Si vienes de la versión en Python, se actualiza sola a esta. Si la bajas a mano, ponla en la misma carpeta que el `Jarvis.exe` viejo. La primera vez que la abras se trae tu `.env`, tus sonidos, tus dispositivos y el inicio con Windows. Tu memoria se queda donde estaba.
 
 ## Uso
 
-- Di **"Hey Jarvis"**, espera el tono y habla. Deja de escuchar cuando te callas.
+- Di **"Hey Jarvis"** y habla. Puedes decirlo todo de corrido ("Hey Jarvis, abre Spotify") o hacer una pausa y esperar el tono. Deja de escuchar cuando te callas.
 - **Ctrl+Alt+J** sirve para hablarle sin decir "Hey Jarvis".
 - Si le hablas mientras está hablando, se calla y te escucha.
 - Para cerrar la conversación dile "adiós" o "eso es todo". Si configuraste una palabra de apagado y la dices, Jarvis se cierra al instante.
 
-Menú del ícono de la bandeja (clic derecho): **Hablar con Jarvis**, **Ocultar/Mostrar la esfera**, **Silenciar micrófono**, **⚙ Configuración…**, **Abrir carpeta de Jarvis** y **Salir**.
+Menú del ícono de la bandeja (clic derecho): **Hablar con Jarvis**, **Ocultar/Mostrar la esfera**, **Modo de pantalla**, **Silenciar micrófono**, **Ventana de inicio…**, **⚙ Configuración…**, **Abrir carpeta de Jarvis** y **Salir**.
+
+### Ventana de Inicio
+
+Sale al abrir `Jarvis.exe` a mano, o desde **Ventana de inicio…** en la bandeja. Tiene:
+
+- **Iniciar Jarvis** (o **Mostrar la esfera**, si ya está corriendo). Si la cierras sin iniciar, Jarvis se cierra.
+- **Modo de pantalla** y **Salida de audio** (bocinas o audífonos). Los cambios se aplican al momento.
+- **Configuración**, **Silenciar micrófono**, **Probar audio**, **Buscar actualizaciones**, **Abrir carpeta de datos** y **Salir**.
+
+"Probar audio" hace sonar el tono de Jarvis por la salida elegida y, si Jarvis ya está iniciado, también su voz.
 
 ### Configuración
 
 | Sección | Qué tiene |
 |---|---|
+| Inicio | Iniciar, modo de pantalla, salida de audio y botones rápidos (ver arriba) |
 | Cuenta | API key de Groq, tu nombre, contraseña de tu perfil y palabra de apagado |
 | Pantalla | Modo de pantalla, resolución de la esfera, estilo (halo de puntos o líneas) y subtítulos |
-| Voz y audio | Volumen, voz de Windows (Raúl de México por defecto), micrófono y sensibilidad de "Hey Jarvis" |
+| Voz y audio | Volumen, voz de Windows (Raúl de México por defecto), micrófono, salida de audio y sensibilidad de "Hey Jarvis" |
 | General | Iniciar con Windows, conectar tus PCs con Tailscale, sonido de activación, Obsidian y buscar actualizaciones |
 
 Modos de pantalla:
 
 - **Pantalla completa:** siempre encima de todo. Se aparta sola cuando Jarvis abre algo.
 - **Pantalla completa sin bordes:** ocupa la pantalla, pero tus ventanas pueden ir encima. Pasa al frente cuando le hablas.
-- **Ventana sin bordes:** una esfera flotante y transparente que puedes arrastrar a donde quieras.
+- **Esfera flotante:** una esfera transparente que puedes arrastrar a donde quieras.
+- **Ventana:** una ventana normal que puedes mover, agrandar o minimizar. **F11** (o doble clic) la pone en pantalla completa y **F11** o **Esc** la regresan. La X la oculta, pero Jarvis sigue escuchando.
+- **Minimizado:** igual que Ventana, pero arranca minimizada en la barra de tareas y no se asoma cuando le hablas.
+
+F11 solo funciona en Ventana y Minimizado, cuando la ventana tiene el foco. En los otros modos la esfera nunca toma el teclado, para que las teclas que manda Jarvis lleguen a tu app. En esos modos cambias de modo desde la bandeja o la ventana de Inicio.
+
+La salida de audio elegida vale para la voz de Jarvis y su tono. Si pusiste un sonido de activación propio (MP3 o WAV), ese sale por la salida predeterminada de Windows.
 
 ## Qué puede hacer
 
@@ -101,7 +120,7 @@ En cada push, GitHub Actions compila en un Windows real (una advertencia del com
 ### Publicar una versión
 
 1. Sube la versión en `src/config.h` (`JARVIS_VERSION` y `JARVIS_VERSION_W`), en `res/jarvis.rc` (las cuatro) y en `res/jarvis.manifest`. `sh tests/check_version.sh` revisa que coincidan.
-2. Con eso ya en `master`: `git tag v2.0.2 && git push origin v2.0.2`.
+2. Con eso ya en `master`: `git tag v2.0.3 && git push origin v2.0.3`.
 3. Actions compila, prueba, revisa que el tag coincida con el código y deja un **borrador** de release con el exe.
 4. Revisa el borrador y publícalo. Hasta que lo publiques, nadie se actualiza.
 
@@ -127,7 +146,7 @@ Si editas `tools.json` o `system_prompt.txt`, el siguiente `mingw32-make` los me
 | `agent.c`, `tools*.c`, `calc.c` | Conversación y herramientas |
 | `tts.c`, `audio.c`, `sounds.c` | Voces de Windows, micrófono, bocinas y tonos |
 | `sphere.c`, `ui_main.c` | Esfera animada, modos de pantalla y subtítulos |
-| `ui_settings.c`, `tray.c` | Ventana de configuración e ícono de la bandeja |
+| `ui_settings.c`, `tray.c` | Ventana de Inicio y de configuración, e ícono de la bandeja |
 | `memory.c`, `config.c`, `mesh.c`, `update.c` | Memoria, configuración, otras PCs y actualizaciones |
 
 ## Créditos

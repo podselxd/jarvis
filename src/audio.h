@@ -25,6 +25,12 @@ void free_string_list(char **list, int n);
 typedef bool (*PlayCallback)(float level, void *ctx);
 bool speaker_play(const int16_t *pcm, size_t samples, int rate, float gain, PlayCallback cb, void *ctx);
 
+/* Salida de audio por nombre (el que da Windows, como en mic_list_devices);
+   NULL o "" = la predeterminada. Si esa salida no está conectada, se usa la
+   predeterminada. */
+void speaker_set_device(const char *name);
+int speaker_list_devices(char ***names_out);
+
 float frame_energy(const int16_t *pcm, size_t n);
 float volume_to_gain(int volume);
 

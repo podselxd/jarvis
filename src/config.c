@@ -14,11 +14,14 @@ AppPaths g_paths;
 static AppConfig g_cfg;
 static SRWLOCK g_lock = SRWLOCK_INIT;
 
-static const char *DISPLAY_KEYS[] = {"fullscreen", "fullscreen_borderless", "windowed_borderless"};
+/* "windowed_borderless" es la esfera flotante: el nombre viene de antes de que
+   existiera el modo Ventana y se queda así para leer configuraciones viejas. */
+static const char *DISPLAY_KEYS[DISPLAY_MODE_COUNT] = {"fullscreen", "fullscreen_borderless", "windowed_borderless",
+                                                      "windowed", "minimized"};
 
 const char *display_mode_key(int mode)
 {
-    if (mode < 0 || mode > 2) mode = DISPLAY_FULLSCREEN_BORDERLESS;
+    if (mode < 0 || mode >= DISPLAY_MODE_COUNT) mode = DISPLAY_FULLSCREEN_BORDERLESS;
     return DISPLAY_KEYS[mode];
 }
 
@@ -77,12 +80,14 @@ static void defaults(AppConfig *c)
     c->mesh_secret = xstrdup("");
     c->voice = xstrdup("");
     c->mic_name = xstrdup("");
+    c->output_name = xstrdup("");
     c->display_mode = DISPLAY_FULLSCREEN_BORDERLESS;
     c->resolution = 0;
     c->volume = 100;
     c->wake_sensitivity = 67;
     c->sphere_style = 0;
     c->orb_x = c->orb_y = -1;
+    c->win_x = c->win_y = c->win_w = c->win_h = -1;
     c->subtitles = true;
     c->autostart = false;
     c->mic_muted = false;
@@ -96,8 +101,9 @@ static void apply_kv(AppConfig *c, const char *key, const char *value)
     else if (!strcmp(key, "JARVIS_MESH_SECRET")) set_str(&c->mesh_secret, value);
     else if (!strcmp(key, "JARVIS_VOICE")) set_str(&c->voice, value);
     else if (!strcmp(key, "JARVIS_MIC")) set_str(&c->mic_name, value);
+    else if (!strcmp(key, "JARVIS_OUTPUT")) set_str(&c->output_name, value);
     else if (!strcmp(key, "JARVIS_DISPLAY_MODE")) {
-        for (int i = 0; i < 3; i++)
+        for (int i = 0; i < DISPLAY_MODE_COUNT; i++)
             if (!strcmp(value, DISPLAY_KEYS[i])) c->display_mode = i;
     } else if (!strcmp(key, "JARVIS_RESOLUTION")) {
         c->resolution = atoi(value);
@@ -113,6 +119,10 @@ static void apply_kv(AppConfig *c, const char *key, const char *value)
         c->sphere_style = !strcmp(value, "lineas") ? 1 : 0;
     } else if (!strcmp(key, "JARVIS_ORB_POS")) {
         if (sscanf(value, "%d,%d", &c->orb_x, &c->orb_y) != 2) c->orb_x = c->orb_y = -1;
+    } else if (!strcmp(key, "JARVIS_WINDOW")) {
+        if (sscanf(value, "%d,%d,%d,%d", &c->win_x, &c->win_y, &c->win_w, &c->win_h) != 4 || c->win_w <= 0 ||
+            c->win_h <= 0)
+            c->win_x = c->win_y = c->win_w = c->win_h = -1;
     } else if (!strcmp(key, "JARVIS_SUBTITLES")) c->subtitles = parse_bool(value);
     else if (!strcmp(key, "JARVIS_AUTOSTART")) c->autostart = parse_bool(value);
     else if (!strcmp(key, "JARVIS_MIC_MUTED")) c->mic_muted = parse_bool(value);
@@ -168,12 +178,14 @@ static bool save_locked(void)
     put_kv(&sb, "JARVIS_MESH_SECRET", g_cfg.mesh_secret);
     put_kv(&sb, "JARVIS_VOICE", g_cfg.voice);
     put_kv(&sb, "JARVIS_MIC", g_cfg.mic_name);
+    put_kv(&sb, "JARVIS_OUTPUT", g_cfg.output_name);
     put_kv(&sb, "JARVIS_DISPLAY_MODE", display_mode_key(g_cfg.display_mode));
     sb_appendf(&sb, "JARVIS_RESOLUTION=%d\n", g_cfg.resolution);
     sb_appendf(&sb, "JARVIS_VOLUME=%d\n", g_cfg.volume);
     sb_appendf(&sb, "JARVIS_WAKE_SENSITIVITY=%d\n", g_cfg.wake_sensitivity);
     sb_appendf(&sb, "JARVIS_SPHERE_STYLE=%s\n", g_cfg.sphere_style == 1 ? "lineas" : "puntos");
     sb_appendf(&sb, "JARVIS_ORB_POS=%d,%d\n", g_cfg.orb_x, g_cfg.orb_y);
+    sb_appendf(&sb, "JARVIS_WINDOW=%d,%d,%d,%d\n", g_cfg.win_x, g_cfg.win_y, g_cfg.win_w, g_cfg.win_h);
     sb_appendf(&sb, "JARVIS_SUBTITLES=%d\n", g_cfg.subtitles ? 1 : 0);
     sb_appendf(&sb, "JARVIS_AUTOSTART=%d\n", g_cfg.autostart ? 1 : 0);
     sb_appendf(&sb, "JARVIS_MIC_MUTED=%d\n", g_cfg.mic_muted ? 1 : 0);
@@ -201,6 +213,7 @@ static void copy_cfg(AppConfig *dst, const AppConfig *src)
     dst->mesh_secret = xstrdup(src->mesh_secret);
     dst->voice = xstrdup(src->voice);
     dst->mic_name = xstrdup(src->mic_name);
+    dst->output_name = xstrdup(src->output_name);
 }
 
 void config_free(AppConfig *c)
@@ -211,6 +224,7 @@ void config_free(AppConfig *c)
     free(c->mesh_secret);
     free(c->voice);
     free(c->mic_name);
+    free(c->output_name);
     memset(c, 0, sizeof *c);
 }
 
@@ -284,6 +298,34 @@ void config_set_orb_pos(int x, int y)
     AcquireSRWLockExclusive(&g_lock);
     g_cfg.orb_x = x;
     g_cfg.orb_y = y;
+    save_locked();
+    ReleaseSRWLockExclusive(&g_lock);
+}
+
+void config_set_window_rect(int x, int y, int w, int h)
+{
+    AcquireSRWLockExclusive(&g_lock);
+    g_cfg.win_x = x;
+    g_cfg.win_y = y;
+    g_cfg.win_w = w;
+    g_cfg.win_h = h;
+    save_locked();
+    ReleaseSRWLockExclusive(&g_lock);
+}
+
+void config_set_display_mode(int mode)
+{
+    if (mode < 0 || mode >= DISPLAY_MODE_COUNT) return;
+    AcquireSRWLockExclusive(&g_lock);
+    g_cfg.display_mode = mode;
+    save_locked();
+    ReleaseSRWLockExclusive(&g_lock);
+}
+
+void config_set_output(const char *name)
+{
+    AcquireSRWLockExclusive(&g_lock);
+    set_str(&g_cfg.output_name, name);
     save_locked();
     ReleaseSRWLockExclusive(&g_lock);
 }

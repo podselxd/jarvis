@@ -20,6 +20,7 @@
 #include "log.h"
 #include "memory.h"
 #include "mesh.h"
+#include "sounds.h"
 #include "tts.h"
 #include "ui.h"
 #include "update.h"
@@ -40,8 +41,8 @@
 #define C_NAV_SEL RGB(0x28, 0x26, 0x3a)
 #define C_LINK RGB(0x9d, 0x92, 0xff)
 
-enum { SEC_ACCOUNT, SEC_DISPLAY, SEC_AUDIO, SEC_GENERAL, SEC_COUNT };
-static const wchar_t *SECTION_NAMES[SEC_COUNT] = {L"Cuenta", L"Pantalla", L"Voz y audio", L"General"};
+enum { SEC_HOME, SEC_ACCOUNT, SEC_DISPLAY, SEC_AUDIO, SEC_GENERAL, SEC_COUNT };
+static const wchar_t *SECTION_NAMES[SEC_COUNT] = {L"Inicio", L"Cuenta", L"Pantalla", L"Voz y audio", L"General"};
 
 typedef enum {
     W_LABEL,
@@ -62,7 +63,8 @@ enum {
 
 enum {
     A_NONE, A_GROQ_LINK, A_RESET_PW, A_SHOW_API, A_SHOW_STOP, A_TAILSCALE, A_COPY_SECRET, A_OBSIDIAN, A_PICK_SOUND,
-    A_CLEAR_SOUND, A_OPEN_FOLDER, A_CHECK_UPDATE, A_SAVE, A_CANCEL,
+    A_CLEAR_SOUND, A_OPEN_FOLDER, A_CHECK_UPDATE, A_SAVE, A_CANCEL, A_START, A_GO_SETTINGS, A_MUTE, A_TEST_AUDIO,
+    A_QUIT, A_MODE_CHANGED, A_OUTPUT_CHANGED,
 };
 
 typedef struct {
@@ -71,9 +73,9 @@ typedef struct {
     const wchar_t *text;
     int *value;        /* segment/cards/slider/toggle/dropdown */
     int options;       /* número de opciones */
-    const wchar_t **labels;
-    const wchar_t **descs;
-    int action;
+    const wchar_t *const *labels;
+    const wchar_t *const *descs;
+    int action;        /* botón/enlace; en una lista, se llama al elegir */
     int edit;          /* índice de F_* para W_EDIT */
     bool primary;
 } Widget;
@@ -82,6 +84,8 @@ static struct {
     HWND hwnd;
     HINSTANCE inst;
     bool first_run;
+    bool home_mode;     /* abierta como ventana de Inicio: Guardar/Cancelar regresan a Inicio */
+    bool quit_on_close; /* primera vez, o Inicio antes de arrancar: cerrarla cierra Jarvis */
     SettingsSavedFn on_saved;
     int section;
     int dpi;
@@ -100,6 +104,10 @@ static struct {
     char **mics;
     int nmics;
     int mic_index;
+    char **outputs;
+    int nouts;
+    int output_index;
+    int home_display, home_output; /* lo que está en uso ahora (Inicio lo aplica al momento) */
     int display_mode, resolution_index, style;
     int volume, sensitivity;
     wchar_t *status_line;
@@ -112,12 +120,18 @@ static struct {
 
 static const int RESOLUTIONS[] = {0, 720, 1080, 1440, 2160};
 static const wchar_t *RES_LABELS[] = {L"Automática", L"720p", L"1080p", L"1440p", L"4K"};
-static const wchar_t *MODE_LABELS[] = {L"Pantalla completa", L"Pantalla completa sin bordes", L"Ventana sin bordes"};
-static const wchar_t *MODE_DESCS[] = {
-    L"Ocupa toda la pantalla, siempre por encima. Se aparta sola cuando Jarvis abre algo.",
-    L"Ocupa la pantalla pero tus ventanas pueden ir encima. Aparece al frente cuando le hablas.",
-    L"Una esfera flotante y transparente, siempre visible. Arrástrala a donde quieras.",
+const wchar_t *const DISPLAY_MODE_LABELS[DISPLAY_MODE_COUNT] = {
+    L"Pantalla completa", L"Pantalla completa sin bordes", L"Esfera flotante", L"Ventana", L"Minimizado",
 };
+static const wchar_t *const MODE_DESCS[DISPLAY_MODE_COUNT] = {
+    L"Siempre encima de todo. Se aparta sola cuando Jarvis abre algo.",
+    L"Tus ventanas pueden ir encima; sale al frente cuando le hablas.",
+    L"Una esfera transparente, siempre visible. Arrástrala a donde quieras.",
+    L"Una ventana normal: muévela, agrándala. F11 = pantalla completa.",
+    L"Como Ventana, pero arranca minimizada y no se asoma al hablarle.",
+};
+#define CARD_H 56
+#define CARD_GAP 6
 static const wchar_t *STYLE_LABELS[] = {L"Halo de puntos", L"Líneas"};
 
 static int dp(int v)
@@ -283,7 +297,7 @@ static int layout_help(int x, int y, int w, const wchar_t *t)
     return y + h + dp(8);
 }
 
-static int layout_segment(int x, int y, int w, int *value, const wchar_t **labels, int n)
+static int layout_segment(int x, int y, int w, int *value, const wchar_t *const *labels, int n)
 {
     Widget *s = add(W_SEGMENT, (RECT){x, y, x + w, y + dp(38)});
     s->value = value;
@@ -307,12 +321,13 @@ static int layout_toggle(int x, int y, int w, int *value, const wchar_t *label)
     return y + dp(42);
 }
 
-static int layout_dropdown(int x, int y, int w, int *value, const wchar_t **labels, int n)
+static int layout_dropdown(int x, int y, int w, int *value, const wchar_t *const *labels, int n, int action)
 {
     Widget *d = add(W_DROPDOWN, (RECT){x, y, x + w, y + dp(40)});
     d->value = value;
     d->labels = labels;
     d->options = n;
+    d->action = action;
     return y + dp(54);
 }
 
@@ -327,6 +342,7 @@ static int layout_button(int x, int y, int w, const wchar_t *t, int action, bool
 
 static const wchar_t **g_voice_labels;
 static const wchar_t **g_mic_labels;
+static const wchar_t **g_output_labels;
 
 static void free_labels(void)
 {
@@ -336,6 +352,9 @@ static void free_labels(void)
     for (int i = 0; g_mic_labels && i < S.nmics + 1; i++) free((void *)g_mic_labels[i]);
     free(g_mic_labels);
     g_mic_labels = NULL;
+    for (int i = 0; g_output_labels && i < S.nouts + 1; i++) free((void *)g_output_labels[i]);
+    free(g_output_labels);
+    g_output_labels = NULL;
 }
 
 static void build_labels(void)
@@ -346,10 +365,59 @@ static void build_labels(void)
     g_mic_labels = xcalloc((size_t)S.nmics + 2, sizeof(wchar_t *));
     g_mic_labels[0] = xwcsdup(L"Predeterminado de Windows");
     for (int i = 0; i < S.nmics; i++) g_mic_labels[i + 1] = utf8_to_wide(S.mics[i]);
+    g_output_labels = xcalloc((size_t)S.nouts + 2, sizeof(wchar_t *));
+    g_output_labels[0] = xwcsdup(L"Predeterminada de Windows");
+    for (int i = 0; i < S.nouts; i++) g_output_labels[i + 1] = utf8_to_wide(S.outputs[i]);
+}
+
+/* 0 = la predeterminada; si la guardada ya no está conectada, también. */
+static int output_index_of(const char *name)
+{
+    for (int i = 0; name && *name && i < S.nouts; i++)
+        if (!strcmp(S.outputs[i], name)) return i + 1;
+    return 0;
+}
+
+static const char *output_name_at(int index)
+{
+    return index > 0 && index <= S.nouts ? S.outputs[index - 1] : "";
 }
 
 static wchar_t g_tailscale_text[160];
 static wchar_t g_sound_text[160];
+static wchar_t g_home_title[96];
+static wchar_t g_home_text[200];
+
+static void layout_home(int x, int y, int w)
+{
+    AppConfig c = config_snapshot();
+    S.home_display = c.display_mode;
+    S.home_output = output_index_of(c.output_name);
+    bool muted = c.mic_muted, running = voice_running();
+    config_free(&c);
+    swprintf(g_home_text, 200, L"%ls%ls",
+             running ? L"Jarvis está activo: di \"Hey Jarvis\" (o Ctrl+Alt+J) para hablarle."
+                     : L"Todo listo. Dale a Iniciar y di \"Hey Jarvis\" (o Ctrl+Alt+J) cuando quieras hablarle.",
+             muted ? L" El micrófono está silenciado." : L"");
+    y = layout_help(x, y - dp(6), w, g_home_text);
+    y = layout_button(x, y + dp(6), dp(220), running ? L"Mostrar la esfera" : L"Iniciar Jarvis", A_START, true) + dp(8);
+    y = layout_label(x, y, w, L"Modo de pantalla");
+    y = layout_dropdown(x, y, w, &S.home_display, DISPLAY_MODE_LABELS, DISPLAY_MODE_COUNT, A_MODE_CHANGED);
+    y = layout_help(x, y - dp(10), w, MODE_DESCS[S.home_display]);
+    y = layout_label(x, y, w, L"Salida de audio (bocinas o audífonos)");
+    y = layout_dropdown(x, y, w, &S.home_output, g_output_labels, S.nouts + 1, A_OUTPUT_CHANGED);
+    y = layout_help(x, y - dp(10), w,
+                    L"Por aquí sale la voz de Jarvis y su tono. Si pusiste un sonido de activación propio, ese "
+                    L"sale por la predeterminada de Windows.") + dp(6);
+    int bw = (w - dp(24)) / 3;
+    layout_button(x, y, bw, L"Configuración", A_GO_SETTINGS, false);
+    layout_button(x + bw + dp(12), y, bw, muted ? L"Activar micrófono" : L"Silenciar micrófono", A_MUTE, false);
+    layout_button(x + 2 * (bw + dp(12)), y, bw, L"Probar audio", A_TEST_AUDIO, false);
+    y += dp(46);
+    layout_button(x, y, bw, L"Buscar actualizaciones", A_CHECK_UPDATE, false);
+    layout_button(x + bw + dp(12), y, bw, L"Abrir carpeta de datos", A_OPEN_FOLDER, false);
+    layout_button(x + 2 * (bw + dp(12)), y, bw, L"Salir", A_QUIT, false);
+}
 
 static void layout(void)
 {
@@ -362,6 +430,15 @@ static void layout(void)
     int y = dp(34);
     Widget *title = add(W_LABEL, (RECT){x, y, x + w, y + dp(32)});
     title->text = S.first_run ? L"Configuremos tu Jarvis" : SECTION_NAMES[S.section];
+    if (S.section == SEC_HOME && !S.first_run) {
+        char *name = config_user_name();
+        wchar_t *wn = utf8_to_wide(name);
+        if (*wn) swprintf(g_home_title, 96, L"Hola, %ls", wn);
+        else wcscpy(g_home_title, L"Inicio");
+        title->text = g_home_title;
+        free(wn);
+        free(name);
+    }
     title->primary = true;
     y += dp(46);
     if (S.first_run) {
@@ -371,6 +448,9 @@ static void layout(void)
     }
 
     switch (S.section) {
+    case SEC_HOME:
+        layout_home(x, y, w);
+        break;
     case SEC_ACCOUNT:
         y = layout_edit(x, y, w, L"API key de Groq", F_API, NULL);
         y = layout_link(x, y - dp(10), L"Consíguela gratis en console.groq.com  →", A_GROQ_LINK) + dp(6);
@@ -383,12 +463,13 @@ static void layout(void)
         break;
     case SEC_DISPLAY: {
         y = layout_label(x, y, w, L"Modo de pantalla");
-        Widget *c = add(W_CARDS, (RECT){x, y, x + w, y + dp(66) * 3 + dp(16)});
+        int ch = dp(CARD_H) * DISPLAY_MODE_COUNT + dp(CARD_GAP) * (DISPLAY_MODE_COUNT - 1);
+        Widget *c = add(W_CARDS, (RECT){x, y, x + w, y + ch});
         c->value = &S.display_mode;
-        c->labels = MODE_LABELS;
+        c->labels = DISPLAY_MODE_LABELS;
         c->descs = MODE_DESCS;
-        c->options = 3;
-        y += dp(66) * 3 + dp(30);
+        c->options = DISPLAY_MODE_COUNT;
+        y += ch + dp(14);
         y = layout_label(x, y, w, L"Resolución de la esfera");
         y = layout_segment(x, y, w, &S.resolution_index, RES_LABELS, 5);
         y = layout_label(x, y, w, L"Estilo");
@@ -400,9 +481,11 @@ static void layout(void)
         y = layout_label(x, y, w, L"Volumen de la voz de Jarvis");
         y = layout_slider(x, y, w, &S.volume);
         y = layout_label(x, y, w, L"Voz");
-        y = layout_dropdown(x, y, w, &S.voice_index, g_voice_labels, S.nvoices);
+        y = layout_dropdown(x, y, w, &S.voice_index, g_voice_labels, S.nvoices, A_NONE);
         y = layout_label(x, y, w, L"Micrófono");
-        y = layout_dropdown(x, y, w, &S.mic_index, g_mic_labels, S.nmics + 1);
+        y = layout_dropdown(x, y, w, &S.mic_index, g_mic_labels, S.nmics + 1, A_NONE);
+        y = layout_label(x, y, w, L"Salida de audio");
+        y = layout_dropdown(x, y, w, &S.output_index, g_output_labels, S.nouts + 1, A_NONE);
         y = layout_label(x, y, w, L"Sensibilidad de \"Hey Jarvis\"");
         y = layout_slider(x, y, w, &S.sensitivity);
         y = layout_help(x, y - dp(8), w,
@@ -442,9 +525,17 @@ static void layout(void)
         break;
     }
 
-    int by = cr.bottom - dp(64);
-    layout_button(cr.right - dp(40) - dp(150), by, dp(150), S.first_run ? L"Empezar" : L"Guardar", A_SAVE, true);
-    if (!S.first_run) layout_button(cr.right - dp(40) - dp(150) - dp(12) - dp(120), by, dp(120), L"Cancelar", A_CANCEL, false);
+    if (S.section != SEC_HOME) {
+        int by = cr.bottom - dp(64);
+        layout_button(cr.right - dp(40) - dp(150), by, dp(150), S.first_run ? L"Empezar" : L"Guardar", A_SAVE, true);
+        if (!S.first_run)
+            layout_button(cr.right - dp(40) - dp(150) - dp(12) - dp(120), by, dp(120), L"Cancelar", A_CANCEL, false);
+    }
+    if (!S.first_run) SetWindowTextW(S.hwnd, S.section == SEC_HOME ? L"Jarvis" : L"Jarvis — Configuración");
+    /* Que no quede el foco en un campo que ya no se ve (lo que escribas iría a
+       parar ahí sin que lo notes). */
+    HWND f = GetFocus();
+    if (f && GetParent(f) == S.hwnd && !IsWindowVisible(f)) SetFocus(S.hwnd);
     InvalidateRect(S.hwnd, NULL, FALSE);
 }
 
@@ -494,19 +585,19 @@ static void paint_widget(Widget *wd, int index)
         break;
     }
     case W_CARDS: {
-        int ch = dp(66);
+        int ch = dp(CARD_H);
         for (int i = 0; i < wd->options; i++) {
-            RECT c = {r.left, r.top + i * (ch + dp(8)), r.right, r.top + i * (ch + dp(8)) + ch};
+            RECT c = {r.left, r.top + i * (ch + dp(CARD_GAP)), r.right, r.top + i * (ch + dp(CARD_GAP)) + ch};
             bool sel = *wd->value == i;
             round_rect(c, (float)dp(12), sel ? C_NAV_SEL : C_SURFACE, sel ? C_NAV_SEL : C_SURFACE, 0);
             round_rect(c, (float)dp(12), sel ? C_ACCENT : C_BORDER, sel ? C_ACCENT : C_BORDER, sel ? 2.0f : 1.0f);
             circle((float)(c.left + dp(22)), (float)(c.top + ch / 2), (float)dp(8), sel ? C_ACCENT : C_BORDER);
             circle((float)(c.left + dp(22)), (float)(c.top + ch / 2), (float)dp(6), sel ? C_ACCENT : C_SURFACE);
             if (sel) circle((float)(c.left + dp(22)), (float)(c.top + ch / 2), (float)dp(3), RGB(255, 255, 255));
-            RECT t = {c.left + dp(44), c.top + dp(10), c.right - dp(12), c.top + dp(32)};
+            RECT t = {c.left + dp(44), c.top + dp(8), c.right - dp(12), c.top + dp(28)};
             text(wd->labels[i], t, S.f_body, C_TEXT, DT_LEFT | DT_SINGLELINE | DT_VCENTER);
-            RECT d = {c.left + dp(44), c.top + dp(32), c.right - dp(12), c.bottom - dp(6)};
-            text(wd->descs[i], d, S.f_small, C_MUTED, DT_LEFT | DT_WORDBREAK | DT_END_ELLIPSIS);
+            RECT d = {c.left + dp(44), c.top + dp(28), c.right - dp(12), c.bottom - dp(8)};
+            text(wd->descs[i], d, S.f_small, C_MUTED, DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
         }
         break;
     }
@@ -597,7 +688,8 @@ static void paint(HDC dc)
         GdiFlush();
     }
     if (S.status_line) {
-        RECT st = {side + dp(40), S.bh - dp(58), S.bw - dp(40) - dp(290), S.bh - dp(26)};
+        int right = S.section == SEC_HOME ? S.bw - dp(40) : S.bw - dp(40) - dp(290);
+        RECT st = {side + dp(40), S.bh - dp(58), right, S.bh - dp(26)};
         text(S.status_line, st, S.f_small, C_LINK, DT_LEFT | DT_WORDBREAK | DT_END_ELLIPSIS);
     }
     BitBlt(dc, 0, 0, S.bw, S.bh, S.mem, 0, 0, SRCCOPY);
@@ -691,6 +783,9 @@ static void load_values(void)
     S.mic_index = 0;
     for (int i = 0; i < S.nmics; i++)
         if (!strcmp(S.mics[i], S.cfg.mic_name)) S.mic_index = i + 1;
+    free_string_list(S.outputs, S.nouts);
+    S.nouts = speaker_list_devices(&S.outputs);
+    S.output_index = output_index_of(S.cfg.output_name);
     build_labels();
     refresh_tailscale_text();
     refresh_sound_text();
@@ -732,7 +827,10 @@ static void save(void)
     c.voice = xstrdup(S.voice_index < S.nvoices ? S.voices[S.voice_index].id : "");
     free(c.mic_name);
     c.mic_name = xstrdup(S.mic_index > 0 && S.mic_index <= S.nmics ? S.mics[S.mic_index - 1] : "");
+    free(c.output_name);
+    c.output_name = xstrdup(output_name_at(S.output_index));
     config_apply(&c);
+    speaker_set_device(c.output_name);
 
     char *pw = edit_text(F_PROFILE_PW);
     if (*pw) set_profile_password(c.user_name, pw);
@@ -746,8 +844,32 @@ static void save(void)
     bool first = S.first_run;
     SettingsSavedFn cb = S.on_saved;
     S.first_run = false;
+    if (S.home_mode && !first) {
+        load_values();
+        S.section = SEC_HOME;
+        layout();
+        set_status(L"Cambios guardados.");
+        return;
+    }
+    S.quit_on_close = false;
     DestroyWindow(S.hwnd);
     if (cb) cb(first);
+}
+
+static DWORD WINAPI chime_worker(LPVOID arg)
+{
+    sound_chime();
+    return 0;
+}
+
+static void start_or_show(void)
+{
+    SettingsSavedFn cb = S.on_saved;
+    bool running = voice_running();
+    S.quit_on_close = false;
+    DestroyWindow(S.hwnd);
+    if (!running && cb) cb(false);
+    ui_show_hud(running ? HUD_SHOW_FRONT : HUD_SHOW_STARTED);
 }
 
 typedef struct {
@@ -918,8 +1040,57 @@ static void do_action(int action)
         save();
         break;
     case A_CANCEL:
-        DestroyWindow(S.hwnd);
+        if (S.home_mode) {
+            load_values();
+            S.section = SEC_HOME;
+            set_status(NULL);
+            layout();
+        } else {
+            DestroyWindow(S.hwnd);
+        }
         break;
+    case A_START:
+        start_or_show();
+        break;
+    case A_GO_SETTINGS:
+        S.section = SEC_ACCOUNT;
+        layout();
+        break;
+    case A_MUTE:
+        if (ui_message_window()) SendMessageW(ui_message_window(), WM_COMMAND, IDM_MUTE, 0);
+        break;
+    case A_TEST_AUDIO: {
+        wchar_t msg[200];
+        const wchar_t *out = g_output_labels[S.home_output];
+        if (voice_running()) {
+            voice_test_audio();
+            swprintf(msg, 200, L"Probando por «%ls»: suena el tono y luego mi voz.", out);
+        } else {
+            HANDLE t = CreateThread(NULL, 0, chime_worker, NULL, 0, NULL);
+            if (t) CloseHandle(t);
+            swprintf(msg, 200, L"Sonó el tono por «%ls». La voz se prueba con Jarvis iniciado.", out);
+        }
+        set_status(msg);
+        break;
+    }
+    case A_QUIT:
+        if (ui_message_window()) PostMessageW(ui_message_window(), WM_APP_QUIT, 0, 0);
+        break;
+    case A_MODE_CHANGED:
+        S.display_mode = S.home_display;
+        ui_set_display_mode(S.home_display);
+        break;
+    case A_OUTPUT_CHANGED: {
+        const char *name = output_name_at(S.home_output);
+        S.output_index = S.home_output;
+        config_set_output(name);
+        speaker_set_device(name);
+        wchar_t msg[160];
+        swprintf(msg, 160, L"Salida de audio: %ls. Dale a Probar audio para oírla.", g_output_labels[S.home_output]);
+        set_status(msg);
+        layout();
+        break;
+    }
     }
 }
 
@@ -952,7 +1123,7 @@ static void click(int i, int x, int y)
         break;
     }
     case W_CARDS: {
-        int idx = (y - w->r.top) / (dp(66) + dp(8));
+        int idx = (y - w->r.top) / (dp(CARD_H) + dp(CARD_GAP));
         if (idx >= 0 && idx < w->options) *w->value = idx;
         break;
     }
@@ -972,7 +1143,13 @@ static void click(int i, int x, int y)
         ClientToScreen(S.hwnd, &pt);
         int sel = TrackPopupMenu(m, TPM_RETURNCMD | TPM_LEFTALIGN | TPM_TOPALIGN, pt.x, pt.y, 0, S.hwnd, NULL);
         DestroyMenu(m);
-        if (sel > 0) *w->value = sel - 1;
+        if (sel > 0 && sel - 1 != *w->value) {
+            *w->value = sel - 1;
+            if (w->action) {
+                do_action(w->action); /* puede volver a armar la ventana: w ya no sirve */
+                return;
+            }
+        }
         break;
     }
     case W_LINK:
@@ -1030,7 +1207,7 @@ static LRESULT CALLBACK proc(HWND h, UINT m, WPARAM w, LPARAM l)
         paint(dc);
         ReleaseDC(h, dc);
         layout();
-        SetFocus(S.edits[F_API]);
+        SetFocus(S.section == SEC_ACCOUNT ? S.edits[F_API] : h);
         return 0;
     }
     case WM_DPICHANGED: {
@@ -1107,7 +1284,12 @@ static LRESULT CALLBACK proc(HWND h, UINT m, WPARAM w, LPARAM l)
         }
         return 0;
     case WM_KEYDOWN:
-        if (w == VK_ESCAPE) do_action(S.first_run ? A_NONE : A_CANCEL);
+        /* Esc: en una sección vuelve a Inicio (o cierra, si se abrió como
+           Configuración); en Inicio cierra, salvo que Jarvis no haya arrancado. */
+        if (w == VK_ESCAPE && !S.first_run) {
+            if (S.section != SEC_HOME) do_action(A_CANCEL);
+            else if (!S.quit_on_close) DestroyWindow(h);
+        }
         return 0;
     case WM_APP_ASYNC_DONE: {
         AsyncJob *job = (AsyncJob *)l;
@@ -1126,7 +1308,7 @@ static LRESULT CALLBACK proc(HWND h, UINT m, WPARAM w, LPARAM l)
         DestroyWindow(h);
         return 0;
     case WM_DESTROY: {
-        bool quit = S.first_run;
+        bool quit = S.quit_on_close;
         for (int i = 0; i < F_EDIT_COUNT; i++) S.edits[i] = NULL;
         if (S.mem) {
             SelectObject(S.mem, S.old_bmp);
@@ -1150,9 +1332,24 @@ HWND settings_window(void)
     return S.hwnd;
 }
 
-void settings_open(HINSTANCE inst, bool first_run, SettingsSavedFn on_saved)
+void settings_sync(void)
+{
+    if (!S.hwnd) return;
+    AppConfig c = config_snapshot();
+    S.display_mode = c.display_mode;
+    config_free(&c);
+    layout();
+}
+
+static void open_window(HINSTANCE inst, bool first_run, bool home, bool starting, SettingsSavedFn on_saved)
 {
     if (S.hwnd) {
+        if (!S.first_run) {
+            if (home) S.home_mode = true;
+            S.section = home ? SEC_HOME : SEC_ACCOUNT;
+            set_status(NULL);
+            layout();
+        }
         ShowWindow(S.hwnd, SW_SHOWNORMAL);
         SetForegroundWindow(S.hwnd);
         return;
@@ -1171,8 +1368,10 @@ void settings_open(HINSTANCE inst, bool first_run, SettingsSavedFn on_saved)
     }
     S.inst = inst;
     S.first_run = first_run;
+    S.home_mode = home;
+    S.quit_on_close = first_run || starting;
     S.on_saved = on_saved;
-    S.section = SEC_ACCOUNT;
+    S.section = home ? SEC_HOME : SEC_ACCOUNT;
     S.api_visible = S.stop_visible = false;
     UINT dpi = GetDpiForSystem();
     int cw = MulDiv(900, (int)dpi, 96), ch = MulDiv(700, (int)dpi, 96);
@@ -1182,10 +1381,20 @@ void settings_open(HINSTANCE inst, bool first_run, SettingsSavedFn on_saved)
     RECT r = {0, 0, cw, ch};
     AdjustWindowRectExForDpi(&r, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX, FALSE, 0, dpi);
     int ww = r.right - r.left, wh = r.bottom - r.top;
-    CreateWindowExW(0, SETTINGS_CLASS, first_run ? L"Bienvenido a Jarvis" : L"Jarvis — Configuración",
+    CreateWindowExW(0, SETTINGS_CLASS, first_run ? L"Bienvenido a Jarvis" : home ? L"Jarvis" : L"Jarvis — Configuración",
                     WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
                     wa.left + (wa.right - wa.left - ww) / 2, wa.top + (wa.bottom - wa.top - wh) / 2, ww, wh, NULL,
                     NULL, inst, NULL);
     ShowWindow(S.hwnd, SW_SHOWNORMAL);
     SetForegroundWindow(S.hwnd);
+}
+
+void settings_open(HINSTANCE inst, bool first_run, SettingsSavedFn on_saved)
+{
+    open_window(inst, first_run, false, false, on_saved);
+}
+
+void home_open(HINSTANCE inst, bool starting, SettingsSavedFn on_start)
+{
+    open_window(inst, false, true, starting, on_start);
 }

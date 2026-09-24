@@ -5,6 +5,9 @@
    %LOCALAPPDATA%\Jarvis\sounds, o elegidos desde Configuración) se usan esos;
    si no, un tono corto generado por Jarvis para la activación. */
 void sound_activation(void);
+/* Siempre el tono integrado (sale por la salida de audio elegida; tus MP3
+   personalizados van por la predeterminada de Windows). */
+void sound_chime(void);
 void sound_search_start(void);
 void sound_search_stop(void);
 
