@@ -522,6 +522,45 @@ char *tool_list_windows(const cJSON *a)
     return sb_steal(&sb);
 }
 
+/* Terminales: ahí lo que escribe Jarvis se ejecuta como comando (con Enter,
+   y en cmd hasta con el Shift+Enter de los saltos de línea). Se reconocen por
+   la clase de la ventana o por el programa. */
+static const wchar_t *TERMINAL_CLASSES[] = {L"ConsoleWindowClass", L"CASCADIA_HOSTING_WINDOW_CLASS",
+                                            L"PseudoConsoleWindow", L"mintty", L"VirtualConsoleClass",
+                                            L"PuTTY", L"KiTTY"};
+static const wchar_t *TERMINAL_EXES[] = {
+    L"cmd.exe",       L"powershell.exe", L"pwsh.exe",     L"powershell_ise.exe", L"WindowsTerminal.exe",
+    L"OpenConsole.exe", L"conhost.exe",  L"wsl.exe",      L"wslhost.exe",        L"bash.exe",
+    L"mintty.exe",    L"alacritty.exe",  L"wezterm-gui.exe", L"putty.exe",       L"kitty.exe",
+    L"Hyper.exe",     L"Tabby.exe",      L"ConEmu.exe",   L"ConEmu64.exe",       L"Cmder.exe",
+    L"MobaXterm.exe", L"Warp.exe"};
+
+bool is_terminal_window_info(const wchar_t *cls, const wchar_t *exe)
+{
+    for (size_t i = 0; cls && i < sizeof TERMINAL_CLASSES / sizeof *TERMINAL_CLASSES; i++)
+        if (!_wcsicmp(cls, TERMINAL_CLASSES[i])) return true;
+    const wchar_t *base = exe && *exe ? path_basename(exe) : NULL;
+    for (size_t i = 0; base && i < sizeof TERMINAL_EXES / sizeof *TERMINAL_EXES; i++)
+        if (!_wcsicmp(base, TERMINAL_EXES[i])) return true;
+    return false;
+}
+
+static bool window_is_terminal(HWND h)
+{
+    if (!h) return false;
+    wchar_t cls[128] = L"", exe[MAX_PATH] = L"";
+    GetClassNameW(h, cls, 128);
+    DWORD pid = 0;
+    GetWindowThreadProcessId(h, &pid);
+    HANDLE p = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (p) {
+        DWORD n = MAX_PATH;
+        if (!QueryFullProcessImageNameW(p, 0, exe, &n)) exe[0] = 0;
+        CloseHandle(p);
+    }
+    return is_terminal_window_info(cls, exe);
+}
+
 static void type_unicode(const wchar_t *text)
 {
     INPUT batch[64];
@@ -566,6 +605,9 @@ char *tool_type_text(const cJSON *a)
     } else {
         app_yield_focus();
     }
+    if (window_is_terminal(GetForegroundWindow()))
+        return xstrdup("Por seguridad no escribo en terminales (cmd, PowerShell, Windows Terminal y parecidas): ahí el "
+                       "texto se ejecuta como comando.");
     wchar_t *w = utf8_to_wide(texto);
     type_unicode(w);
     free(w);

@@ -34,6 +34,7 @@ char *tool_info_sistema(const cJSON *a);
 char *focus_window_by_title(const char *needle, bool *ok);
 bool open_target_is_dangerous(const wchar_t *path);
 bool open_app_targets_file(const cJSON *a);
+bool is_terminal_window_info(const wchar_t *cls, const wchar_t *exe);
 
 /* archivos */
 char *tool_list_files(const cJSON *a);

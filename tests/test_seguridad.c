@@ -213,6 +213,22 @@ static void test_web(void)
           "leer_pagina niega http://x@127.0.0.1 (antes pasaba)");
 }
 
+static void test_terminales(void)
+{
+    printf("-- type_text y terminales --\n");
+    check(is_terminal_window_info(L"ConsoleWindowClass", L"C:\\Windows\\System32\\conhost.exe"), "cmd clásico");
+    check(is_terminal_window_info(L"CASCADIA_HOSTING_WINDOW_CLASS",
+                                  L"C:\\Program Files\\WindowsApps\\Microsoft.WindowsTerminal\\WindowsTerminal.exe"),
+          "Windows Terminal");
+    check(is_terminal_window_info(L"HwndWrapper", L"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"),
+          "PowerShell por nombre de programa");
+    check(is_terminal_window_info(L"mintty", L"C:\\Program Files\\Git\\usr\\bin\\mintty.exe"), "Git Bash");
+    check(!is_terminal_window_info(L"Chrome_WidgetWin_1", L"C:\\Program Files\\Google\\Chrome\\chrome.exe") &&
+              !is_terminal_window_info(L"Notepad", L"C:\\Windows\\notepad.exe") &&
+              !is_terminal_window_info(L"Chrome_WidgetWin_1", L"C:\\Users\\yo\\WhatsApp.exe"),
+          "navegador, bloc de notas y WhatsApp no son terminales");
+}
+
 int wmain(void)
 {
     CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
@@ -221,6 +237,7 @@ int wmain(void)
     test_open_app();
     test_malla();
     test_web();
+    test_terminales();
     printf("%d/%d pruebas %s\n", g_total - g_fail, g_total, g_fail ? "— HAY FALLAS" : "ok");
     return g_fail ? 1 : 0;
 }

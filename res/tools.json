@@ -307,7 +307,7 @@
     "type": "function",
     "function": {
       "name": "type_text",
-      "description": "Escribe texto donde está el foco (o en 'ventana', enfocándola antes). enviar=true presiona Enter: úsalo sin preguntar solo si el riesgo es bajo (buscar, navegar). Si le llega a otra persona (mensaje, email, publicación), deja enviar=false y pregunta antes, salvo que ya te lo haya pedido.",
+      "description": "Escribe texto donde está el foco (o en 'ventana', enfocándola antes). enviar=true presiona Enter: úsalo sin preguntar solo si el riesgo es bajo (buscar, navegar). Si le llega a otra persona (mensaje, email, publicación), deja enviar=false y pregunta antes, salvo que ya te lo haya pedido. Nunca escribe en terminales (cmd, PowerShell).",
       "parameters": {
         "type": "object",
         "properties": {
