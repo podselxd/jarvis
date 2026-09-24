@@ -11,6 +11,10 @@ void voice_stop(void);
 void voice_trigger(void);
 void voice_settings_changed(void);
 bool voice_wait(unsigned ms);
+bool voice_running(void);
+/* Tono + una frase por la salida de audio elegida (cuando Jarvis no está en
+   medio de una conversación). */
+void voice_test_audio(void);
 
 /* Voces disponibles, pedidas al hilo de síntesis (SAPI vive en ese hilo). */
 int voice_list_voices(TtsVoice **out);

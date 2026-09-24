@@ -5,6 +5,7 @@
 #include <string.h>
 #include <wchar.h>
 
+#include "config.h"
 #include "ui.h"
 
 static NOTIFYICONDATAW g_nid;
@@ -115,13 +116,20 @@ void tray_notify(const wchar_t *title, const wchar_t *text)
     if (g_added) Shell_NotifyIconW(NIM_MODIFY, &n);
 }
 
-void tray_show_menu(HWND owner, bool hud_visible, bool muted)
+void tray_show_menu(HWND owner, bool hud_visible, bool muted, int display_mode)
 {
     HMENU m = CreatePopupMenu();
     AppendMenuW(m, MF_STRING, IDM_TALK, L"Hablar con Jarvis\tCtrl+Alt+J");
     AppendMenuW(m, MF_STRING, IDM_TOGGLE_HUD, hud_visible ? L"Ocultar la esfera" : L"Mostrar la esfera");
+    HMENU modes = CreatePopupMenu();
+    for (int i = 0; i < DISPLAY_MODE_COUNT; i++)
+        AppendMenuW(modes, MF_STRING, (UINT_PTR)(IDM_MODE_BASE + i), DISPLAY_MODE_LABELS[i]);
+    CheckMenuRadioItem(modes, IDM_MODE_BASE, IDM_MODE_BASE + DISPLAY_MODE_COUNT - 1, IDM_MODE_BASE + display_mode,
+                       MF_BYCOMMAND);
+    AppendMenuW(m, MF_POPUP, (UINT_PTR)modes, L"Modo de pantalla");
     AppendMenuW(m, MF_STRING | (muted ? MF_CHECKED : 0), IDM_MUTE, L"Silenciar micrófono");
     AppendMenuW(m, MF_SEPARATOR, 0, NULL);
+    AppendMenuW(m, MF_STRING, IDM_HOME, L"Ventana de inicio…");
     AppendMenuW(m, MF_STRING, IDM_SETTINGS, L"Configuración…");
     HBITMAP gear = gear_bitmap();
     if (gear) {

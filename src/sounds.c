@@ -43,7 +43,7 @@ static bool mci_open(const wchar_t *path, const wchar_t *alias)
     return true;
 }
 
-static void builtin_chime(void)
+void sound_chime(void)
 {
     const int rate = 24000;
     const double notes[2] = {880.0, 1318.5};
@@ -72,7 +72,7 @@ void sound_activation(void)
         mci(L"stop jarvis_activacion");
         mci(L"close jarvis_activacion");
     } else {
-        builtin_chime();
+        sound_chime();
     }
     free(p);
 }

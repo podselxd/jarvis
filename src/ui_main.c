@@ -1,8 +1,11 @@
 /* Ventana del HUD (la esfera) + ventana oculta de mensajes (bandeja, atajo de
    teclado, avisos). La esfera se dibuja en su propio hilo, sincronizado con el
    refresco del monitor; el hilo de la interfaz solo maneja mensajes.
-   La ventana nunca toma el foco (WS_EX_NOACTIVATE): las teclas que manda
-   Jarvis siempre llegan a la app que estás usando, no a la esfera. */
+   En pantalla completa y como esfera flotante la ventana nunca toma el foco
+   (WS_EX_NOACTIVATE): las teclas que manda Jarvis siempre llegan a la app que
+   estás usando. En modo Ventana es una ventana normal (se puede mover,
+   minimizar, F11); ahí, antes de mandar teclas, le pasa el foco a la ventana
+   que sigue. */
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <dwmapi.h>
@@ -35,11 +38,13 @@ static struct {
     bool subtitles;
     volatile LONG visible;
     volatile LONG yielded;
-    RECT mon;
+    RECT mon; /* monitor; en los modos con ventana, el rectángulo de la ventana */
     int orb_size;
+    bool win_full, in_sizemove, size_changed, close_hint_shown;
+    WINDOWPLACEMENT win_place;
 
     HANDLE thread, wake;
-    volatile LONG running, reconfig;
+    volatile LONG running, reconfig, resized;
     SRWLOCK hud_lock;
 
     SRWLOCK text_lock;
@@ -141,6 +146,11 @@ HICON ui_app_icon(int size)
 
 /* ------------------------------------------------------------- ventana --- */
 
+static bool windowed(int mode)
+{
+    return mode == DISPLAY_WINDOWED || mode == DISPLAY_MINIMIZED;
+}
+
 static void primary_monitor(RECT *out)
 {
     HMONITOR m = MonitorFromPoint((POINT){0, 0}, MONITOR_DEFAULTTOPRIMARY);
@@ -168,20 +178,42 @@ static void load_display_config(void)
             y = wa.bottom - U.orb_size - mh / 40;
         }
         U.mon = (RECT){x, y, x + U.orb_size, y + U.orb_size};
+    } else if (windowed(U.mode)) {
+        RECT r = {c.win_x, c.win_y, c.win_x + c.win_w, c.win_y + c.win_h};
+        if (c.win_w <= 0 || c.win_h <= 0 || !MonitorFromRect(&r, MONITOR_DEFAULTTONULL)) {
+            RECT wa;
+            SystemParametersInfoW(SPI_GETWORKAREA, 0, &wa, 0);
+            int h = (wa.bottom - wa.top) * 3 / 5, w = h * 4 / 3;
+            r.left = wa.left + (wa.right - wa.left - w) / 2;
+            r.top = wa.top + (wa.bottom - wa.top - h) / 2;
+            r.right = r.left + w;
+            r.bottom = r.top + h;
+        }
+        U.mon = r;
     }
     config_free(&c);
 }
 
+/* Al mostrarla sin que la pidas (al arrancar, al cambiar de modo) nunca le
+   quita el foco a lo que estás usando; en Minimizado queda en la barra de
+   tareas. */
+static int quiet_show_cmd(void)
+{
+    return U.mode == DISPLAY_MINIMIZED ? SW_SHOWMINNOACTIVE : SW_SHOWNOACTIVATE;
+}
+
 static void create_hud(void)
 {
-    DWORD ex = WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE;
+    bool win = windowed(U.mode);
+    DWORD ex = win ? WS_EX_APPWINDOW : WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE;
     if (U.mode == DISPLAY_FULLSCREEN || U.mode == DISPLAY_WINDOWED_BORDERLESS) ex |= WS_EX_TOPMOST;
     if (U.mode == DISPLAY_WINDOWED_BORDERLESS) ex |= WS_EX_LAYERED;
-    U.hud = CreateWindowExW(ex, HUD_CLASS, L"Jarvis", WS_POPUP, U.mon.left, U.mon.top, U.mon.right - U.mon.left,
-                            U.mon.bottom - U.mon.top, NULL, NULL, U.inst, NULL);
+    U.win_full = false;
+    U.hud = CreateWindowExW(ex, HUD_CLASS, L"Jarvis", win ? WS_OVERLAPPEDWINDOW : WS_POPUP, U.mon.left, U.mon.top,
+                            U.mon.right - U.mon.left, U.mon.bottom - U.mon.top, NULL, NULL, U.inst, NULL);
     BOOL dark = TRUE;
     DwmSetWindowAttribute(U.hud, 20 /* DWMWA_USE_IMMERSIVE_DARK_MODE */, &dark, sizeof dark);
-    if (InterlockedCompareExchange(&U.visible, 1, 1)) ShowWindow(U.hud, SW_SHOWNOACTIVATE);
+    if (InterlockedCompareExchange(&U.visible, 1, 1)) ShowWindow(U.hud, quiet_show_cmd());
 }
 
 static void rebuild_hud(void)
@@ -201,36 +233,186 @@ void ui_config_changed(void)
     if (U.msg) PostMessageW(U.msg, WM_APP_CONFIG, 0, 0);
 }
 
-static void show_hud(bool show)
+static void show_hud(bool show, HudShow how)
 {
     InterlockedExchange(&U.visible, show ? 1 : 0);
     InterlockedExchange(&U.yielded, 0);
-    if (U.hud) ShowWindow(U.hud, show ? SW_SHOWNOACTIVATE : SW_HIDE);
+    if (U.hud) {
+        bool front = how == HUD_SHOW_FRONT || (how == HUD_SHOW_STARTED && U.mode == DISPLAY_WINDOWED);
+        if (!show) {
+            ShowWindow(U.hud, SW_HIDE);
+        } else if (windowed(U.mode) && front) {
+            ShowWindow(U.hud, IsIconic(U.hud) ? SW_RESTORE : SW_SHOW);
+            SetForegroundWindow(U.hud);
+        } else if (!windowed(U.mode) || !IsWindowVisible(U.hud)) {
+            ShowWindow(U.hud, quiet_show_cmd());
+        }
+    }
     SetEvent(U.wake);
+}
+
+/* Minimizada cuenta como oculta: un clic en la bandeja la trae. */
+static bool hud_shown(void)
+{
+    return InterlockedCompareExchange(&U.visible, 1, 1) && !(U.hud && windowed(U.mode) && IsIconic(U.hud));
+}
+
+static void toggle_hud(void)
+{
+    /* Antes de darle a Iniciar no hay nada que mostrar: la esfera no te
+       escucharía. Se trae la ventana de Inicio. */
+    if (!voice_running()) {
+        home_open(U.inst, false, U.on_saved);
+        return;
+    }
+    show_hud(!hud_shown(), HUD_SHOW_FRONT);
+}
+
+void ui_show_hud(HudShow how)
+{
+    if (U.msg) PostMessageW(U.msg, WM_APP_SHOWHUD, (WPARAM)how, 0);
+}
+
+void ui_set_display_mode(int mode)
+{
+    if (mode < 0 || mode >= DISPLAY_MODE_COUNT) return;
+    config_set_display_mode(mode);
+    rebuild_hud();
+    settings_sync();
+}
+
+/* F11 (o doble clic) en modo Ventana: la misma ventana ocupa todo su monitor,
+   como la pantalla completa de un navegador; F11 o Esc la regresan. Como
+   tiene el foco, la tapa cualquier ventana que abras. No se guarda: Jarvis
+   siempre vuelve a abrir en ventana. */
+static void toggle_full(HWND h)
+{
+    if (IsIconic(h)) return;
+    if (!U.win_full) {
+        U.win_place.length = sizeof U.win_place;
+        GetWindowPlacement(h, &U.win_place);
+        MONITORINFO mi = {sizeof mi};
+        GetMonitorInfoW(MonitorFromWindow(h, MONITOR_DEFAULTTONEAREST), &mi);
+        U.win_full = true;
+        SetWindowLongPtrW(h, GWL_STYLE, WS_POPUP | WS_VISIBLE);
+        SetWindowPos(h, HWND_TOP, mi.rcMonitor.left, mi.rcMonitor.top, mi.rcMonitor.right - mi.rcMonitor.left,
+                     mi.rcMonitor.bottom - mi.rcMonitor.top, SWP_FRAMECHANGED | SWP_NOOWNERZORDER);
+    } else {
+        U.win_full = false;
+        SetWindowLongPtrW(h, GWL_STYLE, WS_OVERLAPPEDWINDOW | WS_VISIBLE);
+        SetWindowPlacement(h, &U.win_place);
+        SetWindowPos(h, NULL, 0, 0, 0, 0,
+                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+    }
+}
+
+static void save_window_rect(HWND h)
+{
+    if (U.win_full || IsIconic(h) || IsZoomed(h)) return;
+    RECT r;
+    GetWindowRect(h, &r);
+    config_set_window_rect(r.left, r.top, r.right - r.left, r.bottom - r.top);
+}
+
+/* En modo Ventana la esfera sí puede tener el foco: antes de que Jarvis mande
+   teclas se lo pasa a la ventana que sigue (la que usabas antes), para que lo
+   que escriba no le llegue a la esfera. */
+static void activate_next_window(void)
+{
+    for (HWND w = GetWindow(U.hud, GW_HWNDNEXT); w; w = GetWindow(w, GW_HWNDNEXT)) {
+        if (!IsWindowVisible(w) || IsIconic(w) || app_is_own_window(w)) continue;
+        LONG_PTR ex = GetWindowLongPtrW(w, GWL_EXSTYLE);
+        if (ex & (WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE)) continue;
+        BOOL cloaked = FALSE;
+        DwmGetWindowAttribute(w, DWMWA_CLOAKED, &cloaked, sizeof cloaked);
+        if (cloaked) continue;
+        wchar_t cls[32];
+        GetClassNameW(w, cls, 32);
+        if (!wcscmp(cls, L"Progman") || !wcscmp(cls, L"WorkerW") || !wcscmp(cls, L"Shell_TrayWnd")) continue;
+        SetForegroundWindow(w);
+        return;
+    }
 }
 
 static LRESULT CALLBACK hud_proc(HWND h, UINT m, WPARAM w, LPARAM l)
 {
     switch (m) {
     case WM_MOUSEACTIVATE:
-        return MA_NOACTIVATE;
+        if (!windowed(U.mode)) return MA_NOACTIVATE;
+        break;
     case WM_NCHITTEST:
         if (U.mode == DISPLAY_WINDOWED_BORDERLESS) return HTCAPTION;
         break;
     case WM_NCLBUTTONDBLCLK:
+        if (windowed(U.mode)) break; /* doble clic en la barra de título: maximizar */
+        show_hud(false, HUD_SHOW_QUIET);
+        return 0;
     case WM_LBUTTONDBLCLK:
-        show_hud(false);
+        if (windowed(U.mode)) toggle_full(h);
+        else show_hud(false, HUD_SHOW_QUIET);
+        return 0;
+    case WM_KEYDOWN:
+        if (windowed(U.mode) && (w == VK_F11 || (w == VK_ESCAPE && U.win_full))) toggle_full(h);
         return 0;
     case WM_NCRBUTTONUP:
-    case WM_RBUTTONUP:
-        tray_show_menu(U.msg, true, config_mic_muted());
+        if (windowed(U.mode)) break; /* clic derecho en la barra de título: menú de la ventana */
+        tray_show_menu(U.msg, true, config_mic_muted(), U.mode);
         return 0;
+    case WM_RBUTTONUP:
+        tray_show_menu(U.msg, true, config_mic_muted(), U.mode);
+        return 0;
+    case WM_ENTERSIZEMOVE:
+        U.in_sizemove = true;
+        U.size_changed = false;
+        break;
     case WM_EXITSIZEMOVE: {
-        RECT r;
-        GetWindowRect(h, &r);
-        config_set_orb_pos(r.left, r.top);
+        U.in_sizemove = false;
+        if (U.mode == DISPLAY_WINDOWED_BORDERLESS) {
+            RECT r;
+            GetWindowRect(h, &r);
+            config_set_orb_pos(r.left, r.top);
+        } else if (windowed(U.mode)) {
+            save_window_rect(h);
+            if (U.size_changed) {
+                InterlockedExchange(&U.reconfig, 1);
+                SetEvent(U.wake);
+            }
+        }
         return 0;
     }
+    case WM_SIZE:
+        /* Mientras arrastras el borde solo se ajusta el lienzo; la esfera se
+           vuelve a armar a su nuevo tamaño cuando sueltas. */
+        if (windowed(U.mode) && w != SIZE_MINIMIZED) {
+            if (U.in_sizemove) U.size_changed = true;
+            InterlockedExchange(U.in_sizemove ? &U.resized : &U.reconfig, 1);
+            SetEvent(U.wake);
+        }
+        break;
+    case WM_GETMINMAXINFO:
+        if (windowed(U.mode)) {
+            MINMAXINFO *mm = (MINMAXINFO *)l;
+            int dpi = (int)GetDpiForWindow(h);
+            mm->ptMinTrackSize.x = MulDiv(320, dpi, 96);
+            mm->ptMinTrackSize.y = MulDiv(240, dpi, 96);
+            return 0;
+        }
+        break;
+    case WM_DPICHANGED:
+        if (windowed(U.mode) && !U.win_full) {
+            RECT *r = (RECT *)l;
+            SetWindowPos(h, NULL, r->left, r->top, r->right - r->left, r->bottom - r->top,
+                         SWP_NOZORDER | SWP_NOACTIVATE);
+        }
+        return 0;
+    case WM_CLOSE:
+        /* La X oculta: Jarvis sigue escuchando. Se cierra desde la bandeja. */
+        show_hud(false, HUD_SHOW_QUIET);
+        if (windowed(U.mode) && !U.close_hint_shown) {
+            U.close_hint_shown = true;
+            tray_notify(L"Jarvis", L"Sigo escuchando aquí en la bandeja. Para cerrarme: clic derecho en el ícono > Salir.");
+        }
+        return 0;
     case WM_ERASEBKGND:
         return 1;
     case WM_PAINT: {
@@ -363,29 +545,44 @@ static DWORD WINAPI render_main(LPVOID arg)
     int frame = 0;
 
     while (InterlockedCompareExchange(&U.running, 1, 1)) {
-        if (!InterlockedCompareExchange(&U.visible, 1, 1) || InterlockedCompareExchange(&U.yielded, 1, 1)) {
+        AcquireSRWLockShared(&U.hud_lock);
+        HWND hud = U.hud;
+        /* Oculta, apartada o minimizada: no se dibuja nada. */
+        if (!InterlockedCompareExchange(&U.visible, 1, 1) || InterlockedCompareExchange(&U.yielded, 1, 1) ||
+            (hud && windowed(U.mode) && IsIconic(hud))) {
+            ReleaseSRWLockShared(&U.hud_lock);
             WaitForSingleObject(U.wake, 300);
             QueryPerformanceCounter(&last);
             continue;
         }
-        AcquireSRWLockShared(&U.hud_lock);
-        HWND hud = U.hud;
-        if (InterlockedExchange(&U.reconfig, 0) || !sr) {
-            int mh = U.mon.bottom - U.mon.top, mw = U.mon.right - U.mon.left;
-            int canvas = U.mode == DISPLAY_WINDOWED_BORDERLESS ? U.orb_size : (U.res > 0 ? U.res : mh);
-            if (canvas > 2160) canvas = 2160;
-            sphere_destroy(sr);
-            sr = sphere_create(canvas);
-            canvas = sphere_size(sr);
-            surface_alloc(&sphere, canvas, canvas);
+        bool full_reconfig = InterlockedExchange(&U.reconfig, 0) || !sr;
+        if (InterlockedExchange(&U.resized, 0) || full_reconfig) {
+            int W = U.mon.right - U.mon.left, H = U.mon.bottom - U.mon.top;
+            if (windowed(U.mode) && hud) {
+                RECT rc;
+                GetClientRect(hud, &rc);
+                W = rc.right > 1 ? rc.right : 1;
+                H = rc.bottom > 1 ? rc.bottom : 1;
+            }
+            if (full_reconfig) {
+                /* Lo que mide el lado del cuadro donde va la esfera (el alto,
+                   salvo en una ventana o un monitor más altos que anchos). */
+                int side = W < H ? W : H;
+                int canvas = U.mode == DISPLAY_WINDOWED_BORDERLESS ? U.orb_size : U.res > 0 ? U.res : side;
+                if (canvas > 2160) canvas = 2160;
+                sphere_destroy(sr);
+                sr = sphere_create(canvas);
+                canvas = sphere_size(sr);
+                surface_alloc(&sphere, canvas, canvas);
+            }
             if (U.mode == DISPLAY_WINDOWED_BORDERLESS) {
                 surface_free(&back);
             } else {
-                surface_alloc(&back, mw, mh);
+                surface_alloc(&back, W, H);
                 if (big) DeleteObject(big), DeleteObject(small), DeleteObject(status_font);
-                big = make_font(mh / 34, 350);
-                small = make_font(mh / 46, FW_NORMAL);
-                status_font = make_font(mh / 54, FW_NORMAL);
+                big = make_font(H / 34 > 15 ? H / 34 : 15, 350);
+                small = make_font(H / 46 > 12 ? H / 46 : 12, FW_NORMAL);
+                status_font = make_font(H / 54 > 11 ? H / 54 : 11, FW_NORMAL);
             }
         }
 
@@ -419,14 +616,14 @@ static DWORD WINAPI render_main(LPVOID arg)
             int W = back.w, H = back.h;
             int band = (int)(H * 0.68);
             memset(back.px + (size_t)band * W, 0, sizeof(uint32_t) * (size_t)(H - band) * W);
-            int side = H;
-            int x0 = (W - side) / 2;
+            int side = H < W ? H : W;
+            int x0 = (W - side) / 2, y0 = (H - side) / 2;
             if (sphere.w == side) {
-                BitBlt(back.dc, x0, 0, side, side, sphere.dc, 0, 0, SRCCOPY);
+                BitBlt(back.dc, x0, y0, side, side, sphere.dc, 0, 0, SRCCOPY);
             } else {
                 SetStretchBltMode(back.dc, HALFTONE);
                 SetBrushOrgEx(back.dc, 0, 0, NULL);
-                StretchBlt(back.dc, x0, 0, side, side, sphere.dc, 0, 0, sphere.w, sphere.h, SRCCOPY);
+                StretchBlt(back.dc, x0, y0, side, side, sphere.dc, 0, 0, sphere.w, sphere.h, SRCCOPY);
             }
             draw_overlay(&back, big, small, status_font);
             HDC dc = GetDC(hud);
@@ -468,21 +665,27 @@ static LRESULT CALLBACK msg_proc(HWND h, UINT m, WPARAM w, LPARAM l)
         case WM_LBUTTONUP:
         case NIN_SELECT:
         case NIN_KEYSELECT:
-            show_hud(!InterlockedCompareExchange(&U.visible, 1, 1));
+            toggle_hud();
             break;
         case WM_CONTEXTMENU:
         case WM_RBUTTONUP:
-            tray_show_menu(h, InterlockedCompareExchange(&U.visible, 1, 1), config_mic_muted());
+            tray_show_menu(h, hud_shown(), config_mic_muted(), U.mode);
             break;
         }
         return 0;
     case WM_COMMAND:
+        if (LOWORD(w) >= IDM_MODE_BASE && LOWORD(w) < IDM_MODE_BASE + DISPLAY_MODE_COUNT) {
+            ui_set_display_mode(LOWORD(w) - IDM_MODE_BASE);
+            /* Elegido desde la bandeja: que se vea cómo quedó. */
+            if (voice_running()) show_hud(true, HUD_SHOW_QUIET);
+            return 0;
+        }
         switch (LOWORD(w)) {
         case IDM_TALK:
             voice_trigger();
             break;
         case IDM_TOGGLE_HUD:
-            show_hud(!InterlockedCompareExchange(&U.visible, 1, 1));
+            toggle_hud();
             break;
         case IDM_MUTE: {
             bool muted = !config_mic_muted();
@@ -490,10 +693,14 @@ static LRESULT CALLBACK msg_proc(HWND h, UINT m, WPARAM w, LPARAM l)
             tray_set_tooltip(muted ? L"Jarvis — micrófono silenciado" : L"Jarvis — escuchando \"Hey Jarvis\"");
             tray_notify(L"Jarvis", muted ? L"Micrófono silenciado. Jarvis no escucha hasta que lo actives."
                                          : L"Micrófono activado. Di \"Hey Jarvis\" cuando quieras.");
+            settings_sync();
             break;
         }
         case IDM_SETTINGS:
             settings_open(U.inst, false, U.on_saved);
+            break;
+        case IDM_HOME:
+            home_open(U.inst, false, U.on_saved);
             break;
         case IDM_OPEN_DATA:
             open_data_folder();
@@ -518,21 +725,33 @@ static LRESULT CALLBACK msg_proc(HWND h, UINT m, WPARAM w, LPARAM l)
         if (U.mode == DISPLAY_FULLSCREEN && InterlockedCompareExchange(&U.visible, 1, 1) && U.hud) {
             InterlockedExchange(&U.yielded, 1);
             ShowWindow(U.hud, SW_HIDE);
+        } else if (windowed(U.mode) && U.hud && IsWindowVisible(U.hud)) {
+            /* Si tenía el foco se lo pasa a tu ventana; y si estaba encima de
+               ella (por ejemplo en F11), se pone detrás para que veas lo que
+               Jarvis escribe o abre. */
+            if (GetForegroundWindow() == U.hud) activate_next_window();
+            HWND fg = GetForegroundWindow();
+            if (fg && fg != U.hud) SetWindowPos(U.hud, fg, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
         }
         return 0;
     case WM_APP_SHOWHUD:
+        /* 2: empezó a escucharte; si no, un HudShow. */
         if (w == 2) {
-            if (InterlockedExchange(&U.yielded, 0) && U.hud && InterlockedCompareExchange(&U.visible, 1, 1))
-                ShowWindow(U.hud, SW_SHOWNOACTIVATE);
-            if (U.hud && U.mode == DISPLAY_FULLSCREEN_BORDERLESS && InterlockedCompareExchange(&U.visible, 1, 1))
+            bool vis = InterlockedCompareExchange(&U.visible, 1, 1);
+            if (InterlockedExchange(&U.yielded, 0) && U.hud && vis) ShowWindow(U.hud, SW_SHOWNOACTIVATE);
+            bool raise = U.mode == DISPLAY_FULLSCREEN_BORDERLESS || (U.mode == DISPLAY_WINDOWED && !IsIconic(U.hud));
+            if (U.hud && vis && raise)
                 SetWindowPos(U.hud, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
             SetEvent(U.wake);
         } else {
-            show_hud(true);
+            show_hud(true, (HudShow)w);
         }
         return 0;
     case WM_APP_SETTINGS:
         settings_open(U.inst, false, U.on_saved);
+        return 0;
+    case WM_APP_HOME:
+        home_open(U.inst, false, U.on_saved);
         return 0;
     case WM_APP_CONFIG:
         rebuild_hud();
@@ -557,7 +776,7 @@ static LRESULT CALLBACK msg_proc(HWND h, UINT m, WPARAM w, LPARAM l)
     return DefWindowProcW(h, m, w, l);
 }
 
-bool ui_init(HINSTANCE inst, SettingsSavedFn on_saved)
+bool ui_init(HINSTANCE inst, SettingsSavedFn on_saved, bool show)
 {
     U.inst = inst;
     U.on_saved = on_saved;
@@ -587,7 +806,7 @@ bool ui_init(HINSTANCE inst, SettingsSavedFn on_saved)
     if (!RegisterHotKey(U.msg, HOTKEY_TALK, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'J'))
         log_msg("No pude registrar el atajo Ctrl+Alt+J (otra app lo usa).");
 
-    InterlockedExchange(&U.visible, 1);
+    InterlockedExchange(&U.visible, show ? 1 : 0);
     load_display_config();
     create_hud();
     InterlockedExchange(&U.running, 1);

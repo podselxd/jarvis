@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "app.h"
+#include "audio.h"
 #include "autostart.h"
 #include "config.h"
 #include "http.h"
@@ -36,11 +37,14 @@ static void enable_dark_menus(void)
     if (flush) flush();
 }
 
+/* Se llama al guardar la primera configuración, al darle a Iniciar y al
+   arrancar directo. */
 static void on_settings_saved(bool first_run)
 {
     if (!g_voice_started) {
         g_voice_started = voice_start();
         update_start_background();
+        ui_show_hud(HUD_SHOW_QUIET);
     }
     if (first_run) app_notify("Jarvis", "Listo. Di \"Hey Jarvis\" (o Ctrl+Alt+J) cuando quieras hablarle.");
 }
@@ -73,11 +77,12 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmdline, int show)
     int argc = 0;
     wchar_t **argv = CommandLineToArgvW(GetCommandLineW(), &argc);
     const wchar_t *simulate = NULL;
-    bool updated = false;
+    bool updated = false, from_autostart = false;
     for (int i = 1; i < argc; i++) {
         if (!wcscmp(argv[i], L"--wait-for-pid") && i + 1 < argc) wait_for_pid(argv[++i]);
         else if (!wcscmp(argv[i], L"--simulate") && i + 1 < argc) simulate = argv[++i];
         else if (!wcscmp(argv[i], L"--updated")) updated = true;
+        else if (!wcscmp(argv[i], AUTOSTART_FLAG)) from_autostart = true;
     }
     if (simulate) AttachConsole(ATTACH_PARENT_PROCESS);
 
@@ -96,8 +101,9 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmdline, int show)
     if (!simulate) {
         mutex = CreateMutexW(NULL, TRUE, INSTANCE_MUTEX);
         if (GetLastError() == ERROR_ALREADY_EXISTS) {
+            /* Ya está abierto: abrirlo otra vez a mano muestra su ventana de Inicio. */
             HWND other = FindWindowW(JARVIS_MSG_CLASS, NULL);
-            if (other) PostMessageW(other, WM_APP_SHOWHUD, 1, 0);
+            if (other && !from_autostart) PostMessageW(other, WM_APP_HOME, 0, 0);
             return 0;
         }
     }
@@ -112,19 +118,24 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmdline, int show)
     if (simulate) return run_simulation(simulate);
 
     autostart_migrate_legacy();
+    autostart_refresh();
     enable_dark_menus();
-    if (!ui_init(inst, on_settings_saved)) {
+    AppConfig cfg = config_snapshot();
+    speaker_set_device(cfg.output_name);
+    bool has_key = *cfg.groq_api_key != 0;
+    SecureZeroMemory(cfg.groq_api_key, strlen(cfg.groq_api_key));
+    config_free(&cfg);
+
+    LaunchKind kind = launch_kind(has_key, from_autostart, updated);
+    if (!ui_init(inst, on_settings_saved, kind == LAUNCH_DIRECT)) {
         MessageBoxW(NULL, L"No pude abrir la interfaz de Jarvis.", L"Jarvis", MB_ICONERROR);
         return 1;
     }
-
-    char *key = config_api_key();
-    bool has_key = *key != 0;
-    SecureZeroMemory(key, strlen(key));
-    free(key);
-    if (has_key) {
+    if (kind == LAUNCH_DIRECT) {
         on_settings_saved(false);
         if (updated) app_notify("Jarvis", "Me actualicé a la versión " JARVIS_VERSION ".");
+    } else if (kind == LAUNCH_HOME) {
+        home_open(inst, true, on_settings_saved);
     } else {
         settings_open(inst, true, on_settings_saved);
     }

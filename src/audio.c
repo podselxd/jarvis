@@ -223,6 +223,50 @@ void free_string_list(char **list, int n)
     free(list);
 }
 
+int speaker_list_devices(char ***names_out)
+{
+    UINT n = waveOutGetNumDevs();
+    char **names = xcalloc(n + 1, sizeof(char *));
+    int count = 0;
+    for (UINT i = 0; i < n; i++) {
+        WAVEOUTCAPSW caps;
+        if (waveOutGetDevCapsW(i, &caps, sizeof caps) == MMSYSERR_NOERROR) names[count++] = wide_to_utf8(caps.szPname);
+    }
+    *names_out = names;
+    return count;
+}
+
+static char *g_out_name;
+static SRWLOCK g_out_lock = SRWLOCK_INIT;
+
+void speaker_set_device(const char *name)
+{
+    AcquireSRWLockExclusive(&g_out_lock);
+    free(g_out_name);
+    g_out_name = name && *name ? xstrdup(name) : NULL;
+    ReleaseSRWLockExclusive(&g_out_lock);
+}
+
+/* Se busca por nombre en cada reproducción: los números de dispositivo
+   cambian cuando conectas o desconectas unos audífonos. */
+static UINT out_device(void)
+{
+    UINT id = WAVE_MAPPER;
+    AcquireSRWLockShared(&g_out_lock);
+    if (g_out_name) {
+        UINT n = waveOutGetNumDevs();
+        for (UINT i = 0; i < n && id == WAVE_MAPPER; i++) {
+            WAVEOUTCAPSW caps;
+            if (waveOutGetDevCapsW(i, &caps, sizeof caps) != MMSYSERR_NOERROR) continue;
+            char *name = wide_to_utf8(caps.szPname);
+            if (!strcmp(name, g_out_name)) id = i;
+            free(name);
+        }
+    }
+    ReleaseSRWLockShared(&g_out_lock);
+    return id;
+}
+
 #define PLAY_BUFFERS 4
 #define PLAY_CHUNK_MS 40
 
@@ -232,7 +276,11 @@ bool speaker_play(const int16_t *pcm, size_t samples, int rate, float gain, Play
                         .wBitsPerSample = 16, .nBlockAlign = 2, .nAvgBytesPerSec = (DWORD)rate * 2};
     HANDLE ev = CreateEventW(NULL, FALSE, FALSE, NULL);
     HWAVEOUT hwo;
-    if (waveOutOpen(&hwo, WAVE_MAPPER, &fmt, (DWORD_PTR)ev, 0, CALLBACK_EVENT) != MMSYSERR_NOERROR) {
+    UINT dev = out_device();
+    MMRESULT rc = waveOutOpen(&hwo, dev, &fmt, (DWORD_PTR)ev, 0, CALLBACK_EVENT);
+    if (rc != MMSYSERR_NOERROR && dev != WAVE_MAPPER)
+        rc = waveOutOpen(&hwo, WAVE_MAPPER, &fmt, (DWORD_PTR)ev, 0, CALLBACK_EVENT);
+    if (rc != MMSYSERR_NOERROR) {
         CloseHandle(ev);
         log_msg("No pude abrir la salida de audio.");
         return false;

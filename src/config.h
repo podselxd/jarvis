@@ -11,7 +11,10 @@
 typedef enum {
     DISPLAY_FULLSCREEN = 0,
     DISPLAY_FULLSCREEN_BORDERLESS = 1,
-    DISPLAY_WINDOWED_BORDERLESS = 2,
+    DISPLAY_WINDOWED_BORDERLESS = 2, /* la esfera flotante */
+    DISPLAY_WINDOWED = 3,
+    DISPLAY_MINIMIZED = 4, /* como DISPLAY_WINDOWED, pero arranca minimizada */
+    DISPLAY_MODE_COUNT
 } DisplayMode;
 
 typedef struct {
@@ -21,12 +24,14 @@ typedef struct {
     char *mesh_secret;
     char *voice;
     char *mic_name;
+    char *output_name; /* salida de audio; "" = la predeterminada de Windows */
     int display_mode;
     int resolution; /* 0 = automática, si no el alto en píxeles (720, 1080, 1440, 2160) */
     int volume;     /* 0-100, volumen de la voz de Jarvis (no el del sistema) */
     int wake_sensitivity; /* 0-100 */
     int sphere_style;     /* 0 = halo de puntos, 1 = líneas */
     int orb_x, orb_y;     /* posición de la ventana flotante; -1 = centrada */
+    int win_x, win_y, win_w, win_h; /* modo Ventana; win_w <= 0 = tamaño y lugar por defecto */
     bool subtitles;
     bool autostart;
     bool mic_muted;
@@ -62,6 +67,9 @@ float config_wake_threshold(void);
 bool config_mic_muted(void);
 void config_set_mic_muted(bool muted);
 void config_set_orb_pos(int x, int y);
+void config_set_window_rect(int x, int y, int w, int h);
+void config_set_display_mode(int mode);
+void config_set_output(const char *name);
 
 const char *display_mode_key(int mode);
 

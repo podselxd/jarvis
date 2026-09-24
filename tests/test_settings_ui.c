@@ -72,14 +72,16 @@ int wmain(int argc, wchar_t **argv)
     pump(600);
     capture(h, argv[1], first ? L"ui_first" : L"ui_cuenta");
     if (!first) {
-        const wchar_t *names[] = {L"ui_pantalla", L"ui_audio", L"ui_general"};
+        /* Barra lateral: Inicio, Cuenta (ya capturada), Pantalla, Voz y audio, General. */
+        const wchar_t *names[] = {L"ui_inicio", NULL, L"ui_pantalla", L"ui_audio", L"ui_general"};
         UINT dpi = GetDpiForWindow(h);
-        for (int i = 1; i <= 3; i++) {
+        for (int i = 0; i < 5; i++) {
+            if (!names[i]) continue;
             int y = MulDiv(110 + i * 46 + 20, (int)dpi, 96);
             int x = MulDiv(60, (int)dpi, 96);
             SendMessageW(h, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(x, y));
             pump(400);
-            capture(h, argv[1], names[i - 1]);
+            capture(h, argv[1], names[i]);
         }
     }
     DestroyWindow(h);

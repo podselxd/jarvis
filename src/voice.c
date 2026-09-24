@@ -30,6 +30,11 @@
 #define MAX_COMMAND_FRAMES (20 * MIC_RATE / MIC_FRAME)
 #define LISTEN_TIMEOUT_FRAMES (5 * MIC_RATE / MIC_FRAME)
 #define PREROLL_FRAMES 4 /* 320 ms antes de que la voz supere el umbral: no se come el inicio */
+#define LOOKAHEAD_FRAMES 4 /* 320 ms después de "Hey Jarvis" para ver si sigues hablando */
+/* 400 ms hasta el cuadro donde se detectó el nombre: el detector avisa hasta
+   ~1/3 s después de que terminas de decir "Jarvis", y para entonces la orden
+   ya pudo empezar. Si se cuela el final del nombre, no pasa nada. */
+#define WAKE_HISTORY_FRAMES 5
 #define INTERRUPT_ENERGY_MULTIPLIER 4.5f
 #define INTERRUPT_FRAMES 2 /* voz fuerte sostenida, no un golpe o un movimiento suelto */
 #define REMINDER_CHECK_FRAMES (20 * MIC_RATE / MIC_FRAME)
@@ -58,6 +63,7 @@ static HANDLE g_thread;
 static HANDLE g_quit;
 static HANDLE g_trigger;
 static volatile LONG g_settings_dirty;
+static volatile LONG g_test_audio;
 static int g_silence = 300;
 static Conversation *g_conv;
 static Conversation *g_mesh_conv;
@@ -362,17 +368,20 @@ static void calibrate(void)
     log_msg("Umbral de silencio ajustado a tu ambiente: %d", g_silence);
 }
 
-static int16_t *record_command(size_t *out_n)
+/* seed: audio que ya se sabe que es el principio de la orden (lo que dijiste
+   de corrido después de "Hey Jarvis"); con él ya no se espera a que hables. */
+static int16_t *record_command(const int16_t *seed, int nseed, size_t *out_n)
 {
     size_t cap = (size_t)MAX_COMMAND_FRAMES * MIC_FRAME;
     int16_t *buf = xmalloc(sizeof(int16_t) * cap);
     int16_t pre[PREROLL_FRAMES][MIC_FRAME];
     int npre = 0, pre_start = 0;
-    size_t n = 0;
-    bool heard = false;
+    size_t n = (size_t)nseed * MIC_FRAME;
+    if (nseed) memcpy(buf, seed, sizeof(int16_t) * n);
+    bool heard = nseed > 0;
     int silence_run = 0, waited = 0;
     int16_t f[MIC_FRAME];
-    for (int i = 0; i < MAX_COMMAND_FRAMES; i++) {
+    for (int i = nseed; i < MAX_COMMAND_FRAMES; i++) {
         if (WaitForSingleObject(g_quit, 0) == WAIT_OBJECT_0 || !input_read(f, 2000)) break;
         float e = frame_energy(f, MIC_FRAME);
         float lvl = e / 3000.0f;
@@ -411,6 +420,7 @@ static int16_t *record_command(size_t *out_n)
 static bool handle_turn(const int16_t *audio, size_t n)
 {
     if (n < (size_t)(MIC_RATE * 3 / 10)) return true;
+    log_msg("Grabé %.1f s de audio.", (double)n / MIC_RATE);
     app_set_state(JV_THINKING);
     app_status("Escuchando lo que dijiste…");
     GroqError err = {0};
@@ -445,16 +455,41 @@ static bool handle_turn(const int16_t *audio, size_t n)
     return r.keep_going;
 }
 
-static void conversation(void)
+/* "Hey Jarvis abre Spotify" de corrido: si justo después del nombre sigues
+   hablando, no suena el tono ni se tira ese audio (es el principio de la
+   orden). Devuelve cuántos cuadros hay en seed (los últimos antes de la
+   detección más los que siguen), o 0 si hiciste pausa. */
+static int continued_speech(const int16_t *history, int nhist, int16_t seed[][MIC_FRAME])
+{
+    memcpy(seed[0], history, sizeof(int16_t) * MIC_FRAME * (size_t)nhist);
+    int n = nhist, loud = 0;
+    for (int i = 0; i < LOOKAHEAD_FRAMES; i++) {
+        if (!input_read(seed[n], 1000)) break;
+        /* El primero no cuenta: puede ser la cola de "Jarvis" o el eco del cuarto. */
+        if (i > 0 && frame_energy(seed[n], MIC_FRAME) > (float)g_silence) loud++;
+        n++;
+    }
+    return loud >= 2 ? n : 0;
+}
+
+/* history: los últimos cuadros hasta el que activó "Hey Jarvis" (nhist = 0 si
+   fue con el atajo). */
+static void conversation(const int16_t *history, int nhist)
 {
     app_set_state(JV_LISTENING);
-    if (!g_sim_mode) sound_activation();
-    input_flush();
+    int16_t seed[WAKE_HISTORY_FRAMES + LOOKAHEAD_FRAMES][MIC_FRAME];
+    int nseed = nhist ? continued_speech(history, nhist, seed) : 0;
+    if (nseed) {
+        log_msg("Seguiste hablando después del nombre: tomo la orden sin tono.");
+    } else {
+        if (!g_sim_mode) sound_activation();
+        input_flush();
+    }
     conv_new_session(g_conv);
-    for (;;) {
+    for (bool first = true;; first = false) {
         app_set_state(JV_LISTENING);
         size_t n;
-        int16_t *audio = record_command(&n);
+        int16_t *audio = first && nseed ? record_command(seed[0], nseed, &n) : record_command(NULL, 0, &n);
         bool cont = n >= (size_t)(MIC_RATE * 3 / 10) && handle_turn(audio, n);
         free(audio);
         if (!cont || WaitForSingleObject(g_quit, 0) == WAIT_OBJECT_0) break;
@@ -545,10 +580,20 @@ static DWORD WINAPI voice_main(LPVOID arg)
     log_msg("Listo. Di \"Hey Jarvis\" (o Ctrl+Alt+J) para hablarle.");
 
     int16_t f[MIC_FRAME];
+    int16_t hist[WAKE_HISTORY_FRAMES][MIC_FRAME];
+    int nhist = 0;
     int frame_count = 0;
     uint64_t last_data = GetTickCount64();
     while (WaitForSingleObject(g_quit, 0) != WAIT_OBJECT_0) {
         if (InterlockedExchange(&g_settings_dirty, 0)) apply_settings();
+        if (InterlockedExchange(&g_test_audio, 0)) {
+            sound_chime();
+            speak("Así me escuchas por esta salida de audio.", false);
+            app_set_state(JV_IDLE);
+            if (ww) ww_reset(ww);
+            nhist = 0;
+            continue;
+        }
         bool triggered = WaitForSingleObject(g_trigger, 0) == WAIT_OBJECT_0;
         bool got = input_read(f, 500);
         if (!got) {
@@ -560,6 +605,11 @@ static DWORD WINAPI voice_main(LPVOID arg)
             if (!triggered) continue;
         } else {
             last_data = GetTickCount64();
+            if (nhist == WAKE_HISTORY_FRAMES) {
+                memmove(hist[0], hist[1], sizeof hist[0] * (WAKE_HISTORY_FRAMES - 1));
+                nhist--;
+            }
+            memcpy(hist[nhist++], f, sizeof f);
         }
         if (++frame_count % REMINDER_CHECK_FRAMES == 0) announce_due_reminders();
         if (config_mic_muted()) {
@@ -570,9 +620,10 @@ static DWORD WINAPI voice_main(LPVOID arg)
         if (score > config_wake_threshold() || triggered) {
             log_msg(triggered ? "Activado con el atajo." : "Wake word detectada (%.2f).", score);
             if (ww) ww_reset(ww);
-            conversation();
+            conversation(hist[0], triggered ? 0 : nhist);
             if (ww) ww_reset(ww);
             input_flush();
+            nhist = 0;
         }
     }
 
@@ -620,4 +671,14 @@ void voice_trigger(void)
 void voice_settings_changed(void)
 {
     InterlockedExchange(&g_settings_dirty, 1);
+}
+
+bool voice_running(void)
+{
+    return g_thread != NULL;
+}
+
+void voice_test_audio(void)
+{
+    InterlockedExchange(&g_test_audio, 1);
 }
