@@ -19,7 +19,7 @@ El celular no ejecuta nada por su cuenta:
 
 ## Instalar
 
-1. En GitHub, en **Releases**, abre la versión más nueva y baja **`Sokari.apk`**. Va junto a `Sokari.exe`, con la misma versión.
+1. En GitHub, en **Releases**, abre la versión más nueva y baja **`Sokari.apk`**. Va junto a `Sokari.exe` y lleva su misma versión (Sokari 2.3.0 → app 2.3.0).
 2. Ábrelo en el celular. Android te va a pedir permiso para instalar apps de esa fuente.
 3. Abre **Sokari**, toca *Configurar* y pon:
    - la IP de tu PC (o su nombre `.ts.net`);
