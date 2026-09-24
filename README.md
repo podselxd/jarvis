@@ -158,6 +158,10 @@ Si editas `tools.json` o `system_prompt.txt`, el siguiente `mingw32-make` los me
 | `ui_settings.c`, `tray.c` | Ventana de Inicio y de configuración, e ícono de la bandeja |
 | `memory.c`, `config.c`, `mesh.c`, `update.c` | Memoria, configuración, otras PCs y actualizaciones |
 
+## Desde el celular
+
+La app de Android de `movil/` te deja hablarle a tu Sokari de la PC desde el celular, en casa o fuera, por Tailscale. Instalación y límites en [`movil/README.md`](movil/README.md).
+
 ## Entrenar "Hey Sokari"
 
 El clasificador de "Hey Sokari" se entrena una vez con voces sintéticas (muchas voces distintas, para que responda a cualquiera) y queda como `res/hey_sokari.jww`. Los pasos y el cuaderno de Google Colab están en `herramientas/`.
