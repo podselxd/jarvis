@@ -64,12 +64,14 @@ jobs:
         run: |
           llave="$RUNNER_TEMP/sokari.p12"
           rm -f "$llave"
-          if [ -n "$LLAVE_B64" ] && [ -n "$LLAVE_CLAVE" ]; then
+          # Al pegar la clave en GitHub es fácil que se cuele un Enter o un espacio: se quitan.
+          clave=$(printf '%s' "$LLAVE_CLAVE" | tr -d '\r\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+          if [ -n "$clave" ]; then echo "::add-mask::$clave"; fi
+          if [ -n "$LLAVE_B64" ] && [ -n "$clave" ]; then
             if ! printf '%s' "$LLAVE_B64" | tr -d ' \r\n\t' | base64 -d > "$llave" 2>/dev/null; then
               echo "::error::El secreto ANDROID_LLAVE no se pudo leer: ¿se pegó completo? Es una sola línea larga."
               exit 1
             fi
-            clave="$LLAVE_CLAVE"
             origen="Se firma con tu llave."
           elif [ -n "$VERSION" ]; then
             echo "::error::Faltan los secretos ANDROID_LLAVE y ANDROID_LLAVE_CLAVE. Sin ellos, este APK no se podría instalar encima del anterior. Ver movil/README.md."
