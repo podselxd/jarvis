@@ -169,15 +169,22 @@ static Value atom(Parser *ps)
     } else if (isdigit((unsigned char)*ps->p) || (*ps->p == '.' && isdigit((unsigned char)ps->p[1]))) {
         char buf[64];
         size_t n = 0;
-        while ((isdigit((unsigned char)*ps->p) || *ps->p == '.' || *ps->p == '_') && n < sizeof buf - 1) {
+        /* Un número que no cabe en buf es un error, no se corta en silencio:
+           antes, 63 dígitos seguidos de "e-5" escribían fuera de buf. */
+        while (isdigit((unsigned char)*ps->p) || *ps->p == '.' || *ps->p == '_') {
+            if (n >= sizeof buf - 1) fail(ps, "ese número es demasiado largo");
             if (*ps->p != '_') buf[n++] = *ps->p;
             ps->p++;
         }
         if ((*ps->p == 'e' || *ps->p == 'E') &&
             (isdigit((unsigned char)ps->p[1]) || ((ps->p[1] == '-' || ps->p[1] == '+') && isdigit((unsigned char)ps->p[2])))) {
+            if (n >= sizeof buf - 3) fail(ps, "ese número es demasiado largo");
             buf[n++] = *ps->p++;
             if (*ps->p == '-' || *ps->p == '+') buf[n++] = *ps->p++;
-            while (isdigit((unsigned char)*ps->p) && n < sizeof buf - 1) buf[n++] = *ps->p++;
+            while (isdigit((unsigned char)*ps->p)) {
+                if (n >= sizeof buf - 1) fail(ps, "ese número es demasiado largo");
+                buf[n++] = *ps->p++;
+            }
         }
         buf[n] = 0;
         char *end;
@@ -218,20 +225,27 @@ static Value power(Parser *ps)
 {
     Value base = atom(ps);
     if (accept(ps, "**") || accept(ps, "^")) {
+        /* 2**2**2... se encadena por recursión: cuenta para el mismo tope que
+           los paréntesis, si no una cadena de unos cientos agota la pila. */
+        if (++ps->depth > MAX_DEPTH) fail(ps, "la expresión está demasiado anidada");
         Value e = unary(ps);
+        ps->depth--;
         return number(safe_pow(ps, num_of(ps, &base), num_of(ps, &e)));
     }
     return base;
 }
 
+/* Los signos seguidos ("--5") se cuentan en un bucle y no por recursión:
+   unos cientos de "-" agotaban la pila del hilo y cerraban Jarvis. */
 static Value unary(Parser *ps)
 {
-    if (accept(ps, "-")) {
-        Value v = unary(ps);
-        return number(-num_of(ps, &v));
+    bool neg = false;
+    for (;;) {
+        if (accept(ps, "-")) neg = !neg;
+        else if (!accept(ps, "+")) break;
     }
-    if (accept(ps, "+")) return unary(ps);
-    return power(ps);
+    Value v = power(ps);
+    return neg ? number(-num_of(ps, &v)) : v;
 }
 
 static Value term(Parser *ps)
