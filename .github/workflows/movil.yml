@@ -1,5 +1,10 @@
 # Prueba y compila la app de Android (movil/) cuando cambia. El APK queda como
-# artefacto de la corrida (Sokari-apk) para instalarlo en el celular.
+# artefacto de la corrida (Sokari-apk). Al subir un tag, release.yml la llama
+# con la versión y adjunta Sokari.apk al release junto a Sokari.exe.
+#
+# Firma: con tu llave (secretos ANDROID_LLAVE y ANDROID_LLAVE_CLAVE), así cada
+# versión se instala encima de la anterior. Un release sin esos secretos falla.
+# Una rama sin ellos se firma con una llave temporal, solo para probar la firma.
 name: App del celular
 
 on:
@@ -7,6 +12,18 @@ on:
     branches: ['**']
     paths: ['movil/**', '.github/workflows/movil.yml']
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      version:
+        description: 'Tag del release (vX.Y.Z): el APK lleva esa versión y exige tu llave'
+        type: string
+        required: false
+        default: ''
+    secrets:
+      ANDROID_LLAVE:
+        required: false
+      ANDROID_LLAVE_CLAVE:
+        required: false
 
 jobs:
   android:
@@ -15,6 +32,10 @@ jobs:
     defaults:
       run:
         working-directory: movil
+    env:
+      LLAVE_B64: ${{ secrets.ANDROID_LLAVE }}
+      LLAVE_CLAVE: ${{ secrets.ANDROID_LLAVE_CLAVE }}
+      VERSION: ${{ inputs.version }}
     steps:
       - uses: actions/checkout@v4
 
@@ -38,11 +59,74 @@ jobs:
       - name: Pruebas
         run: flutter test
 
+      - name: Llave de firma
+        run: |
+          llave="$RUNNER_TEMP/sokari.p12"
+          rm -f "$llave"
+          if [ -n "$LLAVE_B64" ] && [ -n "$LLAVE_CLAVE" ]; then
+            if ! printf '%s' "$LLAVE_B64" | tr -d ' \r\n\t' | base64 -d > "$llave" 2>/dev/null; then
+              echo "::error::El secreto ANDROID_LLAVE no se pudo leer: ¿se pegó completo? Es una sola línea larga."
+              exit 1
+            fi
+            clave="$LLAVE_CLAVE"
+            origen="Se firma con tu llave."
+          elif [ -n "$VERSION" ]; then
+            echo "::error::Faltan los secretos ANDROID_LLAVE y ANDROID_LLAVE_CLAVE. Sin ellos, este APK no se podría instalar encima del anterior. Ver movil/README.md."
+            exit 1
+          else
+            clave=$(openssl rand -hex 16)
+            echo "::add-mask::$clave"
+            SOKARI_LLAVE_CLAVE="$clave" keytool -genkeypair -storetype PKCS12 -keystore "$llave" -alias sokari \
+              -keyalg RSA -keysize 2048 -validity 1 -dname "CN=Llave temporal de prueba" \
+              -storepass:env SOKARI_LLAVE_CLAVE -keypass:env SOKARI_LLAVE_CLAVE >/dev/null 2>&1
+            origen="::notice::Sin los secretos de la llave: este APK va firmado con una llave temporal, solo para probar la firma."
+          fi
+          if ! SOKARI_LLAVE_CLAVE="$clave" keytool -list -v -keystore "$llave" -storepass:env SOKARI_LLAVE_CLAVE \
+              > "$RUNNER_TEMP/llave.txt" 2>&1 || ! grep -q "Alias name: sokari" "$RUNNER_TEMP/llave.txt"; then
+            echo "::error::No pude abrir la llave con su clave (o no trae el alias sokari). Revisa los secretos ANDROID_LLAVE y ANDROID_LLAVE_CLAVE."
+            exit 1
+          fi
+          echo "$origen"
+          grep -m1 "SHA256:" "$RUNNER_TEMP/llave.txt" | sed 's/.*SHA256: *//; s/://g' | tr 'A-F' 'a-f' > "$RUNNER_TEMP/huella"
+          echo "Huella SHA-256 del certificado: $(cat "$RUNNER_TEMP/huella")"
+          echo "SOKARI_LLAVE_ARCHIVO=$llave" >> "$GITHUB_ENV"
+          echo "SOKARI_LLAVE_CLAVE=$clave" >> "$GITHUB_ENV"
+
+      - name: Versión
+        run: |
+          if [ -z "$VERSION" ]; then
+            echo "Versión del pubspec (no es un release)."
+            exit 0
+          fi
+          v="${VERSION#v}"
+          echo "$v" | grep -Eq '^[0-9]+\.[0-9]{1,2}\.[0-9]{1,2}$' || { echo "::error::El tag $VERSION no es vX.Y.Z"; exit 1; }
+          mayor=${v%%.*}; resto=${v#*.}; menor=${resto%%.*}; parche=${resto#*.}
+          codigo=$((mayor * 10000 + menor * 100 + parche))
+          echo "APK $v (código $codigo)"
+          echo "APK_VERSION=$v" >> "$GITHUB_ENV"
+          echo "APK_CODIGO=$codigo" >> "$GITHUB_ENV"
+
       - name: Compilar el APK
-        run: flutter build apk --release
+        run: |
+          args=(--release)
+          if [ -n "${APK_VERSION:-}" ]; then args+=(--build-name="$APK_VERSION" --build-number="$APK_CODIGO"); fi
+          flutter build apk "${args[@]}"
+
+      - name: Revisar la firma
+        run: |
+          apk=build/app/outputs/flutter-apk/app-release.apk
+          bt=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
+          "$bt/apksigner" verify --print-certs "$apk" | tee "$RUNNER_TEMP/firma.txt"
+          if ! grep -qi "certificate SHA-256 digest: $(cat "$RUNNER_TEMP/huella")" "$RUNNER_TEMP/firma.txt"; then
+            echo "::error::El APK no quedó firmado con la llave esperada."
+            exit 1
+          fi
+          "$bt/aapt2" dump badging "$apk" 2>/dev/null | head -1 || true
+          mkdir -p salida
+          cp "$apk" salida/Sokari.apk
 
       - uses: actions/upload-artifact@v4
         with:
           name: Sokari-apk
-          path: movil/build/app/outputs/flutter-apk/app-release.apk
+          path: movil/salida/Sokari.apk
           if-no-files-found: error

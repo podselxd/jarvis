@@ -19,14 +19,18 @@ El celular no ejecuta nada por su cuenta:
 
 ## Instalar
 
-1. En GitHub, pestaña **Actions** → corrida más reciente de "App del celular" → baja el artefacto **Sokari-apk**.
-2. Descomprímelo y abre `app-release.apk` en el celular. Android te va a pedir permiso para instalar apps de esa fuente.
+1. En GitHub, en **Releases**, abre la versión más nueva y baja **`Sokari.apk`**. Va junto a `Sokari.exe`, con la misma versión.
+2. Ábrelo en el celular. Android te va a pedir permiso para instalar apps de esa fuente.
 3. Abre **Sokari**, toca *Configurar* y pon:
    - la IP de tu PC (o su nombre `.ts.net`);
    - el secreto de malla.
 4. Dale **Probar conexión** y luego **Guardar**.
 
 La prueba de conexión no gasta tu cupo de Groq: solo revisa que tu PC conteste y que el secreto coincida.
+
+**Para actualizar**, instala el `Sokari.apk` nuevo encima. Todas las versiones van firmadas con la misma llave, así que conserva la IP y el secreto.
+
+**Una sola vez:** si antes instalaste un APK de prueba (de la pestaña *Actions*), desinstálalo antes de instalar el del release. Los de prueba van firmados con otra llave y Android no deja instalar uno encima del otro.
 
 ## Uso
 
@@ -51,6 +55,25 @@ La prueba de conexión no gasta tu cupo de Groq: solo revisa que tu PC conteste 
 - **Dónde se conecta:** solo a direcciones de Tailscale (100.64.0.0/10 o nombres `.ts.net`, y solo si resuelven a una IP de Tailscale). Nunca manda el secreto a otro lado.
 - **Dónde guarda tus datos:** la dirección y el secreto se guardan cifrados con la llave del sistema (Android Keystore).
 - **Sin "Hey Sokari" en el celular.** Oír todo el tiempo gasta batería, y Android obliga a una notificación fija.
+
+## La llave de firma (una sola vez, para publicar)
+
+Para que cada versión se instale encima de la anterior, el APK del release se firma siempre con la misma llave. Vive en dos secretos del repo:
+- `ANDROID_LLAVE`: la llave en base64;
+- `ANDROID_LLAVE_CLAVE`: su contraseña.
+
+Se agregan en *Settings → Secrets and variables → Actions → New repository secret*.
+
+- **Si faltan**, el release falla con un mensaje claro, en vez de publicar un APK que obligue a desinstalar. En las ramas, el CI prueba la firma con una llave temporal.
+- **Si pierdes la llave**, crea una nueva y cambia los dos secretos. La siguiente versión habrá que instalarla desinstalando la anterior una vez.
+
+Para crear una:
+
+```
+keytool -genkeypair -storetype PKCS12 -keystore sokari.p12 -alias sokari -keyalg RSA -keysize 2048 -validity 10950 -dname "CN=Sokari"
+```
+
+`keytool` viene con Java y con Android Studio. Luego, en PowerShell, `[Convert]::ToBase64String([IO.File]::ReadAllBytes("sokari.p12"))` da el valor de `ANDROID_LLAVE`.
 
 ## Para desarrollar
 

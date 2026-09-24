@@ -128,7 +128,7 @@ En cada push, GitHub Actions compila en un Windows real (una advertencia del com
 
 1. Sube la versión en `src/config.h` (`SOKARI_VERSION` y `SOKARI_VERSION_W`), en `res/sokari.rc` (las cuatro) y en `res/sokari.manifest`. `sh tests/check_version.sh` revisa que coincidan.
 2. Con eso ya en `master`: `git tag v2.2.0 && git push origin v2.2.0`.
-3. Actions compila, prueba, revisa que el tag coincida con el código y deja un **borrador** de release con `Sokari.exe`.
+3. Actions compila, prueba, revisa que el tag coincida con el código y deja un **borrador** de release con `Sokari.exe` y `Sokari.apk` (la app del celular, con la misma versión). El APK necesita los secretos de su llave de firma (ver [`movil/README.md`](movil/README.md)); sin ellos, el release falla.
 4. Revisa el borrador y publícalo. Hasta que lo publiques, nadie se actualiza.
 
 No crees el release a mano desde GitHub: te saltas las pruebas, y si el tag no coincide con la versión del código, el exe se vuelve a descargar cada 6 horas.

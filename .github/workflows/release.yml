@@ -1,7 +1,8 @@
-# Al subir un tag vX.Y.Z: compila y prueba en Windows, revisa que el tag
-# coincida con la versión del código y deja el release como BORRADOR con
-# Sokari.exe adjunto. Nadie se actualiza hasta que lo publiques a mano en
-# GitHub (el actualizador solo ve releases publicados).
+# Al subir un tag vX.Y.Z: compila y prueba en Windows y la app de Android,
+# revisa que el tag coincida con la versión del código y deja el release como
+# BORRADOR con Sokari.exe y Sokari.apk adjuntos. Nadie se actualiza hasta que
+# lo publiques a mano en GitHub (el actualizador solo ve releases publicados y
+# solo baja Sokari.exe).
 name: Borrador de release
 
 on:
@@ -12,8 +13,14 @@ jobs:
   compilar:
     uses: ./.github/workflows/compilar.yml
 
+  movil:
+    uses: ./.github/workflows/movil.yml
+    with:
+      version: ${{ github.ref_name }}
+    secrets: inherit
+
   borrador:
-    needs: compilar
+    needs: [compilar, movil]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -28,10 +35,15 @@ jobs:
           name: Sokari-exe
           path: dist
 
+      - uses: actions/download-artifact@v4
+        with:
+          name: Sokari-apk
+          path: dist
+
       - name: Crear el borrador
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          sha256sum dist/Sokari.exe
-          gh release create "$GITHUB_REF_NAME" dist/Sokari.exe --draft \
+          sha256sum dist/Sokari.exe dist/Sokari.apk
+          gh release create "$GITHUB_REF_NAME" dist/Sokari.exe dist/Sokari.apk --draft \
             --title "Sokari $GITHUB_REF_NAME" --generate-notes --verify-tag

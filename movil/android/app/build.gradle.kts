@@ -4,6 +4,13 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+// La llave de firma llega del CI (secretos ANDROID_LLAVE y ANDROID_LLAVE_CLAVE,
+// ver .github/workflows/movil.yml). Con ella cada versión se instala encima de
+// la anterior. Sin ella (en tu PC, por ejemplo) se firma con la de depuración.
+val llaveArchivo: String? = System.getenv("SOKARI_LLAVE_ARCHIVO")
+val llaveClave: String? = System.getenv("SOKARI_LLAVE_CLAVE")
+val conLlave = !llaveArchivo.isNullOrEmpty() && !llaveClave.isNullOrEmpty()
+
 android {
     namespace = "com.podsel.sokari_remoto"
     compileSdk = flutter.compileSdkVersion
@@ -15,25 +22,29 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "com.podsel.sokari_remoto"
-        // You can update the following values to match your application needs.
-        // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
-        // Uses the version code from pubspec.yaml. When using split APKs, 1000 * ABI_VERSION
-        // is added automatically by Flutter. (https://developer.android.com/studio/build/configure-apk-splits#configure-APK-versions)
-        // You can force using the value of versionCode by specifying the `-P force-version-code-ignoring-abi=true`
-        // flag during build.
+        // Del pubspec, o de --build-name/--build-number (el release usa la versión de Sokari).
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        if (conLlave) {
+            create("sokari") {
+                storeFile = file(llaveArchivo!!)
+                storeType = "pkcs12"
+                storePassword = llaveClave
+                keyAlias = "sokari"
+                keyPassword = llaveClave
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName(if (conLlave) "sokari" else "debug")
         }
     }
 }
