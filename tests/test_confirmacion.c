@@ -61,7 +61,7 @@ cJSON *groq_chat(const cJSON *messages, const cJSON *tools, GroqError *err)
         char *name = p + 5, *sp = strchr(name, ' ');
         *sp = 0;
         cJSON *call = cJSON_CreateObject();
-        char id[16];
+        char id[24]; /* "call_" + un int de hasta 11 caracteres + NUL */
         snprintf(id, sizeof id, "call_%d", ++g_call_id);
         cJSON_AddStringToObject(call, "id", id);
         cJSON_AddStringToObject(call, "type", "function");
