@@ -504,7 +504,7 @@
     "type": "function",
     "function": {
       "name": "registrar_dispositivo",
-      "description": "Registra otro dispositivo tuyo con Jarvis (dirección de Tailscale) bajo un nombre.",
+      "description": "Registra otro dispositivo tuyo con Jarvis bajo un nombre. host: su dirección de Tailscale (IP 100.x.y.z o nombre que termina en .ts.net); no acepta otras.",
       "parameters": {
         "type": "object",
         "properties": {

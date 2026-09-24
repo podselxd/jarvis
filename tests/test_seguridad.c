@@ -10,6 +10,7 @@
 #include <string.h>
 
 #include "config.h"
+#include "mesh.h"
 #include "third_party/cJSON.h"
 #include "tools.h"
 #include "util.h"
@@ -156,12 +157,42 @@ static void test_open_app(void)
           "un nombre suelto que no es alias (mshta) no se ejecuta del PATH");
 }
 
+static void test_malla(void)
+{
+    printf("-- malla (Tailscale) --\n");
+    const char *si[] = {"100.64.0.1", "100.127.255.255", "100.101.7.8", "laptop.tail1234.ts.net", "PC.TAIL9.TS.NET"};
+    const char *no[] = {"100.128.0.1", "100.63.255.255", "192.168.1.5", "8.8.8.8", "256.64.0.1", "evil.com",
+                        "evil.com.ts.net.evil.com", ".ts.net", "a..ts.net", "100.64.0.1.evil.com", "x@100.64.0.1",
+                        "100.64.0.1:80", "localhost", ""};
+    bool ok = true;
+    for (size_t i = 0; i < sizeof si / sizeof *si; i++)
+        if (!mesh_host_allowed(si[i])) ok = false, printf("      debió aceptar %s\n", si[i]);
+    check(ok, "acepta IPs 100.64/10 y nombres *.ts.net");
+    ok = true;
+    for (size_t i = 0; i < sizeof no / sizeof *no; i++)
+        if (mesh_host_allowed(no[i])) ok = false, printf("      debió negar %s\n", no[i]);
+    check(ok, "niega todo lo demás (IPs públicas o de casa, dominios, trucos con puntos, @ y puertos)");
+    check(tool_says("Solo registro direcciones de Tailscale", "registrar_dispositivo", "nombre", "atacante", "host",
+                    "evil.com"),
+          "registrar_dispositivo niega evil.com");
+    /* Un dispositivo registrado antes de este cambio con una dirección cualquiera
+       tampoco recibe el secreto. */
+    wchar_t *df = path_join(g_paths.local_dir, L"dispositivos.json");
+    const char viejo[] = "{\"vieja\": \"evil.com\"}";
+    write_file_atomic(df, viejo, sizeof viejo - 1);
+    check(tool_says("no tiene una dirección de Tailscale", "gestionar_dispositivo", "nombre", "vieja", "comando", "hola"),
+          "gestionar_dispositivo no le manda el secreto a un registro viejo fuera de Tailscale");
+    DeleteFileW(df);
+    free(df);
+}
+
 int wmain(void)
 {
     CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
     paths_init();
     test_archivos();
     test_open_app();
+    test_malla();
     printf("%d/%d pruebas %s\n", g_total - g_fail, g_total, g_fail ? "— HAY FALLAS" : "ok");
     return g_fail ? 1 : 0;
 }

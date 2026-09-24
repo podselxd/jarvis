@@ -36,6 +36,11 @@ bool tailscale_installed(void)
     return ok;
 }
 
+static bool is_tailscale_v4(const unsigned char b[4])
+{
+    return b[0] == 100 && b[1] >= 64 && b[1] <= 127;
+}
+
 /* La IP de Tailscale está en 100.64.0.0/10 (CGNAT); se busca en el adaptador
    de Tailscale directamente, sin tener que ejecutar "tailscale ip". */
 char *mesh_tailscale_ip(void)
@@ -58,11 +63,60 @@ char *mesh_tailscale_ip(void)
             for (IP_ADAPTER_UNICAST_ADDRESS *u = a->FirstUnicastAddress; u && !ip; u = u->Next) {
                 struct sockaddr_in *sin = (struct sockaddr_in *)u->Address.lpSockaddr;
                 unsigned char *b = (unsigned char *)&sin->sin_addr;
-                if (b[0] == 100 && b[1] >= 64 && b[1] <= 127 && tail) ip = str_printf("%u.%u.%u.%u", b[0], b[1], b[2], b[3]);
+                if (is_tailscale_v4(b) && tail) ip = str_printf("%u.%u.%u.%u", b[0], b[1], b[2], b[3]);
             }
         }
     }
     free(addrs);
+    return ip;
+}
+
+/* Solo direcciones de Tailscale: una IP 100.64.0.0/10 o un nombre MagicDNS
+   *.ts.net. Así el secreto de la malla (que viaja en cada pedido) nunca sale
+   hacia una dirección cualquiera que el modelo haya registrado. */
+bool mesh_host_allowed(const char *host)
+{
+    unsigned v[4];
+    char extra;
+    if (sscanf(host, "%u.%u.%u.%u%c", &v[0], &v[1], &v[2], &v[3], &extra) == 4) {
+        if (v[0] > 255 || v[1] > 255 || v[2] > 255 || v[3] > 255) return false;
+        unsigned char b[4] = {(unsigned char)v[0], (unsigned char)v[1], (unsigned char)v[2], (unsigned char)v[3]};
+        return is_tailscale_v4(b);
+    }
+    size_t n = strlen(host);
+    if (n <= 7 || n > 253) return false;
+    for (const char *p = host; *p; p++)
+        if (!(isalnum((unsigned char)*p) || *p == '.' || *p == '-')) return false;
+    char *low = str_lower(host);
+    bool ok = host[0] != '.' && host[0] != '-' && !strstr(host, "..") && str_ends_with(low, ".ts.net");
+    free(low);
+    return ok;
+}
+
+/* Resuelve host y devuelve su IP de Tailscale ("100.x.y.z"), o NULL si no
+   resuelve o si alguna de sus direcciones está fuera de 100.64.0.0/10. */
+static char *resolve_tailscale(const char *host)
+{
+    WSADATA wsa;
+    if (WSAStartup(MAKEWORD(2, 2), &wsa)) return NULL;
+    struct addrinfo hints = {0}, *res = NULL;
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+    char *ip = NULL;
+    if (getaddrinfo(host, NULL, &hints, &res) == 0) {
+        bool all_ok = true;
+        for (struct addrinfo *r = res; r; r = r->ai_next) {
+            unsigned char *b = (unsigned char *)&((struct sockaddr_in *)r->ai_addr)->sin_addr;
+            if (!is_tailscale_v4(b)) all_ok = false;
+            else if (!ip) ip = str_printf("%u.%u.%u.%u", b[0], b[1], b[2], b[3]);
+        }
+        if (!all_ok) {
+            free(ip);
+            ip = NULL;
+        }
+        freeaddrinfo(res);
+    }
+    WSACleanup();
     return ip;
 }
 
@@ -243,12 +297,11 @@ char *tool_registrar_dispositivo(const cJSON *a)
         free(host);
         return xstrdup("Necesito un nombre y la dirección de Tailscale de ese dispositivo.");
     }
-    for (char *p = host; *p; p++) {
-        if (!(isalnum((unsigned char)*p) || *p == '.' || *p == '-' || *p == ':')) {
-            free(n);
-            free(host);
-            return xstrdup("Esa dirección no parece válida (solo letras, números, puntos y guiones).");
-        }
+    if (!mesh_host_allowed(host)) {
+        free(n);
+        free(host);
+        return xstrdup("Solo registro direcciones de Tailscale: una IP entre 100.64.0.0 y 100.127.255.255, o un "
+                       "nombre que termine en .ts.net.");
     }
     wchar_t *df = local_file(L"dispositivos.json");
     cJSON *devs = json_load_object(df);
@@ -284,8 +337,20 @@ char *tool_gestionar_dispositivo(const cJSON *a)
         sb_free(&known);
     } else if (str_is_blank(comando)) {
         r = xstrdup("No me dijiste qué comando mandarle.");
+    } else if (!mesh_host_allowed(host->valuestring)) {
+        r = str_printf("'%s' no tiene una dirección de Tailscale (%s), así que no le mando nada. Vuelve a registrarlo "
+                       "con su IP 100.x.y.z o su nombre .ts.net.",
+                       n, host->valuestring);
     } else {
-        char *url = str_printf("http://%s:%d/comando", host->valuestring, MESH_PORT);
+        /* Se conecta a la IP ya revisada y no al nombre: si el DNS cambiara de
+           respuesta entre la revisión y la conexión, igual queda en Tailscale. */
+        char *ip = resolve_tailscale(host->valuestring);
+        if (!ip) {
+            r = str_printf("No pude encontrar a '%s' en tu red de Tailscale (¿está prendido y conectado?).", n);
+            goto done;
+        }
+        char *url = str_printf("http://%s:%d/comando", ip, MESH_PORT);
+        free(ip);
         cJSON *body = cJSON_CreateObject();
         cJSON_AddStringToObject(body, "comando", comando);
         char *payload = cJSON_PrintUnformatted(body);
@@ -305,6 +370,7 @@ char *tool_gestionar_dispositivo(const cJSON *a)
         free(payload);
         free(url);
     }
+done:
     cJSON_Delete(devs);
     free(n);
     return r;
