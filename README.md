@@ -94,10 +94,14 @@ mingw32-make OUT=build/Jarvis.exe
 
 `mingw32-make tests` compila las pruebas en `build/tests/`.
 
-Los recursos que van dentro del exe están en `res/`. Se regeneran con los scripts de `tools/`, que solo hacen falta para desarrollar:
+Lo que va dentro del exe está en `res/`:
 
-- `tools/build_prompts.py` genera las herramientas y el prompt del sistema.
-- `tools/export_wakeword.py` convierte los modelos ONNX de openWakeWord.
+- `tools.json`: las herramientas que Jarvis puede usar.
+- `system_prompt.txt`: sus instrucciones.
+- `wakeword.bin`: el modelo de "Hey Jarvis".
+- El ícono.
+
+Si editas `tools.json` o `system_prompt.txt`, el siguiente `mingw32-make` los mete al exe.
 
 ### Cómo está organizado
 
@@ -117,5 +121,3 @@ Los recursos que van dentro del exe están en `res/`. Se regeneran con los scrip
 
 - [cJSON](https://github.com/DaveGamble/cJSON) (licencia MIT), en `src/third_party/`.
 - El modelo de "Hey Jarvis" es de [openWakeWord](https://github.com/dscripka/openWakeWord) y usa la licencia [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/): Jarvis es para uso personal, no comercial.
-
-La versión anterior en Python está en la rama [`python-legacy`](https://github.com/podselxd/jarvis/tree/python-legacy).

@@ -12,8 +12,4 @@ jarvis.log
 sounds/
 icono.ico
 
-# Python (solo lo usan los scripts de tools/)
-__pycache__/
-*.pyc
-
 .merget/
