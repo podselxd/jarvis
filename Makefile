@@ -61,6 +61,12 @@ build/tests/%.exe: tests/%.c $(OBJ) $(RES_OBJ) | $(NOMANIFEST)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -o $@ $^ -B$(NOMANIFEST_DIR) -static -municode -mconsole $(LIBS)
 
+# La prueba de confirmación trae su propio Groq y su propio run_tool de
+# mentira, así que se enlaza sin groq.o ni tools.o.
+build/tests/test_confirmacion.exe: tests/test_confirmacion.c $(filter-out build/obj/groq.o build/obj/tools.o,$(OBJ)) $(RES_OBJ) | $(NOMANIFEST)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -o $@ $^ -B$(NOMANIFEST_DIR) -static -municode -mconsole $(LIBS)
+
 clean:
 	rm -rf build dist/Jarvis.exe
 

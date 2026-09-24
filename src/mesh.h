@@ -11,5 +11,6 @@ bool mesh_start(MeshHandler handler);
 void mesh_stop(void);
 char *mesh_tailscale_ip(void);
 bool tailscale_installed(void);
+bool mesh_host_allowed(const char *host);
 
 #endif

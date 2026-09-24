@@ -41,29 +41,31 @@ Modos de pantalla:
 ## Qué puede hacer
 
 - Platicar y responder preguntas. Usa los modelos gratis de Groq y rota entre GPT-OSS 120B, Qwen 3 y GPT-OSS 20B para no quedarse sin cupo.
-- Abrir apps (incluidas las del menú Inicio, como Discord, Steam o Spotify), carpetas, archivos y páginas.
+- Abrir apps (incluidas las del menú Inicio, como Discord, Steam o Spotify), carpetas, archivos y páginas. No abre programas ni scripts sueltos (.exe, .bat, accesos directos).
 - Buscar en internet y leer páginas completas.
 - Controlar el volumen (también a un nivel exacto) y la música: pausa, siguiente y anterior.
 - Mostrar el escritorio, cambiar de ventana, minimizar todo, bloquear la PC, poner un video en pantalla completa y cerrar la pestaña.
 - Ver qué ventanas tienes abiertas y traer una al frente.
-- Escribir texto donde está el cursor. Nunca lo envía: tú decides si lo mandas.
+- Escribir texto donde está el cursor. Presiona Enter por su cuenta solo en cosas de bajo riesgo, como una búsqueda; si el texto le llega a otra persona, te pregunta antes (lo decide el modelo, con la regla de confirmación de abajo como respaldo). Nunca escribe en terminales.
 - Leer y copiar al portapapeles.
-- Listar, leer, buscar y mover archivos, sin sobrescribir nada. Si borra algo, siempre va a la Papelera.
+- Listar, leer, buscar y mover archivos, sin sobrescribir nada. Si borra algo, siempre va a la Papelera. No toca rutas de red ni las carpetas donde Jarvis guarda su configuración y su memoria.
 - Ver CPU, RAM, disco y batería.
 - Hacer cálculos exactos con su propia calculadora, sin acceso a nada más.
 - Poner recordatorios con hora (te avisa solo cuando llega el momento) o para la próxima vez que le hables.
 - Recordar datos para siempre, con perfiles por persona que puedes proteger con contraseña, y exportarlos a Obsidian.
 - Crear comandos propios que junten varias acciones ("crea un comando que abra X y ponga música").
-- Mandarle órdenes a tus otras PCs por Tailscale ("dile a mi laptop que…").
+- Mandarle órdenes a tus otras PCs por Tailscale ("dile a mi laptop que…"). Solo registra direcciones de Tailscale.
 
 ## Privacidad y seguridad
 
 - La detección de "Hey Jarvis" corre en tu PC y no sale nada hasta que la oye. Después, tu voz va a Groq para pasarla a texto y el texto va al modelo de Groq.
 - La voz de Jarvis se genera en tu PC con las voces de Windows. Las búsquedas van a DuckDuckGo, o a Bing si DuckDuckGo falla.
 - Lo que le pidas leer (un archivo, el portapapeles o el título de una ventana) viaja a Groq como parte de la conversación. Tenlo en cuenta si es algo delicado.
-- Jarvis no puede ejecutar comandos libres ni hacer clic en cualquier parte: solo tiene un set cerrado de acciones seguras.
-- La palabra de apagado se revisa en tu PC. Nunca se le manda al modelo ni se guarda en la memoria.
-- El servidor para tus otras PCs escucha solo en tu IP de Tailscale, nunca en internet, y pide un secreto que se genera solo.
+- Jarvis no puede ejecutar comandos libres ni hacer clic en cualquier parte: solo tiene un set cerrado de acciones. No abre programas ni scripts sueltos y nunca escribe en terminales.
+- Una página, un archivo, el portapapeles o el título de una pestaña pueden traer instrucciones escondidas para el modelo. Por eso, mientras algo así siga en la conversación, Jarvis te pide un "sí" de voz antes de enviar texto, abrir un archivo, mover o borrar, crear o ejecutar comandos propios y usar la red entre tus PCs. La pregunta la arma Jarvis, no el modelo, así que escuchas lo que va a hacer de verdad.
+- No lee páginas de tu red local (router, otras PCs, localhost), ni siquiera si una página pública redirige ahí.
+- La palabra de apagado se revisa en tu PC. Nunca se le manda al modelo ni se guarda en la memoria, y las herramientas de archivos no pueden leer la carpeta donde está guardada.
+- El servidor para tus otras PCs escucha solo en tu IP de Tailscale, nunca en internet, y pide un secreto que se genera solo. Jarvis solo manda ese secreto a direcciones de Tailscale.
 
 ## Dónde guarda las cosas
 

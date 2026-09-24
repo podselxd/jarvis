@@ -1,5 +1,9 @@
 #define WIN32_LEAN_AND_MEAN
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #include <windows.h>
+#include <shlwapi.h>
+#include <winhttp.h>
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -13,6 +17,7 @@
 #include "util.h"
 
 #define MAX_RESULTS 4
+#define MAX_REDIRECTS 5
 #define MAX_PAGE_READ_CHARS 6000
 
 static void append_codepoint(StrBuf *sb, unsigned long cp)
@@ -53,17 +58,27 @@ static const struct {
     {"egrave", 0xE8},   {"ouml", 0xF6},     {"auml", 0xE4},     {"szlig", 0xDF},    {"trade", 0x2122},
 };
 
-/* Decodifica &algo; en p (que apunta a '&'). Devuelve cuántos bytes consumió. */
+/* Decodifica &algo; en p (que apunta a '&'). Devuelve cuántos bytes consumió.
+   El ';' se busca solo en los 12 bytes siguientes: buscarlo en todo el resto
+   de la página hacía que una página con miles de '&' congelara a Jarvis. */
 static size_t decode_entity(const char *p, StrBuf *sb)
 {
-    const char *semi = strchr(p, ';');
-    if (!semi || semi - p > 12) {
+    const char *semi = NULL;
+    for (size_t i = 1; i <= 12 && p[i]; i++) {
+        if (p[i] == ';') {
+            semi = p + i;
+            break;
+        }
+    }
+    if (!semi) {
         sb_append_char(sb, '&');
         return 1;
     }
     size_t len = (size_t)(semi - p - 1);
     if (p[1] == '#') {
         unsigned long cp = (p[2] == 'x' || p[2] == 'X') ? strtoul(p + 3, NULL, 16) : strtoul(p + 2, NULL, 10);
+        /* &#0; o un surrogate suelto meterían un NUL o UTF-8 inválido al texto. */
+        if (cp == 0 || (cp >= 0xD800 && cp <= 0xDFFF)) cp = 0xFFFD;
         append_codepoint(sb, cp == 0xA0 ? ' ' : cp);
         return (size_t)(semi - p + 1);
     }
@@ -291,26 +306,79 @@ char *tool_web_search(const cJSON *a)
     return sb_steal(&out);
 }
 
-/* Defensa extra: una página que el modelo quiera abrir nunca puede apuntar a
-   tu red local (router, Tailscale, localhost). */
-static bool host_is_private(const char *url)
+static bool v4_is_private(const unsigned char b[4])
 {
-    const char *h = strstr(url, "://");
-    h = h ? h + 3 : url;
-    char host[256];
-    size_t n = 0;
-    while (*h && *h != '/' && *h != ':' && *h != '?' && *h != '#' && n < sizeof host - 1) host[n++] = (char)tolower((unsigned char)*h++);
-    host[n] = 0;
-    if (!strcmp(host, "localhost") || str_ends_with(host, ".local") || str_ends_with(host, ".internal") ||
-        str_ends_with(host, ".ts.net"))
-        return true;
-    unsigned a, b, c, d;
-    if (sscanf(host, "%u.%u.%u.%u", &a, &b, &c, &d) == 4) {
-        if (a == 10 || a == 127 || a == 0 || (a == 169 && b == 254) || (a == 172 && b >= 16 && b <= 31) ||
-            (a == 192 && b == 168) || (a == 100 && b >= 64 && b <= 127))
-            return true;
+    return b[0] == 0 || b[0] == 10 || b[0] == 127 || (b[0] == 169 && b[1] == 254) ||
+           (b[0] == 172 && b[1] >= 16 && b[1] <= 31) || (b[0] == 192 && b[1] == 168) ||
+           (b[0] == 100 && b[1] >= 64 && b[1] <= 127) || (b[0] == 192 && b[1] == 0 && b[2] == 0) ||
+           (b[0] == 198 && (b[1] == 18 || b[1] == 19)) || b[0] >= 224;
+}
+
+static bool addr_is_private(const struct sockaddr *sa)
+{
+    if (sa->sa_family == AF_INET) return v4_is_private((const unsigned char *)&((const struct sockaddr_in *)sa)->sin_addr);
+    if (sa->sa_family != AF_INET6) return true;
+    const unsigned char *b = ((const struct sockaddr_in6 *)sa)->sin6_addr.s6_addr;
+    static const unsigned char zero[10] = {0};
+    /* ::, ::1, ::a.b.c.d y ::ffff:a.b.c.d se juzgan por su IPv4 */
+    if (!memcmp(b, zero, 10) && ((b[10] == 0xff && b[11] == 0xff) || (!b[10] && !b[11]))) return v4_is_private(b + 12);
+    /* NAT64 (64:ff9b::a.b.c.d) y 6to4 (2002:aabb:ccdd::) también llevan una IPv4 adentro */
+    if (b[0] == 0x00 && b[1] == 0x64 && b[2] == 0xff && b[3] == 0x9b && !memcmp(b + 4, zero, 8)) return v4_is_private(b + 12);
+    if (b[0] == 0x20 && b[1] == 0x02) return v4_is_private(b + 2);
+    return (b[0] & 0xfe) == 0xfc || (b[0] == 0xfe && (b[1] & 0xc0) == 0x80) || b[0] == 0xff;
+}
+
+/* Defensa: una página que el modelo quiera abrir nunca puede apuntar a tu red
+   local (router, Tailscale, localhost, otras PCs). El host se saca como lo
+   entiende WinHTTP (así "http://x@127.0.0.1" no engaña) y se revisan todas las
+   IPs a las que resuelve, así un dominio que apunte a 192.168.x.x o formas
+   raras de IP como 127.1 o 2130706433 tampoco pasan. */
+UrlCheck web_url_check(const char *url)
+{
+    wchar_t *w = utf8_to_wide(url);
+    URL_COMPONENTS uc = {0};
+    uc.dwStructSize = sizeof uc;
+    wchar_t host[512];
+    uc.lpszHostName = host;
+    uc.dwHostNameLength = 512;
+    UrlCheck res = URL_BAD;
+    if (WinHttpCrackUrl(w, 0, 0, &uc) && (uc.nScheme == INTERNET_SCHEME_HTTP || uc.nScheme == INTERNET_SCHEME_HTTPS) &&
+        uc.dwHostNameLength) {
+        host[uc.dwHostNameLength] = 0;
+        wchar_t *h = host;
+        size_t n = wcslen(h);
+        if (h[0] == L'[' && n > 2 && h[n - 1] == L']') h[--n] = 0, h++, n--;
+        while (n && h[n - 1] == L'.') h[--n] = 0;
+        char *low = wide_to_utf8(h);
+        char *t = str_lower(low);
+        free(low);
+        /* Nombres de una sola palabra ("router", "nas") los resuelve la red de
+           tu casa, no internet. */
+        bool local_name = !strchr(t, '.') && !strchr(t, ':');
+        if (local_name || !strcmp(t, "localhost") || str_ends_with(t, ".localhost") || str_ends_with(t, ".local") ||
+            str_ends_with(t, ".internal") || str_ends_with(t, ".lan") || str_ends_with(t, ".home.arpa") ||
+            str_ends_with(t, ".ts.net")) {
+            res = URL_PRIVATE;
+        } else {
+            WSADATA wsa;
+            WSAStartup(MAKEWORD(2, 2), &wsa);
+            ADDRINFOW hints = {0}, *ai = NULL;
+            hints.ai_family = AF_UNSPEC;
+            hints.ai_socktype = SOCK_STREAM;
+            if (GetAddrInfoW(h, NULL, &hints, &ai) != 0 || !ai) {
+                res = URL_UNRESOLVED;
+            } else {
+                res = URL_OK;
+                for (ADDRINFOW *p = ai; p; p = p->ai_next)
+                    if (addr_is_private(p->ai_addr)) res = URL_PRIVATE;
+                FreeAddrInfoW(ai);
+            }
+            WSACleanup();
+        }
+        free(t);
     }
-    return host[0] == '[';
+    free(w);
+    return res;
 }
 
 static bool is_utf8_content(const HttpResponse *r)
@@ -343,17 +411,44 @@ char *tool_leer_pagina(const cJSON *a)
         free(url);
         url = u;
     }
-    if (host_is_private(url)) {
+    /* Las redirecciones se siguen a mano para revisar cada salto: si no, una
+       página pública podía mandar a WinHTTP a http://192.168.1.1. */
+    HttpResponse r = {0};
+    char *result = NULL;
+    for (int hop = 0;; hop++) {
+        UrlCheck chk = web_url_check(url);
+        if (chk != URL_OK) {
+            result = xstrdup(chk == URL_PRIVATE      ? "Por seguridad no leo direcciones de tu red local."
+                             : chk == URL_UNRESOLVED ? "No encontré esa página (el dominio no existe o no hay internet)."
+                                                     : "Solo puedo abrir páginas web normales (http o https).");
+            break;
+        }
+        HttpRequest req = {.method = "GET", .url = url, .timeout_ms = 15000, .browser_ua = true,
+                           .max_bytes = 3u << 20, .no_redirects = true};
+        r = http_request(&req);
+        if (r.status < 300 || r.status >= 400 || !r.location) break;
+        if (hop == MAX_REDIRECTS) {
+            result = xstrdup("Esa página redirige demasiadas veces, no la pude leer.");
+            break;
+        }
+        wchar_t *base = utf8_to_wide(url), *rel = utf8_to_wide(r.location);
+        wchar_t next[4096];
+        DWORD len = 4096;
+        bool ok = SUCCEEDED(UrlCombineW(base, rel, next, &len, 0));
+        free(base);
+        free(rel);
+        http_response_free(&r);
+        if (!ok) {
+            result = xstrdup("Esa página redirige a una dirección que no entiendo.");
+            break;
+        }
         free(url);
-        return xstrdup("Por seguridad no leo direcciones de tu red local.");
+        url = wide_to_utf8(next);
     }
-    HttpRequest req = {.method = "GET", .url = url, .timeout_ms = 15000, .browser_ua = true, .max_bytes = 3u << 20};
-    HttpResponse r = http_request(&req);
-    char *result;
-    if (r.status != 200) {
+    if (!result && r.status != 200) {
         result = r.error ? str_printf("No pude abrir esa página: %s", r.error)
                          : str_printf("No pude abrir esa página (respondió %d).", r.status);
-    } else {
+    } else if (!result) {
         char *html = r.body;
         char *converted = NULL;
         if (!is_utf8_content(&r)) {

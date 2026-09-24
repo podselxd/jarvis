@@ -1,3 +1,4 @@
+#include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -20,6 +21,9 @@
 struct Conversation {
     cJSON *history; /* [0] = system prompt, después user/assistant/tool */
     bool announce_pending;
+    bool remote;        /* llega por la malla: ahí nadie puede confirmar de voz */
+    char *pending_tool; /* acción que espera un "sí" de voz, con sus argumentos */
+    char *pending_args;
 };
 
 static cJSON *g_tools;
@@ -78,11 +82,24 @@ Conversation *conv_create(bool load_recent_memory)
     return c;
 }
 
+static void clear_pending(Conversation *c)
+{
+    free(c->pending_tool);
+    free(c->pending_args);
+    c->pending_tool = c->pending_args = NULL;
+}
+
 void conv_destroy(Conversation *c)
 {
     if (!c) return;
+    clear_pending(c);
     cJSON_Delete(c->history);
     free(c);
+}
+
+void conv_set_remote(Conversation *c, bool remote)
+{
+    c->remote = remote;
 }
 
 void conv_new_session(Conversation *c)
@@ -108,6 +125,88 @@ static void shrink_tool_results(cJSON *history, int from)
             free(shorter);
         }
     }
+}
+
+static void add_message(cJSON *history, const char *role, const char *content)
+{
+    cJSON *m = cJSON_CreateObject();
+    cJSON_AddStringToObject(m, "role", role);
+    cJSON_AddStringToObject(m, "content", content);
+    cJSON_AddItemToArray(history, m);
+}
+
+/* ¿Queda en la conversación algo que trajo una herramienta de afuera (una
+   página, un archivo, el portapapeles...)? Mientras quede, el modelo puede
+   estar siguiendo instrucciones escondidas ahí, también en un turno posterior:
+   por eso no alcanza con mirar solo el turno en que se leyó. */
+static bool history_has_outside_text(const cJSON *history)
+{
+    const cJSON *m;
+    cJSON_ArrayForEach(m, history)
+    {
+        const cJSON *call;
+        cJSON_ArrayForEach(call, cJSON_GetObjectItem(m, "tool_calls"))
+        {
+            const char *name = cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetObjectItem(call, "function"), "name"));
+            if (tool_brings_outside_text(name)) return true;
+        }
+    }
+    return false;
+}
+
+/* Respuesta corta a "¿Lo hago?". Cualquier "no" en la frase gana ("claro que
+   no", "sí, no, mejor no"), y una frase larga no cuenta como sí: así "sí, pero
+   primero abre Spotify" se procesa como un pedido nuevo. */
+AgentAnswer agent_classify_answer(const char *text)
+{
+    static const char *const YES[] = {"si",         "sí",       "dale",  "hazlo", "confirmo", "adelante", "claro",
+                                      "ok",         "okay",     "okey",  "afirmativo", "correcto", "simón", "simon",
+                                      "ándale",     "andale",   "órale", "orale", "confirmado"};
+    static const char *const NO[] = {"no",      "cancela",  "cancelalo", "cancélalo", "olvidalo", "olvídalo",
+                                     "nel",     "negativo", "nop",       "nope",      "tampoco",  "nunca"};
+    char *low = str_lower(text);
+    for (unsigned char *p = (unsigned char *)low; *p; p++) {
+        if (p[0] == 0xC2 && (p[1] == 0xA1 || p[1] == 0xBF)) p[0] = p[1] = ' '; /* ¡ ¿ */
+        else if (*p < 0x80 && !isalnum(*p)) *p = ' ';
+    }
+    str_collapse_spaces(low);
+    AgentAnswer a = ANSWER_OTHER;
+    int words = 0;
+    bool any_no = false;
+    for (char *w = low; *w;) {
+        char *end = strchr(w, ' ');
+        if (end) *end = 0;
+        for (size_t i = 0; i < sizeof NO / sizeof *NO; i++)
+            if (!strcmp(w, NO[i])) any_no = true;
+        if (!words++)
+            for (size_t i = 0; i < sizeof YES / sizeof *YES; i++)
+                if (!strcmp(w, YES[i])) a = ANSWER_YES;
+        if (!strcmp(w, "acuerdo") && words == 2) a = ANSWER_YES; /* "de acuerdo" */
+        if (!end) break;
+        w = end + 1;
+    }
+    if (any_no) a = ANSWER_NO;
+    else if (words > 4) a = ANSWER_OTHER;
+    free(low);
+    return a;
+}
+
+/* El "sí" ejecuta exactamente la acción guardada, sin volver a preguntarle
+   al modelo. */
+static TurnResult run_pending(Conversation *c, const char *text)
+{
+    TurnResult r = {0};
+    log_msg("[confirmada] %s(%s)", c->pending_tool, c->pending_args);
+    char *result = run_tool(c->pending_tool, c->pending_args);
+    clear_pending(c);
+    add_message(c->history, "user", text);
+    memory_persist("user", text);
+    add_message(c->history, "assistant", result);
+    memory_persist("assistant", result);
+    trim_history(c->history);
+    r.reply = result;
+    r.keep_going = true;
+    return r;
 }
 
 static bool contains_stop_word(const char *text)
@@ -189,10 +288,26 @@ TurnResult agent_process(Conversation *c, const char *text)
 {
     TurnResult r = {0};
     if (contains_stop_word(text)) {
+        clear_pending(c);
         log_msg("Palabra de apagado detectada. Cerrando Jarvis.");
         r.reply = xstrdup("Jarvis desactivado.");
         r.shutdown = true;
         return r;
+    }
+    if (c->pending_tool) {
+        AgentAnswer ans = agent_classify_answer(text);
+        if (ans == ANSWER_YES) return run_pending(c, text);
+        clear_pending(c);
+        if (ans == ANSWER_NO) {
+            add_message(c->history, "user", text);
+            memory_persist("user", text);
+            r.reply = xstrdup("Va, no lo hago.");
+            add_message(c->history, "assistant", r.reply);
+            memory_persist("assistant", r.reply);
+            r.keep_going = true;
+            return r;
+        }
+        /* Otra cosa: la acción se descarta y el texto se procesa como pedido nuevo. */
     }
     if (is_farewell(text)) {
         memory_persist("user", text);
@@ -228,13 +343,45 @@ TurnResult agent_process(Conversation *c, const char *text)
         }
         cJSON_AddItemToArray(c->history, msg);
         cJSON *call;
+        bool blocked = false;
         cJSON_ArrayForEach(call, calls)
         {
             cJSON *fn = cJSON_GetObjectItem(call, "function");
             const char *name = cJSON_GetStringValue(cJSON_GetObjectItem(fn, "name"));
             const char *args = cJSON_GetStringValue(cJSON_GetObjectItem(fn, "arguments"));
             const char *id = cJSON_GetStringValue(cJSON_GetObjectItem(call, "id"));
-            char *result = run_tool(name ? name : "", args ? args : "{}");
+            if (!name) name = "";
+            if (!args) args = "{}";
+            char *result;
+            cJSON *parsed = cJSON_Parse(args);
+            if (!cJSON_IsObject(parsed)) {
+                cJSON_Delete(parsed);
+                parsed = cJSON_CreateObject();
+            }
+            if (blocked) {
+                /* cada tool_call necesita su resultado o Groq rechaza el historial */
+                result = xstrdup("No se hizo: primero hay que confirmar la acción anterior.");
+            } else if (tool_needs_confirmation(name, parsed) && history_has_outside_text(c->history)) {
+                blocked = true;
+                char *desc = tool_describe_action(name, parsed);
+                log_msg("[confirmación] %s(%s) espera un sí de voz", name, args);
+                if (c->remote) {
+                    result = xstrdup("No se hizo: necesita confirmación de voz en esa PC.");
+                    reply = str_printf("Eso necesita que alguien lo confirme de voz en esta PC, así que no lo hice: %s.",
+                                       desc);
+                } else {
+                    c->pending_tool = xstrdup(name);
+                    c->pending_args = xstrdup(args);
+                    result = xstrdup("Pendiente: se le pidió confirmación de voz a quien habla.");
+                    reply = str_printf("Como en esta conversación leí algo de afuera, confirma primero: %s. ¿Lo hago? "
+                                       "Di sí o no.",
+                                       desc);
+                }
+                free(desc);
+            } else {
+                result = run_tool(name, args);
+            }
+            cJSON_Delete(parsed);
             char *shown = xstrndup(result, utf8_truncate_len(result, 300));
             log_msg("[herramienta] %s(%s) -> %s", name ? name : "?", args ? args : "", shown);
             free(shown);

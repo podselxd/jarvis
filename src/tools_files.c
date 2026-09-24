@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "config.h"
 #include "tools.h"
 #include "util.h"
 
@@ -64,6 +65,78 @@ static wchar_t *resolve_path(const char *ruta)
     return e;
 }
 
+static wchar_t *absolute_path(const wchar_t *path)
+{
+    DWORD n = GetFullPathNameW(path, 0, NULL, NULL);
+    if (!n) return xwcsdup(path);
+    wchar_t *buf = xmalloc(sizeof(wchar_t) * n);
+    DWORD got = GetFullPathNameW(path, n, buf, NULL);
+    if (!got || got >= n) {
+        free(buf);
+        return xwcsdup(path);
+    }
+    return buf;
+}
+
+/* La ruta real de algo que existe, con links, junctions y nombres cortos 8.3
+   resueltos; si no se puede abrir, la misma ruta que llegó. */
+static wchar_t *final_path(const wchar_t *full)
+{
+    HANDLE h = CreateFileW(full, FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
+                           OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+    if (h == INVALID_HANDLE_VALUE) return xwcsdup(full);
+    wchar_t *r = NULL;
+    DWORD n = GetFinalPathNameByHandleW(h, NULL, 0, FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
+    if (n) {
+        r = xmalloc(sizeof(wchar_t) * (n + 1));
+        DWORD got = GetFinalPathNameByHandleW(h, r, n + 1, FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
+        if (!got || got > n) {
+            free(r);
+            r = NULL;
+        }
+    }
+    CloseHandle(h);
+    if (!r) return xwcsdup(full);
+    if (!wcsncmp(r, L"\\\\?\\UNC\\", 8)) memmove(r + 2, r + 8, (wcslen(r + 8) + 1) * sizeof(wchar_t));
+    else if (!wcsncmp(r, L"\\\\?\\", 4)) memmove(r, r + 4, (wcslen(r + 4) + 1) * sizeof(wchar_t));
+    return r;
+}
+
+static bool path_inside(const wchar_t *path, const wchar_t *dir)
+{
+    if (!dir) return false;
+    size_t n = wcslen(dir);
+    while (n && (dir[n - 1] == L'\\' || dir[n - 1] == L'/')) n--;
+    return n && !_wcsnicmp(path, dir, n) && (!path[n] || path[n] == L'\\' || path[n] == L'/');
+}
+
+/* Ninguna herramienta de archivos toca rutas de red (\\servidor\...: con solo
+   preguntar si existen, Windows le manda a ese servidor tu usuario y el hash
+   de tu contraseña) ni las carpetas de datos de Jarvis, donde están la API key,
+   la palabra de apagado, el secreto de la malla, la memoria y los perfiles:
+   nada de eso tiene que poder terminar en la conversación. */
+bool path_is_off_limits(const wchar_t *path)
+{
+    wchar_t *full = absolute_path(path);
+    bool off = (full[0] == L'\\' || full[0] == L'/') && (full[1] == L'\\' || full[1] == L'/');
+    if (!off) {
+        wchar_t *fin = final_path(full);
+        const wchar_t *dirs[] = {g_paths.local_dir, g_paths.memory_dir};
+        for (int i = 0; i < 2 && !off; i++) {
+            if (!dirs[i]) continue;
+            wchar_t *d = final_path(dirs[i]);
+            off = path_inside(fin, d) || path_inside(full, dirs[i]);
+            free(d);
+        }
+        free(fin);
+    }
+    free(full);
+    return off;
+}
+
+static const char OFF_LIMITS[] =
+    "Por seguridad no uso rutas de red ni las carpetas donde Jarvis guarda su configuración y su memoria.";
+
 static int cmp_names(const void *a, const void *b)
 {
     return _wcsicmp(*(wchar_t *const *)a, *(wchar_t *const *)b);
@@ -73,6 +146,10 @@ char *tool_list_files(const cJSON *a)
 {
     const char *carpeta = arg_str(a, "carpeta");
     wchar_t *path = resolve_path(carpeta);
+    if (path_is_off_limits(path)) {
+        free(path);
+        return xstrdup(OFF_LIMITS);
+    }
     if (!dir_exists(path)) {
         free(path);
         return str_printf("No encontré la carpeta '%s'.", carpeta);
@@ -145,6 +222,10 @@ char *tool_read_file(const cJSON *a)
 {
     const char *ruta = arg_str(a, "ruta");
     wchar_t *path = resolve_path(ruta);
+    if (path_is_off_limits(path)) {
+        free(path);
+        return xstrdup(OFF_LIMITS);
+    }
     if (!file_exists(path)) {
         free(path);
         return str_printf("No encontré el archivo '%s'.", ruta);
@@ -229,12 +310,16 @@ static void search_dir(const wchar_t *dir, SearchCtx *c, int depth)
             bool skip = false;
             for (size_t i = 0; i < sizeof SKIP_DIRS / sizeof *SKIP_DIRS; i++)
                 if (!_wcsicmp(fd.cFileName, SKIP_DIRS[i])) skip = true;
-            if (skip) continue;
+            wchar_t *sub = path_join(dir, fd.cFileName);
+            if (skip || path_inside(sub, g_paths.local_dir) || path_inside(sub, g_paths.memory_dir)) {
+                free(sub);
+                continue;
+            }
             if (ndirs == cap) {
                 cap *= 2;
                 dirs = xrealloc(dirs, sizeof(wchar_t *) * (size_t)cap);
             }
-            dirs[ndirs++] = path_join(dir, fd.cFileName);
+            dirs[ndirs++] = sub;
             continue;
         }
         c->scanned++;
@@ -276,6 +361,14 @@ char *tool_buscar_archivo(const cJSON *a)
     sb_init(&where);
     if (!str_is_blank(carpeta)) {
         wchar_t *root = resolve_path(carpeta);
+        if (path_is_off_limits(root)) {
+            free(root);
+            free(needle);
+            free(nombre);
+            sb_free(&hits);
+            sb_free(&where);
+            return xstrdup(OFF_LIMITS);
+        }
         search_dir(root, &c, 0);
         char *u = wide_to_utf8(root);
         sb_append(&where, u);
@@ -309,7 +402,9 @@ char *tool_mover_archivo(const cJSON *a)
     wchar_t *src = resolve_path(origen);
     wchar_t *dst_dir = resolve_path(destino);
     char *r;
-    if (!file_exists(src)) {
+    if (path_is_off_limits(src) || path_is_off_limits(dst_dir)) {
+        r = xstrdup(OFF_LIMITS);
+    } else if (!file_exists(src)) {
         r = str_printf("No encontré el archivo '%s'.", origen);
     } else if (!dir_exists(dst_dir)) {
         r = str_printf("No encontré la carpeta destino '%s'.", destino);
@@ -334,7 +429,8 @@ char *tool_mover_archivo(const cJSON *a)
 static bool is_protected_path(const wchar_t *path)
 {
     wchar_t full[MAX_PATH * 2];
-    if (!GetFullPathNameW(path, MAX_PATH * 2, full, NULL)) return true;
+    DWORD got = GetFullPathNameW(path, MAX_PATH * 2, full, NULL);
+    if (!got || got >= MAX_PATH * 2) return true; /* si no cupo, full quedó sin llenar */
     size_t n = wcslen(full);
     while (n > 3 && (full[n - 1] == L'\\' || full[n - 1] == L'/')) full[--n] = 0;
     if (n <= 3) return true; /* raíz de una unidad */
@@ -364,6 +460,10 @@ char *tool_borrar_archivo(const cJSON *a)
 {
     const char *ruta = arg_str(a, "ruta");
     wchar_t *path = resolve_path(ruta);
+    if (path_is_off_limits(path)) {
+        free(path);
+        return xstrdup(OFF_LIMITS);
+    }
     if (GetFileAttributesW(path) == INVALID_FILE_ATTRIBUTES) {
         free(path);
         return str_printf("No encontré '%s'.", ruta);
