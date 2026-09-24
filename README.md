@@ -25,7 +25,11 @@ Baja `Sokari.exe` y ábrelo; la versión anterior no se actualiza sola a esta.
 
 - Di **"Hey Sokari"** y habla. Puedes decirlo todo de corrido ("Hey Sokari, abre Spotify") o hacer una pausa y esperar el tono. Deja de escuchar cuando te callas.
 - **Ctrl+Alt+J** sirve para hablarle sin decir "Hey Sokari".
-- **"Hey Sokari" todavía se está entrenando** (ver [Entrenar "Hey Sokari"](#entrenar-hey-sokari)). Mientras un exe no traiga el modelo, se le habla solo con **Ctrl+Alt+J** y así lo dicen sus mensajes.
+- **"Hey Sokari" es beta.** Se entrenó solo con voces sintéticas. En pruebas con voces que nunca oyó:
+  - se activó por error 0.35 veces por hora de audio real;
+  - detectó el 94 % de las voces en inglés y ~50–60 % de una voz mexicana sintética.
+  
+  Con tu voz todavía no está medido. Si no te oye, usa **Ctrl+Alt+J**; lo que lo arregla es reentrenarlo con grabaciones de tu voz. Subir la sensibilidad ayuda poco. Detalles en [Entrenar "Hey Sokari"](#entrenar-hey-sokari).
 - Si le hablas mientras está hablando, se calla y te escucha.
 - Para cerrar la conversación dile "adiós" o "eso es todo". Si configuraste una palabra de apagado y la dices, Sokari se cierra al instante.
 
@@ -127,9 +131,16 @@ En cada push, GitHub Actions compila en un Windows real (una advertencia del com
 ### Publicar una versión
 
 1. Sube la versión en `src/config.h` (`SOKARI_VERSION` y `SOKARI_VERSION_W`), en `res/sokari.rc` (las cuatro) y en `res/sokari.manifest`. `sh tests/check_version.sh` revisa que coincidan.
-2. Con eso ya en `master`: `git tag v2.2.0 && git push origin v2.2.0`.
-3. Actions compila, prueba, revisa que el tag coincida con el código y deja un **borrador** de release con `Sokari.exe` y `Sokari.apk` (la app del celular, con la misma versión). El APK necesita los secretos de su llave de firma (ver [`movil/README.md`](movil/README.md)); sin ellos, el release falla.
-4. Revisa el borrador y publícalo. Hasta que lo publiques, nadie se actualiza.
+2. Con eso ya en `master`, crea el release de una de estas dos formas:
+   - **En GitHub:** *Actions → Borrador de release → Run workflow*. Escribe la versión (`v2.3.0`) y marca **publicar** si quieres que salga de una vez; si no, queda como borrador.
+   - **Desde tu PC:** `git tag v2.3.0 && git push origin v2.3.0`. Queda como borrador.
+3. Actions:
+   - compila y prueba el exe y la app;
+   - revisa que la versión coincida con el código;
+   - crea el release con `Sokari.exe` y `Sokari.apk` (la app del celular, con la misma versión).
+   
+   El APK necesita los secretos de su llave de firma (ver [`movil/README.md`](movil/README.md)); sin ellos, el release falla y no se publica nada.
+4. Si quedó como borrador, revísalo y publícalo. Hasta que lo publiques, nadie se actualiza.
 
 No crees el release a mano desde GitHub: te saltas las pruebas, y si el tag no coincide con la versión del código, el exe se vuelve a descargar cada 6 horas.
 
@@ -164,10 +175,17 @@ La app de Android de `movil/` te deja hablarle a tu Sokari de la PC desde el cel
 
 ## Entrenar "Hey Sokari"
 
-El clasificador de "Hey Sokari" se entrena una vez con voces sintéticas (muchas voces distintas, para que responda a cualquiera) y queda como `res/hey_sokari.jww`. Los pasos y el cuaderno de Google Colab están en `herramientas/`.
+El clasificador de "Hey Sokari" se entrena con voces sintéticas (muchas voces distintas, para que responda a cualquiera) y queda como `res/hey_sokari.jww`.
+
+- El de la versión 2.3.0 se entrenó en una PC sin GPU con los scripts de `herramientas/entreno_local/`.
+- Con qué datos, sus números completos y qué hace la sensibilidad están en `herramientas/LEEME.md`, junto con el cuaderno de Google Colab para reentrenarlo con GPU.
 
 ## Créditos
 
 - [cJSON](https://github.com/DaveGamble/cJSON) (licencia MIT), en `src/third_party/`.
 - El detector de la palabra es un puerto a C de [openWakeWord](https://github.com/dscripka/openWakeWord) (código Apache 2.0).
 - Sus modelos (la parte común, `wakeword.bin`) y el clasificador de "Hey Sokari" que se entrena encima (`hey_sokari.jww`) están bajo [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/): uso no comercial y con crédito, y quien los modifique tiene que compartirlos igual. Por eso Sokari es gratis y no comercial. Detalles en `herramientas/LEEME.md`.
+- "Hey Sokari" se entrenó con:
+  - FLEURS y Speech Commands de Google (CC BY 4.0);
+  - ESC-50 de Karol J. Piczak (CC BY-NC 3.0);
+  - voces sintéticas de piper-sample-generator (LibriTTS-R, CC BY 4.0), Piper, MBROLA (uso no comercial) y espeak-ng.
