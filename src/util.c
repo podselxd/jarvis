@@ -11,7 +11,7 @@
 
 static void oom(void)
 {
-    MessageBoxW(NULL, L"Jarvis se quedó sin memoria.", L"Jarvis", MB_ICONERROR);
+    MessageBoxW(NULL, L"Sokari se quedó sin memoria.", L"Sokari", MB_ICONERROR);
     ExitProcess(3);
 }
 
@@ -301,7 +301,7 @@ static bool write_whole(HANDLE h, const void *data, size_t len)
     return true;
 }
 
-/* Escribe primero a un .tmp y después lo renombra encima: si Jarvis se corta
+/* Escribe primero a un .tmp y después lo renombra encima: si Sokari se corta
    a mitad de escritura, el archivo original queda intacto en vez de corrupto. */
 bool write_file_atomic(const wchar_t *path, const void *data, size_t len)
 {
@@ -398,7 +398,7 @@ wchar_t *exe_path(void)
         DWORD n = GetModuleFileNameW(NULL, buf, cap);
         if (n && n < cap) return buf;
         free(buf);
-        if (cap > 32768) return xwcsdup(L"Jarvis.exe");
+        if (cap > 32768) return xwcsdup(L"Sokari.exe");
         cap *= 2;
     }
 }
@@ -534,7 +534,7 @@ bool secure_equal(const char *a, const char *b)
 void random_bytes(void *buf, size_t n)
 {
     if (BCryptGenRandom(NULL, buf, (ULONG)n, BCRYPT_USE_SYSTEM_PREFERRED_RNG) != 0) {
-        MessageBoxW(NULL, L"No pude generar números aleatorios seguros.", L"Jarvis", MB_ICONERROR);
+        MessageBoxW(NULL, L"No pude generar números aleatorios seguros.", L"Sokari", MB_ICONERROR);
         ExitProcess(4);
     }
 }

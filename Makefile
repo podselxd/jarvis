@@ -1,4 +1,4 @@
-# Compila Jarvis.exe (un solo ejecutable estático, sin DLLs extra).
+# Compila Sokari.exe (un solo ejecutable estático, sin DLLs extra).
 # Requiere MinGW-w64 (por ejemplo WinLibs: winget install BrechtSanders.WinLibs.POSIX.UCRT)
 # y correrse desde un shell tipo POSIX (Git Bash):  mingw32-make
 
@@ -17,12 +17,12 @@ MAIN_OBJ := build/obj/main.o
 RES_OBJ := build/obj/jarvis_res.o
 RES_DEPS := res/jarvis.rc res/jarvis.manifest res/jarvis.ico res/tools.json res/system_prompt.txt res/wakeword.bin
 
-# Con Jarvis abierto, Windows no deja reemplazar dist/Jarvis.exe:
-# mingw32-make OUT=build/Jarvis.exe compila en otro lado.
-OUT ?= dist/Jarvis.exe
+# Con Sokari abierto, Windows no deja reemplazar dist/Sokari.exe:
+# mingw32-make OUT=build/Sokari.exe compila en otro lado.
+OUT ?= dist/Sokari.exe
 
 # GCC de MinGW enlaza su propio manifiesto (default-manifest.o), que choca con
-# el de Jarvis (".rsrc merge failure: multiple non-default manifests"). Con -B
+# el de Sokari (".rsrc merge failure: multiple non-default manifests"). Con -B
 # encuentra primero este objeto vacío del mismo nombre y queda un solo manifiesto.
 NOMANIFEST_DIR := build/nomanifest/
 NOMANIFEST := $(NOMANIFEST_DIR)default-manifest.o
@@ -68,6 +68,6 @@ build/tests/test_confirmacion.exe: tests/test_confirmacion.c $(filter-out build/
 	$(CC) $(CFLAGS) -o $@ $^ -B$(NOMANIFEST_DIR) -static -municode -mconsole $(LIBS)
 
 clean:
-	rm -rf build dist/Jarvis.exe
+	rm -rf build dist/Sokari.exe
 
 -include $(OBJ:.o=.d) $(MAIN_OBJ:.o=.d)

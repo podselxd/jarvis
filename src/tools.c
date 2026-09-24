@@ -64,7 +64,7 @@ int arg_int(const cJSON *args, const char *key, int def)
     return def;
 }
 
-/* Un error adentro de una herramienta nunca tiene que tirar abajo a Jarvis:
+/* Un error adentro de una herramienta nunca tiene que tirar abajo a Sokari:
    argumentos raros o faltantes llegan como "" y cada herramienta responde con
    un mensaje en vez de fallar. */
 char *run_tool(const char *name, const char *arguments_json)

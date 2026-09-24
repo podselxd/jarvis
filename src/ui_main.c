@@ -2,7 +2,7 @@
    teclado, avisos). La esfera se dibuja en su propio hilo, sincronizado con el
    refresco del monitor; el hilo de la interfaz solo maneja mensajes.
    En pantalla completa y como esfera flotante la ventana nunca toma el foco
-   (WS_EX_NOACTIVATE): las teclas que manda Jarvis siempre llegan a la app que
+   (WS_EX_NOACTIVATE): las teclas que manda Sokari siempre llegan a la app que
    estás usando. En modo Ventana es una ventana normal (se puede mover,
    minimizar, F11); ahí, antes de mandar teclas, le pasa el foco a la ventana
    que sigue. */
@@ -121,7 +121,7 @@ bool app_is_own_window(HWND h)
     return h && (h == U.hud || h == U.msg || h == settings_window());
 }
 
-/* En "Pantalla completa" la esfera está siempre encima: antes de que Jarvis
+/* En "Pantalla completa" la esfera está siempre encima: antes de que Sokari
    abra algo o mande teclas se aparta, para que se vea el resultado. Vuelve
    sola la próxima vez que le hables. */
 void app_yield_focus(void)
@@ -209,7 +209,7 @@ static void create_hud(void)
     if (U.mode == DISPLAY_FULLSCREEN || U.mode == DISPLAY_WINDOWED_BORDERLESS) ex |= WS_EX_TOPMOST;
     if (U.mode == DISPLAY_WINDOWED_BORDERLESS) ex |= WS_EX_LAYERED;
     U.win_full = false;
-    U.hud = CreateWindowExW(ex, HUD_CLASS, L"Jarvis", win ? WS_OVERLAPPEDWINDOW : WS_POPUP, U.mon.left, U.mon.top,
+    U.hud = CreateWindowExW(ex, HUD_CLASS, L"Sokari", win ? WS_OVERLAPPEDWINDOW : WS_POPUP, U.mon.left, U.mon.top,
                             U.mon.right - U.mon.left, U.mon.bottom - U.mon.top, NULL, NULL, U.inst, NULL);
     BOOL dark = TRUE;
     DwmSetWindowAttribute(U.hud, 20 /* DWMWA_USE_IMMERSIVE_DARK_MODE */, &dark, sizeof dark);
@@ -283,7 +283,7 @@ void ui_set_display_mode(int mode)
 
 /* F11 (o doble clic) en modo Ventana: la misma ventana ocupa todo su monitor,
    como la pantalla completa de un navegador; F11 o Esc la regresan. Como
-   tiene el foco, la tapa cualquier ventana que abras. No se guarda: Jarvis
+   tiene el foco, la tapa cualquier ventana que abras. No se guarda: Sokari
    siempre vuelve a abrir en ventana. */
 static void toggle_full(HWND h)
 {
@@ -314,7 +314,7 @@ static void save_window_rect(HWND h)
     config_set_window_rect(r.left, r.top, r.right - r.left, r.bottom - r.top);
 }
 
-/* En modo Ventana la esfera sí puede tener el foco: antes de que Jarvis mande
+/* En modo Ventana la esfera sí puede tener el foco: antes de que Sokari mande
    teclas se lo pasa a la ventana que sigue (la que usabas antes), para que lo
    que escriba no le llegue a la esfera. */
 static void activate_next_window(void)
@@ -406,11 +406,11 @@ static LRESULT CALLBACK hud_proc(HWND h, UINT m, WPARAM w, LPARAM l)
         }
         return 0;
     case WM_CLOSE:
-        /* La X oculta: Jarvis sigue escuchando. Se cierra desde la bandeja. */
+        /* La X oculta: Sokari sigue escuchando. Se cierra desde la bandeja. */
         show_hud(false, HUD_SHOW_QUIET);
         if (windowed(U.mode) && !U.close_hint_shown) {
             U.close_hint_shown = true;
-            tray_notify(L"Jarvis", L"Sigo escuchando aquí en la bandeja. Para cerrarme: clic derecho en el ícono > Salir.");
+            tray_notify(L"Sokari", L"Sigo escuchando aquí en la bandeja. Para cerrarme: clic derecho en el ícono > Salir.");
         }
         return 0;
     case WM_ERASEBKGND:
@@ -690,8 +690,8 @@ static LRESULT CALLBACK msg_proc(HWND h, UINT m, WPARAM w, LPARAM l)
         case IDM_MUTE: {
             bool muted = !config_mic_muted();
             config_set_mic_muted(muted);
-            tray_set_tooltip(muted ? L"Jarvis — micrófono silenciado" : L"Jarvis — escuchando \"Hey Jarvis\"");
-            tray_notify(L"Jarvis", muted ? L"Micrófono silenciado. Jarvis no escucha hasta que lo actives."
+            tray_set_tooltip(muted ? L"Sokari — micrófono silenciado" : L"Sokari — escuchando \"Hey Jarvis\"");
+            tray_notify(L"Sokari", muted ? L"Micrófono silenciado. Sokari no escucha hasta que lo actives."
                                          : L"Micrófono activado. Di \"Hey Jarvis\" cuando quieras.");
             settings_sync();
             break;
@@ -728,7 +728,7 @@ static LRESULT CALLBACK msg_proc(HWND h, UINT m, WPARAM w, LPARAM l)
         } else if (windowed(U.mode) && U.hud && IsWindowVisible(U.hud)) {
             /* Si tenía el foco se lo pasa a tu ventana; y si estaba encima de
                ella (por ejemplo en F11), se pone detrás para que veas lo que
-               Jarvis escribe o abre. */
+               Sokari escribe o abre. */
             if (GetForegroundWindow() == U.hud) activate_next_window();
             HWND fg = GetForegroundWindow();
             if (fg && fg != U.hud) SetWindowPos(U.hud, fg, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
@@ -753,11 +753,13 @@ static LRESULT CALLBACK msg_proc(HWND h, UINT m, WPARAM w, LPARAM l)
     case WM_APP_HOME:
         home_open(U.inst, false, U.on_saved);
         return 0;
+    case WM_APP_IDENT:
+        return APP_IDENT_SOKARI;
     case WM_APP_CONFIG:
         rebuild_hud();
         return 0;
     case WM_APP_QUIT:
-        tray_set_tooltip(L"Jarvis — cerrando…");
+        tray_set_tooltip(L"Sokari — cerrando…");
         InterlockedExchange(&U.visible, 0);
         if (U.hud) ShowWindow(U.hud, SW_HIDE);
         voice_stop();
@@ -799,10 +801,10 @@ bool ui_init(HINSTANCE inst, SettingsSavedFn on_saved, bool show)
     hc.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
     RegisterClassExW(&hc);
 
-    U.msg = CreateWindowExW(0, JARVIS_MSG_CLASS, L"Jarvis", WS_OVERLAPPED, 0, 0, 0, 0, NULL, NULL, inst, NULL);
+    U.msg = CreateWindowExW(0, JARVIS_MSG_CLASS, L"Sokari", WS_OVERLAPPED, 0, 0, 0, 0, NULL, NULL, inst, NULL);
     if (!U.msg) return false;
     tray_init(U.msg, ui_app_icon(GetSystemMetrics(SM_CXSMICON)));
-    tray_set_tooltip(config_mic_muted() ? L"Jarvis — micrófono silenciado" : L"Jarvis — escuchando \"Hey Jarvis\"");
+    tray_set_tooltip(config_mic_muted() ? L"Sokari — micrófono silenciado" : L"Sokari — escuchando \"Hey Jarvis\"");
     if (!RegisterHotKey(U.msg, HOTKEY_TALK, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'J'))
         log_msg("No pude registrar el atajo Ctrl+Alt+J (otra app lo usa).");
 

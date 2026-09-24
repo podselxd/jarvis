@@ -1,5 +1,5 @@
 /* Verifica las barreras de seguridad de las herramientas: qué rutas, apps,
-   direcciones y acciones rechaza Jarvis. No usa internet ni micrófono, y no
+   direcciones y acciones rechaza Sokari. No usa internet ni micrófono, y no
    abre ventanas: solo llama a las herramientas con casos que deben negarse
    (y algunos normales que deben seguir funcionando). */
 #define WIN32_LEAN_AND_MEAN
@@ -59,8 +59,8 @@ static void test_archivos(void)
     check(path_is_off_limits(L"\\\\servidor\\compartida\\x.txt"), "ruta de red \\\\servidor\\...");
     check(path_is_off_limits(L"//servidor/compartida/x.txt"), "ruta de red //servidor/...");
     check(path_is_off_limits(L"\\\\?\\C:\\Windows"), "ruta de dispositivo \\\\?\\...");
-    check(path_is_off_limits(g_paths.config_file), "config.env de Jarvis");
-    wchar_t *trampa = path_join(g_paths.local_dir, L"..\\Jarvis\\.\\config.env");
+    check(path_is_off_limits(g_paths.config_file), "config.env de Sokari");
+    wchar_t *trampa = path_join(g_paths.local_dir, L"..\\Sokari\\.\\config.env");
     check(path_is_off_limits(trampa), "config.env con ..\\ en el camino");
     free(trampa);
     wchar_t *upper = xwcsdup(g_paths.config_file);
@@ -70,6 +70,14 @@ static void test_archivos(void)
     wchar_t *mem = path_join(g_paths.memory_dir, L"perfiles.json");
     check(path_is_off_limits(mem), "archivo de la carpeta de memoria");
     free(mem);
+    /* Las carpetas de cuando se llamaba Jarvis se quedan como respaldo, con una
+       copia de la API key y de la memoria: también están fuera de alcance. */
+    wchar_t *old_cfg = path_join(g_paths.legacy_local_dir, L"config.env");
+    wchar_t *old_mem = path_join(g_paths.legacy_memory_dir, L"perfiles.json");
+    check(path_is_off_limits(old_cfg) && path_is_off_limits(old_mem),
+          "config.env y memoria en las carpetas viejas de Jarvis");
+    free(old_cfg);
+    free(old_mem);
 
     wchar_t tmp[MAX_PATH];
     GetTempPathW(MAX_PATH, tmp);
@@ -80,20 +88,22 @@ static void test_archivos(void)
     check(tool_says("hola desde la prueba", "read_file", "ruta", normal_u, NULL, NULL), "read_file lee un archivo normal");
 
     char *local_u = w2u(g_paths.local_dir), *mem_u = w2u(g_paths.memory_dir), *cfg_u = w2u(g_paths.config_file);
+    check(tool_says(NO, "read_file", "ruta", "%LOCALAPPDATA%\\Sokari\\config.env", NULL, NULL),
+          "read_file niega %LOCALAPPDATA%\\Sokari\\config.env");
     check(tool_says(NO, "read_file", "ruta", "%LOCALAPPDATA%\\Jarvis\\config.env", NULL, NULL),
-          "read_file niega %LOCALAPPDATA%\\Jarvis\\config.env");
+          "read_file niega el config.env viejo (%LOCALAPPDATA%\\Jarvis)");
     check(tool_says(NO, "read_file", "ruta", "\\\\servidor\\c\\x.txt", NULL, NULL), "read_file niega \\\\servidor");
-    check(tool_says(NO, "list_files", "carpeta", local_u, NULL, NULL), "list_files niega la carpeta de Jarvis");
+    check(tool_says(NO, "list_files", "carpeta", local_u, NULL, NULL), "list_files niega la carpeta de Sokari");
     check(tool_says(NO, "buscar_archivo", "nombre", "json", "carpeta", mem_u), "buscar_archivo niega la memoria");
     check(tool_says(NO, "mover_archivo", "origen", normal_u, "destino_carpeta", local_u),
-          "mover_archivo no mete archivos a la carpeta de Jarvis");
+          "mover_archivo no mete archivos a la carpeta de Sokari");
     check(file_exists(normal), "...y el archivo sigue en su lugar");
     check(tool_says(NO, "mover_archivo", "origen", normal_u, "destino_carpeta", "\\\\servidor\\c"),
           "mover_archivo no saca archivos a \\\\servidor");
     check(tool_says(NO, "borrar_archivo", "ruta", cfg_u, NULL, NULL), "borrar_archivo niega config.env");
     check(file_exists(g_paths.config_file), "...y config.env sigue ahí");
 
-    /* Un link simbólico hacia la carpeta de Jarvis tampoco sirve de atajo
+    /* Un link simbólico hacia la carpeta de Sokari tampoco sirve de atajo
        (crear links puede pedir permisos; si no se puede, se omite). */
     wchar_t *link = path_join(tmp, L"jarvis_atajo");
     RemoveDirectoryW(link);

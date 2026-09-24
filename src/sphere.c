@@ -1,4 +1,4 @@
-/* La esfera de Jarvis. Dos estilos con la misma matemática del diseño
+/* La esfera de Sokari. Dos estilos con la misma matemática del diseño
    original (Main.dc.html): ondulación, rotación + bamboleo, perspectiva,
    color por intensidad (fresnel + relieve + profundidad) en 12 escalones,
    mezcla aditiva y resplandor desenfocado.
@@ -6,7 +6,7 @@
      uniforme, sin acumularse en los polos); el borde brilla solo porque ahí
      los puntos se apilan en perspectiva.
    - Líneas: 140 meridianos de 60 segmentos, como el diseño original.
-   Siempre en movimiento; con la voz de Jarvis palpita (se agranda con cada
+   Siempre en movimiento; con la voz de Sokari palpita (se agranda con cada
    sílaba) y agrega una ondulación rápida con destellos. Rasterizador propio
    con antialiasing, repartido en varios hilos por franjas horizontales. */
 #define WIN32_LEAN_AND_MEAN
@@ -423,7 +423,7 @@ typedef struct {
 
 /* La ondulación base viaja lenta alrededor de la esfera (el "GIF" en reposo);
    con la voz se suma una ondulación rápida de alta frecuencia que la hace
-   vibrar mientras Jarvis habla. */
+   vibrar mientras Sokari habla. */
 static Projected project(const Frame *f, float phi, float theta, float bx, float by, float bz, float base_wave,
                          float voice_amp)
 {

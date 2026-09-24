@@ -314,7 +314,7 @@ int reset_all_profile_passwords(void)
 }
 
 /* Contraseña puesta desde Configuración: protege el mismo perfil al que entra
-   Jarvis al arrancar (el del nombre configurado, o "default"). */
+   Sokari al arrancar (el del nombre configurado, o "default"). */
 bool set_profile_password(const char *name, const char *password)
 {
     state_lock();

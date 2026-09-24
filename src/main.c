@@ -17,6 +17,7 @@
 #include "util.h"
 #include "voice.h"
 
+/* El mismo desde que se llamaba Jarvis: nunca corren los dos a la vez. */
 #define INSTANCE_MUTEX L"Local\\JarvisAsistenteDeVoz"
 
 static HINSTANCE g_inst;
@@ -46,7 +47,7 @@ static void on_settings_saved(bool first_run)
         update_start_background();
         ui_show_hud(HUD_SHOW_QUIET);
     }
-    if (first_run) app_notify("Jarvis", "Listo. Di \"Hey Jarvis\" (o Ctrl+Alt+J) cuando quieras hablarle.");
+    if (first_run) app_notify("Sokari", "Listo. Di \"Hey Jarvis\" (o Ctrl+Alt+J) cuando quieras hablarle.");
 }
 
 static void wait_for_pid(const wchar_t *arg)
@@ -57,6 +58,35 @@ static void wait_for_pid(const wchar_t *arg)
         WaitForSingleObject(h, 15000);
         CloseHandle(h);
     }
+}
+
+/* Ya hay uno abierto. Si es Sokari, se le pide su ventana de Inicio. Si es el
+   Jarvis de antes (no contesta WM_APP_IDENT), se ofrece cerrarlo y seguir.
+   Devuelve true si este ya puede arrancar (tiene el mutex). */
+static bool take_over_from_old_jarvis(HANDLE mutex, bool from_autostart)
+{
+    HWND other = FindWindowW(JARVIS_MSG_CLASS, NULL);
+    DWORD_PTR ident = 0;
+    if (!other || !SendMessageTimeoutW(other, WM_APP_IDENT, 0, 0, SMTO_ABORTIFHUNG, 2000, &ident)) return false;
+    if (ident == APP_IDENT_SOKARI) {
+        if (!from_autostart) PostMessageW(other, WM_APP_HOME, 0, 0);
+        return false;
+    }
+    /* Al prender la PC no se pregunta nada: se queda el que ya arrancó. */
+    if (from_autostart) return false;
+    if (MessageBoxW(NULL,
+                    L"Jarvis (la versión anterior de Sokari) está abierto, y los dos no pueden correr a la vez.\n\n"
+                    L"¿Cierro Jarvis y abro Sokari?",
+                    L"Sokari", MB_YESNO | MB_ICONQUESTION | MB_SETFOREGROUND) != IDYES)
+        return false;
+    PostMessageW(other, WM_APP_QUIT, 0, 0);
+    DWORD w = WaitForSingleObject(mutex, 20000);
+    if (w == WAIT_OBJECT_0 || w == WAIT_ABANDONED) return true;
+    MessageBoxW(NULL,
+                L"Jarvis no se cerró. Ciérralo desde su ícono de la bandeja (clic derecho > Salir) y vuelve a "
+                L"abrir Sokari.",
+                L"Sokari", MB_ICONWARNING);
+    return false;
 }
 
 static int run_simulation(const wchar_t *wav)
@@ -90,9 +120,9 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmdline, int show)
     if (simulate) {
         /* La simulación nunca toca tu memoria real: usa una carpeta temporal. */
         free(g_paths.memory_dir);
-        g_paths.memory_dir = expand_env(L"%TEMP%\\jarvis_simulacion");
+        g_paths.memory_dir = expand_env(L"%TEMP%\\sokari_simulacion");
         free(g_paths.log_file);
-        g_paths.log_file = path_join(g_paths.memory_dir, L"jarvis.log");
+        g_paths.log_file = path_join(g_paths.memory_dir, L"sokari.log");
         ensure_dir(g_paths.memory_dir);
     }
     log_init(g_paths.log_file);
@@ -100,15 +130,14 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmdline, int show)
     HANDLE mutex = NULL;
     if (!simulate) {
         mutex = CreateMutexW(NULL, TRUE, INSTANCE_MUTEX);
-        if (GetLastError() == ERROR_ALREADY_EXISTS) {
-            /* Ya está abierto: abrirlo otra vez a mano muestra su ventana de Inicio. */
-            HWND other = FindWindowW(JARVIS_MSG_CLASS, NULL);
-            if (other && !from_autostart) PostMessageW(other, WM_APP_HOME, 0, 0);
+        if (GetLastError() == ERROR_ALREADY_EXISTS && !take_over_from_old_jarvis(mutex, from_autostart)) {
+            CloseHandle(mutex);
             return 0;
         }
     }
 
-    log_msg("Jarvis %s arrancando.", JARVIS_VERSION);
+    log_msg("Sokari %s arrancando.", JARVIS_VERSION);
+    bool from_jarvis = !simulate && config_migrate_from_jarvis();
     config_load();
     config_migrate_legacy();
     memory_init();
@@ -118,6 +147,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmdline, int show)
     if (simulate) return run_simulation(simulate);
 
     autostart_migrate_legacy();
+    autostart_migrate_from_jarvis(from_jarvis);
     autostart_refresh();
     enable_dark_menus();
     AppConfig cfg = config_snapshot();
@@ -128,12 +158,15 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmdline, int show)
 
     LaunchKind kind = launch_kind(has_key, from_autostart, updated);
     if (!ui_init(inst, on_settings_saved, kind == LAUNCH_DIRECT)) {
-        MessageBoxW(NULL, L"No pude abrir la interfaz de Jarvis.", L"Jarvis", MB_ICONERROR);
+        MessageBoxW(NULL, L"No pude abrir la interfaz de Sokari.", L"Sokari", MB_ICONERROR);
         return 1;
     }
+    if (from_jarvis)
+        app_notify("Sokari", "Jarvis ahora se llama Sokari. Traje tu configuración y tu memoria; las carpetas de "
+                             "Jarvis se quedan como respaldo. Por ahora se despierta igual: \"Hey Jarvis\".");
     if (kind == LAUNCH_DIRECT) {
         on_settings_saved(false);
-        if (updated) app_notify("Jarvis", "Me actualicé a la versión " JARVIS_VERSION ".");
+        if (updated && !from_jarvis) app_notify("Sokari", "Me actualicé a la versión " JARVIS_VERSION ".");
     } else if (kind == LAUNCH_HOME) {
         home_open(inst, true, on_settings_saved);
     } else {
@@ -141,7 +174,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmdline, int show)
     }
 
     int rc = ui_run();
-    log_msg("Jarvis cerrado.");
+    log_msg("Sokari cerrado.");
     if (mutex) {
         ReleaseMutex(mutex);
         CloseHandle(mutex);

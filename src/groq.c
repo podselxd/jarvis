@@ -254,7 +254,7 @@ typedef struct {
 } ChatModel;
 
 /* Cada modelo gratis de Groq tiene su propio cupo de 8000 tokens por minuto:
-   rotar entre los tres triplica lo que Jarvis puede contestar seguido. */
+   rotar entre los tres triplica lo que Sokari puede contestar seguido. */
 static ChatModel MODELS[] = {
     {"openai/gpt-oss-120b", false, 0, -1, 0, 0},
     {"qwen/qwen3.8-27b", true, 0, -1, 0, 0},
