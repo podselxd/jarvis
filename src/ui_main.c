@@ -18,12 +18,13 @@
 #include "config.h"
 #include "log.h"
 #include "resource.h"
+#include "resources.h"
 #include "sphere.h"
 #include "ui.h"
 #include "util.h"
 #include "voice.h"
 
-#define HUD_CLASS L"JarvisHUD"
+#define HUD_CLASS L"SokariHUD"
 #define HOTKEY_TALK 1
 #define SUBTITLE_SECONDS 8.0
 #define ORB_FRACTION 0.40f
@@ -48,7 +49,7 @@ static struct {
     SRWLOCK hud_lock;
 
     SRWLOCK text_lock;
-    wchar_t *sub_user, *sub_jarvis, *status;
+    wchar_t *sub_user, *sub_sokari, *status;
     double sub_time;
 
     volatile LONG state;
@@ -89,9 +90,9 @@ void app_subtitle(bool from_user, const char *text)
 {
     if (from_user) {
         set_text(&U.sub_user, text);
-        set_text(&U.sub_jarvis, NULL);
+        set_text(&U.sub_sokari, NULL);
     } else {
-        set_text(&U.sub_jarvis, text);
+        set_text(&U.sub_sokari, text);
     }
 }
 
@@ -139,9 +140,17 @@ HWND ui_message_window(void)
     return U.msg;
 }
 
+/* Mientras el exe no traiga el modelo de "Hey Sokari", el atajo es la forma
+   de hablarle y así lo dicen los textos. */
+static const wchar_t *tray_tip(void)
+{
+    if (config_mic_muted()) return L"Sokari — micrófono silenciado";
+    return res_has_wake_word() ? L"Sokari — escuchando \"Hey Sokari\"" : L"Sokari — Ctrl+Alt+J para hablarle";
+}
+
 HICON ui_app_icon(int size)
 {
-    return (HICON)LoadImageW(U.inst, MAKEINTRESOURCEW(IDI_JARVIS), IMAGE_ICON, size, size, LR_DEFAULTCOLOR);
+    return (HICON)LoadImageW(U.inst, MAKEINTRESOURCEW(IDI_SOKARI), IMAGE_ICON, size, size, LR_DEFAULTCOLOR);
 }
 
 /* ------------------------------------------------------------- ventana --- */
@@ -503,7 +512,7 @@ static void draw_overlay(Surface *back, HFONT big, HFONT small, HFONT status_fon
     SetBkMode(back->dc, TRANSPARENT);
     if (U.status && *U.status) draw_text_block(back->dc, U.status, &(RECT){area.left, area.top, area.right, (int)(H * 0.975)}, status_font, RGB(0x9d, 0x95, 0xff), 1);
     if (U.subtitles && fresh) {
-        if (U.sub_jarvis) draw_text_block(back->dc, U.sub_jarvis, &area, big, RGB(0xec, 0xe8, 0xff), 3);
+        if (U.sub_sokari) draw_text_block(back->dc, U.sub_sokari, &area, big, RGB(0xec, 0xe8, 0xff), 3);
         if (U.sub_user) draw_text_block(back->dc, U.sub_user, &area, small, RGB(0x8f, 0x93, 0xb3), 2);
     }
     ReleaseSRWLockShared(&U.text_lock);
@@ -690,9 +699,10 @@ static LRESULT CALLBACK msg_proc(HWND h, UINT m, WPARAM w, LPARAM l)
         case IDM_MUTE: {
             bool muted = !config_mic_muted();
             config_set_mic_muted(muted);
-            tray_set_tooltip(muted ? L"Sokari — micrófono silenciado" : L"Sokari — escuchando \"Hey Jarvis\"");
+            tray_set_tooltip(tray_tip());
             tray_notify(L"Sokari", muted ? L"Micrófono silenciado. Sokari no escucha hasta que lo actives."
-                                         : L"Micrófono activado. Di \"Hey Jarvis\" cuando quieras.");
+                   : res_has_wake_word() ? L"Micrófono activado. Di \"Hey Sokari\" cuando quieras."
+                                         : L"Micrófono activado. Háblame con Ctrl+Alt+J.");
             settings_sync();
             break;
         }
@@ -753,8 +763,6 @@ static LRESULT CALLBACK msg_proc(HWND h, UINT m, WPARAM w, LPARAM l)
     case WM_APP_HOME:
         home_open(U.inst, false, U.on_saved);
         return 0;
-    case WM_APP_IDENT:
-        return APP_IDENT_SOKARI;
     case WM_APP_CONFIG:
         rebuild_hud();
         return 0;
@@ -788,7 +796,7 @@ bool ui_init(HINSTANCE inst, SettingsSavedFn on_saved, bool show)
     WNDCLASSEXW wc = {sizeof wc};
     wc.lpfnWndProc = msg_proc;
     wc.hInstance = inst;
-    wc.lpszClassName = JARVIS_MSG_CLASS;
+    wc.lpszClassName = SOKARI_MSG_CLASS;
     wc.hIcon = ui_app_icon(32);
     RegisterClassExW(&wc);
     WNDCLASSEXW hc = {sizeof hc};
@@ -801,10 +809,10 @@ bool ui_init(HINSTANCE inst, SettingsSavedFn on_saved, bool show)
     hc.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
     RegisterClassExW(&hc);
 
-    U.msg = CreateWindowExW(0, JARVIS_MSG_CLASS, L"Sokari", WS_OVERLAPPED, 0, 0, 0, 0, NULL, NULL, inst, NULL);
+    U.msg = CreateWindowExW(0, SOKARI_MSG_CLASS, L"Sokari", WS_OVERLAPPED, 0, 0, 0, 0, NULL, NULL, inst, NULL);
     if (!U.msg) return false;
     tray_init(U.msg, ui_app_icon(GetSystemMetrics(SM_CXSMICON)));
-    tray_set_tooltip(config_mic_muted() ? L"Sokari — micrófono silenciado" : L"Sokari — escuchando \"Hey Jarvis\"");
+    tray_set_tooltip(tray_tip());
     if (!RegisterHotKey(U.msg, HOTKEY_TALK, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'J'))
         log_msg("No pude registrar el atajo Ctrl+Alt+J (otra app lo usa).");
 

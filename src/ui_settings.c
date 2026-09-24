@@ -20,6 +20,7 @@
 #include "log.h"
 #include "memory.h"
 #include "mesh.h"
+#include "resources.h"
 #include "sounds.h"
 #include "tts.h"
 #include "ui.h"
@@ -27,7 +28,7 @@
 #include "util.h"
 #include "voice.h"
 
-#define SETTINGS_CLASS L"JarvisSettings"
+#define SETTINGS_CLASS L"SokariSettings"
 #define WM_APP_ASYNC_DONE (WM_APP + 40)
 
 #define C_BG RGB(0x13, 0x13, 0x18)
@@ -395,9 +396,11 @@ static void layout_home(int x, int y, int w)
     S.home_output = output_index_of(c.output_name);
     bool muted = c.mic_muted, running = voice_running();
     config_free(&c);
-    swprintf(g_home_text, 200, L"%ls%ls",
-             running ? L"Sokari está activo: di \"Hey Jarvis\" (o Ctrl+Alt+J) para hablarle."
-                     : L"Todo listo. Dale a Iniciar y di \"Hey Jarvis\" (o Ctrl+Alt+J) cuando quieras hablarle.",
+    bool word = res_has_wake_word();
+    swprintf(g_home_text, 200, L"%ls%ls%ls",
+             running ? L"Sokari está activo: " : L"Todo listo. Dale a Iniciar y ",
+             word ? L"di \"Hey Sokari\" (o Ctrl+Alt+J) para hablarle."
+                  : L"háblale con Ctrl+Alt+J (\"Hey Sokari\" todavía no está listo).",
              muted ? L" El micrófono está silenciado." : L"");
     y = layout_help(x, y - dp(6), w, g_home_text);
     y = layout_button(x, y + dp(6), dp(220), running ? L"Mostrar la esfera" : L"Iniciar Sokari", A_START, true) + dp(8);
@@ -486,14 +489,14 @@ static void layout(void)
         y = layout_dropdown(x, y, w, &S.mic_index, g_mic_labels, S.nmics + 1, A_NONE);
         y = layout_label(x, y, w, L"Salida de audio");
         y = layout_dropdown(x, y, w, &S.output_index, g_output_labels, S.nouts + 1, A_NONE);
-        y = layout_label(x, y, w, L"Sensibilidad de \"Hey Jarvis\"");
+        y = layout_label(x, y, w, L"Sensibilidad de \"Hey Sokari\"");
         y = layout_slider(x, y, w, &S.sensitivity);
         y = layout_help(x, y - dp(8), w,
                         L"Más alta: te escucha aunque lo digas bajito o lejos, pero puede activarse solo con ruido.");
         break;
     case SEC_GENERAL:
         y = layout_toggle(x, y, w, &S.autostart, L"Iniciar Sokari con Windows");
-        y = layout_help(x, y - dp(6), w, L"Atajo: Ctrl+Alt+J para hablarle sin decir \"Hey Jarvis\".") + dp(6);
+        y = layout_help(x, y - dp(6), w, L"Atajo: Ctrl+Alt+J para hablarle sin decir \"Hey Sokari\".") + dp(6);
         y = layout_edit(x, y, w, L"Tus otros dispositivos (Tailscale) — secreto de malla", F_MESH, g_tailscale_text);
         {
             int bx = x;
@@ -668,7 +671,7 @@ static void paint(HDC dc)
     RECT brand = {dp(24), dp(28), side - dp(12), dp(62)};
     text(L"Sokari", brand, S.f_title, C_TEXT, DT_LEFT | DT_SINGLELINE | DT_VCENTER);
     RECT ver = {dp(24), dp(62), side - dp(12), dp(84)};
-    text(L"versión " JARVIS_VERSION_W, ver, S.f_small, C_MUTED, DT_LEFT | DT_SINGLELINE | DT_VCENTER);
+    text(L"versión " SOKARI_VERSION_W, ver, S.f_small, C_MUTED, DT_LEFT | DT_SINGLELINE | DT_VCENTER);
     GdiFlush();
     if (!S.first_run) {
         for (int i = 0; i < SEC_COUNT; i++) {

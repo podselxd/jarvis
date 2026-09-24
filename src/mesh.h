@@ -1,5 +1,5 @@
-#ifndef JARVIS_MESH_H
-#define JARVIS_MESH_H
+#ifndef SOKARI_MESH_H
+#define SOKARI_MESH_H
 
 #include <stdbool.h>
 

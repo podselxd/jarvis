@@ -157,7 +157,7 @@ char *groq_transcribe(const int16_t *pcm, size_t samples, int sample_rate, GroqE
     unsigned char rnd[12];
     random_bytes(rnd, sizeof rnd);
     char *hex = hex_encode(rnd, sizeof rnd);
-    snprintf(boundary, sizeof boundary, "----jarvis%s", hex);
+    snprintf(boundary, sizeof boundary, "----sokari%s", hex);
     free(hex);
 
     char *result = NULL;

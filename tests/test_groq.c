@@ -36,7 +36,7 @@ int wmain(int argc, wchar_t **argv)
     cJSON_AddItemToArray(msgs, sys);
     cJSON *user = cJSON_CreateObject();
     cJSON_AddStringToObject(user, "role", "user");
-    char *q = argc > 1 ? wide_to_utf8(argv[1]) : xstrdup("Hola Jarvis, ¿cuánto es 17 por 23?");
+    char *q = argc > 1 ? wide_to_utf8(argv[1]) : xstrdup("Hola Sokari, ¿cuánto es 17 por 23?");
     cJSON_AddStringToObject(user, "content", q);
     cJSON_AddItemToArray(msgs, user);
 

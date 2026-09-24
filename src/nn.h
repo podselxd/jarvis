@@ -1,5 +1,5 @@
-#ifndef JARVIS_NN_H
-#define JARVIS_NN_H
+#ifndef SOKARI_NN_H
+#define SOKARI_NN_H
 
 /* Dos kernels, compilados dos veces (AVX2+FMA y genérico SSE2) y elegidos al
    arrancar según el CPU: así el .exe corre en cualquier PC x64 pero usa AVX2

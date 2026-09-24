@@ -7,9 +7,12 @@ dist/
 .env
 commands.json
 dispositivos.json
-jarvis.pid
-jarvis.log
+sokari.pid
+sokari.log
 sounds/
 icono.ico
 
 .merget/
+
+# Caché de Python (herramientas/)
+__pycache__/

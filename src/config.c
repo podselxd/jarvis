@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "compat_jarvis.h"
 #include "config.h"
 #include "log.h"
 #include "util.h"
@@ -39,11 +40,11 @@ void paths_init(void)
     wchar_t *local = known_folder(&FOLDERID_LocalAppData);
     if (!local) local = expand_env(L"%USERPROFILE%\\AppData\\Local");
     g_paths.local_dir = path_join(local, L"Sokari");
-    g_paths.legacy_local_dir = path_join(local, L"Jarvis");
+    g_paths.legacy_local_dir = compat_jarvis_dir(local);
     free(local);
 
     /* Misma regla que desde la versión en Python: %OneDrive%\Desktop\Sokari,
-       o ~\Desktop\Sokari (antes ...\Jarvis). */
+       o ~\Desktop\Sokari. */
     wchar_t base[MAX_PATH * 2];
     DWORD n = GetEnvironmentVariableW(L"OneDrive", base, (DWORD)(sizeof base / sizeof base[0]));
     wchar_t *root = (n && n < sizeof base / sizeof base[0]) ? xwcsdup(base) : NULL;
@@ -51,7 +52,7 @@ void paths_init(void)
     if (!root) root = expand_env(L"%USERPROFILE%");
     wchar_t *desk = path_join(root, L"Desktop");
     g_paths.memory_dir = path_join(desk, L"Sokari");
-    g_paths.legacy_memory_dir = path_join(desk, L"Jarvis");
+    g_paths.legacy_memory_dir = compat_jarvis_dir(desk);
     free(desk);
     free(root);
 
@@ -98,36 +99,36 @@ static void defaults(AppConfig *c)
 static void apply_kv(AppConfig *c, const char *key, const char *value)
 {
     if (!strcmp(key, "GROQ_API_KEY")) set_str(&c->groq_api_key, value);
-    else if (!strcmp(key, "JARVIS_USER_NAME")) set_str(&c->user_name, value);
-    else if (!strcmp(key, "JARVIS_STOP_WORD")) set_str(&c->stop_word, value);
-    else if (!strcmp(key, "JARVIS_MESH_SECRET")) set_str(&c->mesh_secret, value);
-    else if (!strcmp(key, "JARVIS_VOICE")) set_str(&c->voice, value);
-    else if (!strcmp(key, "JARVIS_MIC")) set_str(&c->mic_name, value);
-    else if (!strcmp(key, "JARVIS_OUTPUT")) set_str(&c->output_name, value);
-    else if (!strcmp(key, "JARVIS_DISPLAY_MODE")) {
+    else if (!strcmp(key, "SOKARI_USER_NAME")) set_str(&c->user_name, value);
+    else if (!strcmp(key, "SOKARI_STOP_WORD")) set_str(&c->stop_word, value);
+    else if (!strcmp(key, "SOKARI_MESH_SECRET")) set_str(&c->mesh_secret, value);
+    else if (!strcmp(key, "SOKARI_VOICE")) set_str(&c->voice, value);
+    else if (!strcmp(key, "SOKARI_MIC")) set_str(&c->mic_name, value);
+    else if (!strcmp(key, "SOKARI_OUTPUT")) set_str(&c->output_name, value);
+    else if (!strcmp(key, "SOKARI_DISPLAY_MODE")) {
         for (int i = 0; i < DISPLAY_MODE_COUNT; i++)
             if (!strcmp(value, DISPLAY_KEYS[i])) c->display_mode = i;
-    } else if (!strcmp(key, "JARVIS_RESOLUTION")) {
+    } else if (!strcmp(key, "SOKARI_RESOLUTION")) {
         c->resolution = atoi(value);
         if (c->resolution != 720 && c->resolution != 1080 && c->resolution != 1440 && c->resolution != 2160)
             c->resolution = 0;
-    } else if (!strcmp(key, "JARVIS_VOLUME")) {
+    } else if (!strcmp(key, "SOKARI_VOLUME")) {
         int v = atoi(value);
         c->volume = v < 0 ? 0 : v > 100 ? 100 : v;
-    } else if (!strcmp(key, "JARVIS_WAKE_SENSITIVITY")) {
+    } else if (!strcmp(key, "SOKARI_WAKE_SENSITIVITY")) {
         int v = atoi(value);
         c->wake_sensitivity = v < 0 ? 0 : v > 100 ? 100 : v;
-    } else if (!strcmp(key, "JARVIS_SPHERE_STYLE")) {
+    } else if (!strcmp(key, "SOKARI_SPHERE_STYLE")) {
         c->sphere_style = !strcmp(value, "lineas") ? 1 : 0;
-    } else if (!strcmp(key, "JARVIS_ORB_POS")) {
+    } else if (!strcmp(key, "SOKARI_ORB_POS")) {
         if (sscanf(value, "%d,%d", &c->orb_x, &c->orb_y) != 2) c->orb_x = c->orb_y = -1;
-    } else if (!strcmp(key, "JARVIS_WINDOW")) {
+    } else if (!strcmp(key, "SOKARI_WINDOW")) {
         if (sscanf(value, "%d,%d,%d,%d", &c->win_x, &c->win_y, &c->win_w, &c->win_h) != 4 || c->win_w <= 0 ||
             c->win_h <= 0)
             c->win_x = c->win_y = c->win_w = c->win_h = -1;
-    } else if (!strcmp(key, "JARVIS_SUBTITLES")) c->subtitles = parse_bool(value);
-    else if (!strcmp(key, "JARVIS_AUTOSTART")) c->autostart = parse_bool(value);
-    else if (!strcmp(key, "JARVIS_MIC_MUTED")) c->mic_muted = parse_bool(value);
+    } else if (!strcmp(key, "SOKARI_SUBTITLES")) c->subtitles = parse_bool(value);
+    else if (!strcmp(key, "SOKARI_AUTOSTART")) c->autostart = parse_bool(value);
+    else if (!strcmp(key, "SOKARI_MIC_MUTED")) c->mic_muted = parse_bool(value);
 }
 
 static bool load_env_file(const wchar_t *path, AppConfig *c)
@@ -142,7 +143,8 @@ static bool load_env_file(const wchar_t *path, AppConfig *c)
         if (*t && *t != '#' && eq) {
             *eq = 0;
             char *k = str_trim(t), *v = str_trim(eq + 1);
-            apply_kv(c, k, v);
+            char buf[64];
+            apply_kv(c, compat_jarvis_config_key(k, buf, sizeof buf), v);
             free(k);
             free(v);
         }
@@ -175,22 +177,22 @@ static bool save_locked(void)
     sb_init(&sb);
     sb_append(&sb, "# Configuración de Sokari. Se edita desde la ventana de Configuración.\n");
     put_kv(&sb, "GROQ_API_KEY", g_cfg.groq_api_key);
-    put_kv(&sb, "JARVIS_USER_NAME", g_cfg.user_name);
-    put_kv(&sb, "JARVIS_STOP_WORD", g_cfg.stop_word);
-    put_kv(&sb, "JARVIS_MESH_SECRET", g_cfg.mesh_secret);
-    put_kv(&sb, "JARVIS_VOICE", g_cfg.voice);
-    put_kv(&sb, "JARVIS_MIC", g_cfg.mic_name);
-    put_kv(&sb, "JARVIS_OUTPUT", g_cfg.output_name);
-    put_kv(&sb, "JARVIS_DISPLAY_MODE", display_mode_key(g_cfg.display_mode));
-    sb_appendf(&sb, "JARVIS_RESOLUTION=%d\n", g_cfg.resolution);
-    sb_appendf(&sb, "JARVIS_VOLUME=%d\n", g_cfg.volume);
-    sb_appendf(&sb, "JARVIS_WAKE_SENSITIVITY=%d\n", g_cfg.wake_sensitivity);
-    sb_appendf(&sb, "JARVIS_SPHERE_STYLE=%s\n", g_cfg.sphere_style == 1 ? "lineas" : "puntos");
-    sb_appendf(&sb, "JARVIS_ORB_POS=%d,%d\n", g_cfg.orb_x, g_cfg.orb_y);
-    sb_appendf(&sb, "JARVIS_WINDOW=%d,%d,%d,%d\n", g_cfg.win_x, g_cfg.win_y, g_cfg.win_w, g_cfg.win_h);
-    sb_appendf(&sb, "JARVIS_SUBTITLES=%d\n", g_cfg.subtitles ? 1 : 0);
-    sb_appendf(&sb, "JARVIS_AUTOSTART=%d\n", g_cfg.autostart ? 1 : 0);
-    sb_appendf(&sb, "JARVIS_MIC_MUTED=%d\n", g_cfg.mic_muted ? 1 : 0);
+    put_kv(&sb, "SOKARI_USER_NAME", g_cfg.user_name);
+    put_kv(&sb, "SOKARI_STOP_WORD", g_cfg.stop_word);
+    put_kv(&sb, "SOKARI_MESH_SECRET", g_cfg.mesh_secret);
+    put_kv(&sb, "SOKARI_VOICE", g_cfg.voice);
+    put_kv(&sb, "SOKARI_MIC", g_cfg.mic_name);
+    put_kv(&sb, "SOKARI_OUTPUT", g_cfg.output_name);
+    put_kv(&sb, "SOKARI_DISPLAY_MODE", display_mode_key(g_cfg.display_mode));
+    sb_appendf(&sb, "SOKARI_RESOLUTION=%d\n", g_cfg.resolution);
+    sb_appendf(&sb, "SOKARI_VOLUME=%d\n", g_cfg.volume);
+    sb_appendf(&sb, "SOKARI_WAKE_SENSITIVITY=%d\n", g_cfg.wake_sensitivity);
+    sb_appendf(&sb, "SOKARI_SPHERE_STYLE=%s\n", g_cfg.sphere_style == 1 ? "lineas" : "puntos");
+    sb_appendf(&sb, "SOKARI_ORB_POS=%d,%d\n", g_cfg.orb_x, g_cfg.orb_y);
+    sb_appendf(&sb, "SOKARI_WINDOW=%d,%d,%d,%d\n", g_cfg.win_x, g_cfg.win_y, g_cfg.win_w, g_cfg.win_h);
+    sb_appendf(&sb, "SOKARI_SUBTITLES=%d\n", g_cfg.subtitles ? 1 : 0);
+    sb_appendf(&sb, "SOKARI_AUTOSTART=%d\n", g_cfg.autostart ? 1 : 0);
+    sb_appendf(&sb, "SOKARI_MIC_MUTED=%d\n", g_cfg.mic_muted ? 1 : 0);
     ensure_dir(g_paths.local_dir);
     bool ok = write_file_atomic(g_paths.config_file, sb.data, sb.len);
     sb_free(&sb);
@@ -364,74 +366,6 @@ static void copy_if_missing(const wchar_t *src_dir, const wchar_t *name, const w
     }
     free(src);
     free(dst);
-}
-
-/* Copia una carpeta completa sin pisar lo que ya exista del otro lado ni
-   seguir enlaces (un enlace podría apuntar a cualquier parte del disco).
-   Devuelve cuántos archivos copió. */
-static int copy_tree(const wchar_t *src, const wchar_t *dst, const wchar_t *const *skip, int nskip)
-{
-    if (!ensure_dir(dst)) return 0;
-    wchar_t *pattern = path_join(src, L"*");
-    WIN32_FIND_DATAW fd;
-    HANDLE h = FindFirstFileW(pattern, &fd);
-    free(pattern);
-    if (h == INVALID_HANDLE_VALUE) return 0;
-    int copied = 0;
-    do {
-        if (!wcscmp(fd.cFileName, L".") || !wcscmp(fd.cFileName, L"..")) continue;
-        if (fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) continue;
-        bool skipped = false;
-        for (int i = 0; i < nskip && !skipped; i++) skipped = !_wcsicmp(fd.cFileName, skip[i]);
-        if (skipped) continue;
-        wchar_t *s = path_join(src, fd.cFileName), *d = path_join(dst, fd.cFileName);
-        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) copied += copy_tree(s, d, NULL, 0);
-        else if (CopyFileW(s, d, TRUE)) copied++;
-        free(s);
-        free(d);
-    } while (FindNextFileW(h, &fd));
-    FindClose(h);
-    return copied;
-}
-
-static bool dir_missing_or_empty(const wchar_t *dir)
-{
-    wchar_t *pattern = path_join(dir, L"*");
-    WIN32_FIND_DATAW fd;
-    HANDLE h = FindFirstFileW(pattern, &fd);
-    free(pattern);
-    if (h == INVALID_HANDLE_VALUE) return true;
-    bool empty = true;
-    do {
-        if (wcscmp(fd.cFileName, L".") && wcscmp(fd.cFileName, L"..")) empty = false;
-    } while (empty && FindNextFileW(h, &fd));
-    FindClose(h);
-    return empty;
-}
-
-/* Sokari antes se llamaba Jarvis. La primera vez que corre se trae la
-   configuración (%LOCALAPPDATA%\Jarvis) y la memoria (Escritorio\Jarvis) a
-   sus carpetas nuevas. Copia, no mueve: las de Jarvis se quedan como
-   respaldo y por si vuelves a abrir la versión anterior. Devuelve true si
-   copió algo. Va antes de config_load. */
-bool config_migrate_from_jarvis(void)
-{
-    bool migrated = false;
-    wchar_t *old_cfg = path_join(g_paths.legacy_local_dir, L"config.env");
-    if (!file_exists(g_paths.config_file) && file_exists(old_cfg)) {
-        /* El log y las descargas a medias de una actualización no hacen falta. */
-        static const wchar_t *const SKIP[] = {L"jarvis.log", L"update"};
-        int n = copy_tree(g_paths.legacy_local_dir, g_paths.local_dir, SKIP, 2);
-        log_msg("Configuración de Jarvis copiada a la carpeta de Sokari (%d archivos).", n);
-        migrated = true;
-    }
-    free(old_cfg);
-    if (dir_missing_or_empty(g_paths.memory_dir) && !dir_missing_or_empty(g_paths.legacy_memory_dir)) {
-        int n = copy_tree(g_paths.legacy_memory_dir, g_paths.memory_dir, NULL, 0);
-        log_msg("Memoria de Jarvis copiada a la carpeta de Sokari (%d archivos).", n);
-        migrated = true;
-    }
-    return migrated;
 }
 
 /* La versión en Python guardaba .env, commands.json, dispositivos.json y

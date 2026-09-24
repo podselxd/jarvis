@@ -1,19 +1,18 @@
-#ifndef JARVIS_AUTOSTART_H
-#define JARVIS_AUTOSTART_H
+#ifndef SOKARI_AUTOSTART_H
+#define SOKARI_AUTOSTART_H
 
 #include <stdbool.h>
 #include <wchar.h>
 
 #define AUTOSTART_FLAG L"--autostart"
+#define AUTOSTART_RUN_KEY L"Software\\Microsoft\\Windows\\CurrentVersion\\Run"
+#define AUTOSTART_RUN_VALUE L"Sokari"
 
 bool autostart_is_enabled(void);
 bool autostart_set(bool enable);
-void autostart_migrate_legacy(void);
 /* Si la clave Run de una versión anterior apunta a este mismo .exe sin
    --autostart, se la agrega (así al prender la PC no sale la ventana de Inicio). */
 void autostart_refresh(void);
-/* La clave Run "Jarvis" pasa a "Sokari" (ver autostart.c). */
-void autostart_migrate_from_jarvis(bool data_migrated);
 bool autostart_value_points_to(const wchar_t *value, const wchar_t *exe);
 
 /* Lo que va en la clave Run: "ruta\Sokari.exe" --autostart. */

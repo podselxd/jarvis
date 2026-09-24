@@ -1,4 +1,4 @@
-/* Hilo de voz: micrófono -> "Hey Jarvis" -> grabación del comando -> Groq ->
+/* Hilo de voz: micrófono -> "Hey Sokari" -> grabación del comando -> Groq ->
    herramientas -> respuesta hablada. Más un hilo aparte para la síntesis
    (SAPI) que va generando oración por oración mientras se reproduce la
    anterior, así Sokari empieza a hablar enseguida aunque la respuesta sea
@@ -30,9 +30,9 @@
 #define MAX_COMMAND_FRAMES (20 * MIC_RATE / MIC_FRAME)
 #define LISTEN_TIMEOUT_FRAMES (5 * MIC_RATE / MIC_FRAME)
 #define PREROLL_FRAMES 4 /* 320 ms antes de que la voz supere el umbral: no se come el inicio */
-#define LOOKAHEAD_FRAMES 4 /* 320 ms después de "Hey Jarvis" para ver si sigues hablando */
+#define LOOKAHEAD_FRAMES 4 /* 320 ms después de "Hey Sokari" para ver si sigues hablando */
 /* 400 ms hasta el cuadro donde se detectó el nombre: el detector avisa hasta
-   ~1/3 s después de que terminas de decir "Jarvis", y para entonces la orden
+   ~1/3 s después de que terminas de decir "Sokari", y para entonces la orden
    ya pudo empezar. Si se cuela el final del nombre, no pasa nada. */
 #define WAKE_HISTORY_FRAMES 5
 #define INTERRUPT_ENERGY_MULTIPLIER 4.5f
@@ -369,7 +369,7 @@ static void calibrate(void)
 }
 
 /* seed: audio que ya se sabe que es el principio de la orden (lo que dijiste
-   de corrido después de "Hey Jarvis"); con él ya no se espera a que hables. */
+   de corrido después de "Hey Sokari"); con él ya no se espera a que hables. */
 static int16_t *record_command(const int16_t *seed, int nseed, size_t *out_n)
 {
     size_t cap = (size_t)MAX_COMMAND_FRAMES * MIC_FRAME;
@@ -455,7 +455,7 @@ static bool handle_turn(const int16_t *audio, size_t n)
     return r.keep_going;
 }
 
-/* "Hey Jarvis abre Spotify" de corrido: si justo después del nombre sigues
+/* "Hey Sokari abre Spotify" de corrido: si justo después del nombre sigues
    hablando, no suena el tono ni se tira ese audio (es el principio de la
    orden). Devuelve cuántos cuadros hay en seed (los últimos antes de la
    detección más los que siguen), o 0 si hiciste pausa. */
@@ -465,14 +465,14 @@ static int continued_speech(const int16_t *history, int nhist, int16_t seed[][MI
     int n = nhist, loud = 0;
     for (int i = 0; i < LOOKAHEAD_FRAMES; i++) {
         if (!input_read(seed[n], 1000)) break;
-        /* El primero no cuenta: puede ser la cola de "Jarvis" o el eco del cuarto. */
+        /* El primero no cuenta: puede ser la cola de "Sokari" o el eco del cuarto. */
         if (i > 0 && frame_energy(seed[n], MIC_FRAME) > (float)g_silence) loud++;
         n++;
     }
     return loud >= 2 ? n : 0;
 }
 
-/* history: los últimos cuadros hasta el que activó "Hey Jarvis" (nhist = 0 si
+/* history: los últimos cuadros hasta el que activó "Hey Sokari" (nhist = 0 si
    fue con el atajo). */
 static void conversation(const int16_t *history, int nhist)
 {
@@ -495,7 +495,7 @@ static void conversation(const int16_t *history, int nhist)
         if (!cont || WaitForSingleObject(g_quit, 0) == WAIT_OBJECT_0) break;
     }
     app_set_state(JV_IDLE);
-    log_msg("Escuchando \"Hey Jarvis\"...");
+    log_msg("Escuchando \"Hey Sokari\"...");
 }
 
 static void announce_due_reminders(void)
@@ -553,11 +553,15 @@ static DWORD WINAPI voice_main(LPVOID arg)
     InitializeConditionVariable(&S.cv);
     S.thread = CreateThread(NULL, 0, speech_worker, xstrdup(cfg.voice), 0, NULL);
 
-    size_t blen = 0;
+    size_t blen = 0, wlen = 0;
     const void *blob = res_data(IDR_WAKEWORD, &blen);
-    WakeWord *ww = ww_create(blob, blen);
-    if (!ww) {
-        app_notify("Sokari", "No pude cargar el detector de \"Hey Jarvis\". Usa Ctrl+Alt+J para hablarle.");
+    const void *word = res_data(IDR_HEY_SOKARI, &wlen);
+    WakeWord *ww = word ? ww_create(blob, blen, word, wlen) : NULL;
+    if (!word) {
+        log_msg("Este exe no trae el modelo de \"Hey Sokari\": solo se le habla con Ctrl+Alt+J.");
+        app_notify("Sokari", "Todavía no tengo mi palabra \"Hey Sokari\". Por ahora háblame con Ctrl+Alt+J.");
+    } else if (!ww) {
+        app_notify("Sokari", "No pude cargar el detector de \"Hey Sokari\". Usa Ctrl+Alt+J para hablarle.");
     }
 
     if (!g_sim_mode && !mic_start(g_mic_name) && !mic_start("")) {
@@ -577,7 +581,7 @@ static DWORD WINAPI voice_main(LPVOID arg)
 
     speak("Sokari en línea.", false);
     app_set_state(JV_IDLE);
-    log_msg("Listo. Di \"Hey Jarvis\" (o Ctrl+Alt+J) para hablarle.");
+    log_msg(ww ? "Listo. Di \"Hey Sokari\" (o Ctrl+Alt+J) para hablarle." : "Listo. Ctrl+Alt+J para hablarle.");
 
     int16_t f[MIC_FRAME];
     int16_t hist[WAKE_HISTORY_FRAMES][MIC_FRAME];

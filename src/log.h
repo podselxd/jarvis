@@ -1,5 +1,5 @@
-#ifndef JARVIS_LOG_H
-#define JARVIS_LOG_H
+#ifndef SOKARI_LOG_H
+#define SOKARI_LOG_H
 
 #include <wchar.h>
 

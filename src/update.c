@@ -2,8 +2,8 @@
    .exe que está corriendo, pero sí renombrarlo. Se renombra el actual a
    <nombre>.exe.old, se pone el nuevo en su lugar, se lanza, y el nuevo borra
    el .old al arrancar. Solo se aplica con Sokari en reposo. El archivo
-   conserva su nombre: si era Jarvis.exe sigue llamándose así (los accesos
-   directos y el inicio con Windows apuntan ahí). */
+   conserva su nombre (los accesos directos y el inicio con Windows apuntan
+   ahí). */
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <bcrypt.h>
@@ -134,19 +134,15 @@ static bool fetch_latest(Release *out, char **error)
     return true;
 }
 
-/* Desde que se llama Sokari, el release trae Sokari.exe y una copia idéntica
-   como Jarvis.exe para los Jarvis de antes, que buscan ese nombre. */
 const cJSON *update_pick_asset(const cJSON *assets)
 {
-    const cJSON *fallback = NULL, *a;
+    const cJSON *a;
     cJSON_ArrayForEach(a, assets)
     {
         const cJSON *name = cJSON_GetObjectItemCaseSensitive(a, "name");
-        if (!cJSON_IsString(name)) continue;
-        if (!strcmp(name->valuestring, "Sokari.exe")) return a;
-        if (!fallback && !strcmp(name->valuestring, "Jarvis.exe")) fallback = a;
+        if (cJSON_IsString(name) && !strcmp(name->valuestring, "Sokari.exe")) return a;
     }
-    return fallback;
+    return NULL;
 }
 
 static bool download_verified(const Release *rel, const wchar_t *dest, char **error)
@@ -235,13 +231,13 @@ static char *check_and_update(bool quiet)
         InterlockedExchange(&g_busy, 0);
         return msg;
     }
-    if (!is_newer(rel.tag, JARVIS_VERSION)) {
-        msg = quiet ? NULL : str_printf("Ya tienes la última versión (%s).", JARVIS_VERSION);
+    if (!is_newer(rel.tag, SOKARI_VERSION)) {
+        msg = quiet ? NULL : str_printf("Ya tienes la última versión (%s).", SOKARI_VERSION);
         release_free(&rel);
         InterlockedExchange(&g_busy, 0);
         return msg;
     }
-    log_msg("Hay una versión nueva: %s (tengo %s). Descargando...", rel.tag, JARVIS_VERSION);
+    log_msg("Hay una versión nueva: %s (tengo %s). Descargando...", rel.tag, SOKARI_VERSION);
     wchar_t *dest = path_join(g_paths.update_dir, L"Sokari_nuevo.exe");
     if (!download_verified(&rel, dest, &error)) {
         log_msg("Actualización: %s", error);

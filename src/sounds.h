@@ -1,5 +1,5 @@
-#ifndef JARVIS_SOUNDS_H
-#define JARVIS_SOUNDS_H
+#ifndef SOKARI_SOUNDS_H
+#define SOKARI_SOUNDS_H
 
 /* Sonidos: si pusiste tus propios activacion.mp3/busqueda.mp3 (en
    %LOCALAPPDATA%\Sokari\sounds, o elegidos desde Configuración) se usan esos;

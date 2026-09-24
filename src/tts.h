@@ -1,5 +1,5 @@
-#ifndef JARVIS_TTS_H
-#define JARVIS_TTS_H
+#ifndef SOKARI_TTS_H
+#define SOKARI_TTS_H
 
 #include <stdbool.h>
 #include <stddef.h>

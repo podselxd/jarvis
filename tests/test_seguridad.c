@@ -70,18 +70,18 @@ static void test_archivos(void)
     wchar_t *mem = path_join(g_paths.memory_dir, L"perfiles.json");
     check(path_is_off_limits(mem), "archivo de la carpeta de memoria");
     free(mem);
-    /* Las carpetas de cuando se llamaba Jarvis se quedan como respaldo, con una
+    /* Las carpetas de la versión anterior se quedan como respaldo, con una
        copia de la API key y de la memoria: también están fuera de alcance. */
     wchar_t *old_cfg = path_join(g_paths.legacy_local_dir, L"config.env");
     wchar_t *old_mem = path_join(g_paths.legacy_memory_dir, L"perfiles.json");
     check(path_is_off_limits(old_cfg) && path_is_off_limits(old_mem),
-          "config.env y memoria en las carpetas viejas de Jarvis");
+          "config.env y memoria en las carpetas de la versión anterior");
     free(old_cfg);
     free(old_mem);
 
     wchar_t tmp[MAX_PATH];
     GetTempPathW(MAX_PATH, tmp);
-    wchar_t *normal = path_join(tmp, L"jarvis_prueba.txt");
+    wchar_t *normal = path_join(tmp, L"sokari_prueba.txt");
     write_file_atomic(normal, "hola desde la prueba", 20);
     check(!path_is_off_limits(normal), "un archivo normal en %TEMP% sí se permite");
     char *normal_u = w2u(normal);
@@ -90,8 +90,11 @@ static void test_archivos(void)
     char *local_u = w2u(g_paths.local_dir), *mem_u = w2u(g_paths.memory_dir), *cfg_u = w2u(g_paths.config_file);
     check(tool_says(NO, "read_file", "ruta", "%LOCALAPPDATA%\\Sokari\\config.env", NULL, NULL),
           "read_file niega %LOCALAPPDATA%\\Sokari\\config.env");
-    check(tool_says(NO, "read_file", "ruta", "%LOCALAPPDATA%\\Jarvis\\config.env", NULL, NULL),
-          "read_file niega el config.env viejo (%LOCALAPPDATA%\\Jarvis)");
+    char *old_cfg_u = w2u(g_paths.legacy_local_dir);
+    char old_cfg_arg[MAX_PATH * 3];
+    snprintf(old_cfg_arg, sizeof old_cfg_arg, "%s\\config.env", old_cfg_u);
+    check(tool_says(NO, "read_file", "ruta", old_cfg_arg, NULL, NULL), "read_file niega el config.env de la versión anterior");
+    free(old_cfg_u);
     check(tool_says(NO, "read_file", "ruta", "\\\\servidor\\c\\x.txt", NULL, NULL), "read_file niega \\\\servidor");
     check(tool_says(NO, "list_files", "carpeta", local_u, NULL, NULL), "list_files niega la carpeta de Sokari");
     check(tool_says(NO, "buscar_archivo", "nombre", "json", "carpeta", mem_u), "buscar_archivo niega la memoria");
@@ -105,7 +108,7 @@ static void test_archivos(void)
 
     /* Un link simbólico hacia la carpeta de Sokari tampoco sirve de atajo
        (crear links puede pedir permisos; si no se puede, se omite). */
-    wchar_t *link = path_join(tmp, L"jarvis_atajo");
+    wchar_t *link = path_join(tmp, L"sokari_atajo");
     RemoveDirectoryW(link);
     if (CreateSymbolicLinkW(link, g_paths.local_dir, SYMBOLIC_LINK_FLAG_DIRECTORY | 0x2) &&
         GetFileAttributesW(link) != INVALID_FILE_ATTRIBUTES) {

@@ -1,5 +1,5 @@
-#ifndef JARVIS_AGENT_H
-#define JARVIS_AGENT_H
+#ifndef SOKARI_AGENT_H
+#define SOKARI_AGENT_H
 
 #include <stdbool.h>
 

@@ -1,5 +1,5 @@
-#ifndef JARVIS_UI_H
-#define JARVIS_UI_H
+#ifndef SOKARI_UI_H
+#define SOKARI_UI_H
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -13,14 +13,9 @@
 #define WM_APP_SETTINGS (WM_APP + 6)
 #define WM_APP_CONFIG (WM_APP + 7)
 #define WM_APP_HOME (WM_APP + 8)
-/* Lo contesta Sokari con APP_IDENT_SOKARI; un Jarvis de antes devuelve 0. */
-#define WM_APP_IDENT (WM_APP + 9)
-#define APP_IDENT_SOKARI 0x50CA
 
-/* Nombre de siempre (y el mismo mutex en main.c): así un Jarvis de antes y
-   Sokari nunca corren a la vez, y abrir cualquiera de los dos encuentra al
-   que ya está abierto. */
-#define JARVIS_MSG_CLASS L"JarvisMessageWindow"
+/* Abrir el exe otra vez la busca para mostrar la ventana de Inicio. */
+#define SOKARI_MSG_CLASS L"SokariMessageWindow"
 
 enum {
     IDM_TALK = 1001,

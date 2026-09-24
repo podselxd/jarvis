@@ -205,7 +205,7 @@ char *profile_display_name(const char *key)
 }
 
 /* Recordatorios con hora (cuando_iso) ya vencidos, de TODOS los perfiles: se
-   avisan solos aunque nadie haya dicho "Hey Jarvis". Se marcan como avisados
+   avisan solos aunque nadie haya dicho "Hey Sokari". Se marcan como avisados
    al tomarlos para que no se repitan. */
 int reminders_take_due(DueReminder **out)
 {

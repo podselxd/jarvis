@@ -1,12 +1,12 @@
-#ifndef JARVIS_CONFIG_H
-#define JARVIS_CONFIG_H
+#ifndef SOKARI_CONFIG_H
+#define SOKARI_CONFIG_H
 
 #include <stdbool.h>
 #include <wchar.h>
 
-#define JARVIS_VERSION "2.1.0"
-#define JARVIS_VERSION_W L"2.1.0"
-#define GITHUB_REPO "podselxd/jarvis"
+#define SOKARI_VERSION "2.2.0"
+#define SOKARI_VERSION_W L"2.2.0"
+#define GITHUB_REPO "podselxd/sokari"
 
 typedef enum {
     DISPLAY_FULLSCREEN = 0,
@@ -40,9 +40,9 @@ typedef struct {
 typedef struct {
     wchar_t *local_dir;  /* %LOCALAPPDATA%\Sokari: config, log, dispositivos */
     wchar_t *memory_dir; /* <OneDrive o perfil>\Desktop\Sokari: memoria, datos, perfiles */
-    /* Las de cuando se llamaba Jarvis: se copian la primera vez y se quedan
-       como respaldo (con tu API key y tu memoria adentro, así que también
-       están protegidas). */
+    /* Las de la versión anterior: se copian la primera vez y se quedan como
+       respaldo (con tu API key y tu memoria adentro, así que también están
+       protegidas). Ver compat_jarvis.h. */
     wchar_t *legacy_local_dir;
     wchar_t *legacy_memory_dir;
     wchar_t *config_file;
@@ -58,7 +58,6 @@ void paths_init(void);
 void config_load(void);
 bool config_save(void);
 void config_migrate_legacy(void);
-bool config_migrate_from_jarvis(void);
 
 AppConfig config_snapshot(void);
 void config_free(AppConfig *c);

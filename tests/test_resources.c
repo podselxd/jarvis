@@ -1,5 +1,5 @@
 /* Verifica que los recursos metidos en el exe (herramientas, prompt y modelo
-   de "Hey Jarvis") se lean bien. No usa internet ni abre ventanas. */
+   de "Hey Sokari") se lean bien. No usa internet ni abre ventanas. */
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -31,7 +31,8 @@ int wmain(void)
     }
     char *compact = cJSON_PrintUnformatted(t);
     printf("herramientas: %d (%d mal formadas) | a Groq se mandan %zu bytes\n", n, bad, strlen(compact));
-    printf("prompt: %zu bytes | modelo de wake word: %zu bytes (%.4s)\n", strlen(prompt), ww_len, ww ? ww : "----");
+    printf("prompt: %zu bytes | parte común del detector: %zu bytes (%.4s) | modelo de \"Hey Sokari\": %s\n",
+           strlen(prompt), ww_len, ww ? ww : "----", res_has_wake_word() ? "incluido" : "todavía no");
     bool ok = n > 0 && !bad && *prompt && ww && ww_len > 4 && !memcmp(ww, "JWW1", 4);
     printf(ok ? "ok\n" : "FALLA\n");
     cJSON_free(compact);

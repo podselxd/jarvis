@@ -1,5 +1,5 @@
-#ifndef JARVIS_HTTP_H
-#define JARVIS_HTTP_H
+#ifndef SOKARI_HTTP_H
+#define SOKARI_HTTP_H
 
 #include <stdbool.h>
 #include <stddef.h>

@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "compat_jarvis.h"
 #include "config.h"
 #include "http.h"
 #include "log.h"
@@ -182,7 +183,8 @@ static void handle_client(SOCKET c)
         return;
     }
     size_t vlen = 0;
-    const char *secret = find_header(buf, "X-Jarvis-Secret", &vlen);
+    const char *secret = find_header(buf, "X-Sokari-Secret", &vlen);
+    if (!secret) secret = find_header(buf, COMPAT_JARVIS_MESH_HEADER, &vlen);
     char *expected = config_mesh_secret(false);
     char *given = secret ? xstrndup(secret, vlen) : xstrdup("");
     bool authorized = *expected && secure_equal(given, expected);
@@ -356,7 +358,10 @@ char *tool_gestionar_dispositivo(const cJSON *a)
         char *payload = cJSON_PrintUnformatted(body);
         cJSON_Delete(body);
         char *secret = config_mesh_secret(true);
-        char *headers = str_printf("Content-Type: application/json\r\nX-Jarvis-Secret: %s\r\n", secret);
+        /* También con el encabezado de antes, para tus PCs que todavía no se actualizan. */
+        char *headers = str_printf("Content-Type: application/json\r\nX-Sokari-Secret: %s\r\n"
+                                   COMPAT_JARVIS_MESH_HEADER ": %s\r\n",
+                                   secret, secret);
         free(secret);
         HttpRequest req = {.method = "POST", .url = url, .headers = headers, .body = payload,
                            .body_len = strlen(payload), .timeout_ms = 30000};

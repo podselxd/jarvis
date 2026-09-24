@@ -1,5 +1,5 @@
-#ifndef JARVIS_VOICE_H
-#define JARVIS_VOICE_H
+#ifndef SOKARI_VOICE_H
+#define SOKARI_VOICE_H
 
 #include <stdbool.h>
 #include <stdint.h>

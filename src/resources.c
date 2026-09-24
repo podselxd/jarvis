@@ -1,6 +1,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
+#include "resource.h"
 #include "resources.h"
 #include "util.h"
 
@@ -20,4 +21,10 @@ char *res_string(int id)
     const char *p = res_data(id, &n);
     if (!p) return xstrdup("");
     return xstrndup(p, n);
+}
+
+bool res_has_wake_word(void)
+{
+    size_t n = 0;
+    return res_data(IDR_HEY_SOKARI, &n) && n > 8;
 }
