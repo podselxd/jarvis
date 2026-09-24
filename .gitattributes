@@ -1,0 +1,3 @@
+# Van tal cual dentro del .exe: git nunca debe tocarles los fines de línea.
+*.bin binary
+*.ico binary

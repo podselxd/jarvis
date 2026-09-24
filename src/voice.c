@@ -1,0 +1,622 @@
+/* Hilo de voz: micrófono -> "Hey Jarvis" -> grabación del comando -> Groq ->
+   herramientas -> respuesta hablada. Más un hilo aparte para la síntesis
+   (SAPI) que va generando oración por oración mientras se reproduce la
+   anterior, así Jarvis empieza a hablar enseguida aunque la respuesta sea
+   larga. */
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <objbase.h>
+#include <math.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "agent.h"
+#include "app.h"
+#include "audio.h"
+#include "config.h"
+#include "groq.h"
+#include "log.h"
+#include "memory.h"
+#include "mesh.h"
+#include "resource.h"
+#include "resources.h"
+#include "sounds.h"
+#include "tts.h"
+#include "util.h"
+#include "voice.h"
+#include "wakeword.h"
+
+#define SILENCE_FRAMES_TO_STOP 22 /* ~1.75 s de silencio: tolera pausas naturales */
+#define MAX_COMMAND_FRAMES (20 * MIC_RATE / MIC_FRAME)
+#define LISTEN_TIMEOUT_FRAMES (5 * MIC_RATE / MIC_FRAME)
+#define PREROLL_FRAMES 4 /* 320 ms antes de que la voz supere el umbral: no se come el inicio */
+#define INTERRUPT_ENERGY_MULTIPLIER 4.5f
+#define INTERRUPT_FRAMES 2 /* voz fuerte sostenida, no un golpe o un movimiento suelto */
+#define REMINDER_CHECK_FRAMES (20 * MIC_RATE / MIC_FRAME)
+
+typedef struct Chunk {
+    int16_t *pcm;
+    size_t n;
+    struct Chunk *next;
+} Chunk;
+
+static struct {
+    HANDLE thread;
+    CRITICAL_SECTION lock;
+    CONDITION_VARIABLE cv;
+    char **sentences;
+    int nsent, next_sent;
+    bool job_active, cancel, synth_done, quit;
+    Chunk *head, *tail;
+    char *pending_voice;
+    bool list_request, list_ready;
+    TtsVoice *list_result;
+    int list_count;
+} S;
+
+static HANDLE g_thread;
+static HANDLE g_quit;
+static HANDLE g_trigger;
+static volatile LONG g_settings_dirty;
+static int g_silence = 300;
+static Conversation *g_conv;
+static Conversation *g_mesh_conv;
+static char *g_mic_name;
+
+static int16_t *g_sim;
+static size_t g_sim_n, g_sim_pos;
+static bool g_sim_mode;
+
+/* ------------------------------------------------------------ síntesis --- */
+
+static void free_chunks(void)
+{
+    while (S.head) {
+        Chunk *c = S.head;
+        S.head = c->next;
+        free(c->pcm);
+        free(c);
+    }
+    S.tail = NULL;
+}
+
+static DWORD WINAPI speech_worker(LPVOID arg)
+{
+    char *voice = arg;
+    tts_init(voice);
+    free(voice);
+    EnterCriticalSection(&S.lock);
+    while (!S.quit) {
+        if (S.pending_voice) {
+            char *v = S.pending_voice;
+            S.pending_voice = NULL;
+            LeaveCriticalSection(&S.lock);
+            if (*v) tts_set_voice(v);
+            free(v);
+            EnterCriticalSection(&S.lock);
+            continue;
+        }
+        if (S.list_request) {
+            S.list_request = false;
+            LeaveCriticalSection(&S.lock);
+            TtsVoice *list;
+            int n = tts_list_voices(&list);
+            EnterCriticalSection(&S.lock);
+            S.list_result = list;
+            S.list_count = n;
+            S.list_ready = true;
+            WakeAllConditionVariable(&S.cv);
+            continue;
+        }
+        if (S.job_active && !S.cancel && S.next_sent < S.nsent) {
+            char *sentence = xstrdup(S.sentences[S.next_sent++]);
+            LeaveCriticalSection(&S.lock);
+            size_t n = 0;
+            int16_t *pcm = tts_synthesize(sentence, &n);
+            free(sentence);
+            EnterCriticalSection(&S.lock);
+            if (pcm && !S.cancel) {
+                Chunk *c = xcalloc(1, sizeof *c);
+                c->pcm = pcm;
+                c->n = n;
+                if (S.tail) S.tail->next = c;
+                else S.head = c;
+                S.tail = c;
+            } else {
+                free(pcm);
+            }
+            if (S.next_sent >= S.nsent) S.synth_done = true;
+            WakeAllConditionVariable(&S.cv);
+            continue;
+        }
+        if (S.job_active && !S.synth_done) {
+            S.synth_done = true;
+            WakeAllConditionVariable(&S.cv);
+        }
+        SleepConditionVariableCS(&S.cv, &S.lock, INFINITE);
+    }
+    LeaveCriticalSection(&S.lock);
+    tts_shutdown();
+    return 0;
+}
+
+int voice_list_voices(TtsVoice **out)
+{
+    *out = NULL;
+    if (!S.thread) return 0;
+    EnterCriticalSection(&S.lock);
+    S.list_ready = false;
+    S.list_request = true;
+    WakeAllConditionVariable(&S.cv);
+    while (!S.list_ready && !S.quit)
+        if (!SleepConditionVariableCS(&S.cv, &S.lock, 3000)) break;
+    int n = S.list_ready ? S.list_count : 0;
+    *out = S.list_ready ? S.list_result : NULL;
+    S.list_result = NULL;
+    S.list_ready = false;
+    LeaveCriticalSection(&S.lock);
+    return n;
+}
+
+/* Parte la respuesta en oraciones para sintetizar la primera mientras se
+   escucha nada todavía; las muy cortas se juntan con la siguiente para que
+   la entonación no quede entrecortada. */
+static int split_sentences(const char *text, char ***out)
+{
+    int cap = 8, n = 0;
+    char **list = xmalloc(sizeof(char *) * (size_t)cap);
+    StrBuf cur;
+    sb_init(&cur);
+    for (const char *p = text;; p++) {
+        bool end = !*p;
+        if (!end) sb_append_char(&cur, *p);
+        bool boundary = end || *p == '\n' ||
+                        ((*p == '.' || *p == '!' || *p == '?' || *p == ';' || *p == ':') &&
+                         (p[1] == ' ' || p[1] == '\n' || !p[1]));
+        if (boundary && (end || cur.len >= 40)) {
+            char *t = str_trim(cur.data);
+            if (*t) {
+                if (n == cap) {
+                    cap *= 2;
+                    list = xrealloc(list, sizeof(char *) * (size_t)cap);
+                }
+                list[n++] = t;
+            } else {
+                free(t);
+            }
+            cur.len = 0;
+            cur.data[0] = 0;
+        }
+        if (end) break;
+    }
+    sb_free(&cur);
+    *out = list;
+    return n;
+}
+
+typedef struct {
+    int loud;
+    bool allow_interrupt;
+} PlayCtx;
+
+static bool input_read_nowait(int16_t *f);
+
+static bool play_cb(float level, void *ctx)
+{
+    PlayCtx *pc = ctx;
+    app_set_level(level);
+    if (WaitForSingleObject(g_quit, 0) == WAIT_OBJECT_0) return false;
+    if (!pc->allow_interrupt) return true;
+    int16_t f[MIC_FRAME];
+    while (input_read_nowait(f)) {
+        if (frame_energy(f, MIC_FRAME) > (float)g_silence * INTERRUPT_ENERGY_MULTIPLIER) {
+            if (++pc->loud >= INTERRUPT_FRAMES) {
+                log_msg("Interrumpido: hablaste encima.");
+                return false;
+            }
+        } else {
+            pc->loud = 0;
+        }
+    }
+    return true;
+}
+
+static void input_flush(void);
+
+static void speak(const char *text, bool allow_interrupt)
+{
+    if (str_is_blank(text)) return;
+    log_msg("Jarvis: %s", text);
+    app_subtitle(false, text);
+    app_set_state(JV_SPEAKING);
+    char *clean = tts_clean_text(text);
+    char **sentences;
+    int n = split_sentences(clean, &sentences);
+    free(clean);
+
+    EnterCriticalSection(&S.lock);
+    free_chunks();
+    S.sentences = sentences;
+    S.nsent = n;
+    S.next_sent = 0;
+    S.cancel = false;
+    S.synth_done = n == 0;
+    S.job_active = true;
+    WakeAllConditionVariable(&S.cv);
+    LeaveCriticalSection(&S.lock);
+
+    PlayCtx ctx = {.allow_interrupt = allow_interrupt && !g_sim_mode};
+    for (;;) {
+        EnterCriticalSection(&S.lock);
+        while (!S.head && !S.synth_done && !S.quit) SleepConditionVariableCS(&S.cv, &S.lock, 200);
+        Chunk *c = S.head;
+        if (c) {
+            S.head = c->next;
+            if (!S.head) S.tail = NULL;
+        }
+        LeaveCriticalSection(&S.lock);
+        if (!c) break;
+        bool finished = true;
+        if (!g_sim_mode) finished = speaker_play(c->pcm, c->n, TTS_RATE, volume_to_gain(config_volume()), play_cb, &ctx);
+        free(c->pcm);
+        free(c);
+        if (!finished) {
+            EnterCriticalSection(&S.lock);
+            S.cancel = true;
+            LeaveCriticalSection(&S.lock);
+            break;
+        }
+    }
+    EnterCriticalSection(&S.lock);
+    while (S.job_active && !S.synth_done && S.cancel) SleepConditionVariableCS(&S.cv, &S.lock, 100);
+    free_chunks();
+    for (int i = 0; i < S.nsent; i++) free(S.sentences[i]);
+    free(S.sentences);
+    S.sentences = NULL;
+    S.nsent = S.next_sent = 0;
+    S.job_active = false;
+    LeaveCriticalSection(&S.lock);
+    app_set_level(0);
+    input_flush();
+}
+
+/* -------------------------------------------------------------- entrada --- */
+
+static bool input_read(int16_t *f, unsigned timeout_ms)
+{
+    if (g_sim_mode) {
+        if (g_sim_pos + MIC_FRAME > g_sim_n) {
+            SetEvent(g_quit);
+            return false;
+        }
+        memcpy(f, g_sim + g_sim_pos, sizeof(int16_t) * MIC_FRAME);
+        g_sim_pos += MIC_FRAME;
+        return true;
+    }
+    return mic_read(f, timeout_ms);
+}
+
+static bool input_read_nowait(int16_t *f)
+{
+    return g_sim_mode ? false : mic_read_nowait(f);
+}
+
+static void input_flush(void)
+{
+    if (!g_sim_mode) mic_flush();
+}
+
+void voice_set_input_wav(const wchar_t *path)
+{
+    size_t len;
+    char *d = read_file_all(path, &len);
+    if (!d) return;
+    for (size_t off = 12; off + 8 <= len;) {
+        uint32_t sz;
+        memcpy(&sz, d + off + 4, 4);
+        if (!memcmp(d + off, "data", 4)) {
+            if (off + 8 + sz > len) sz = (uint32_t)(len - off - 8);
+            g_sim = xmalloc(sz);
+            memcpy(g_sim, d + off + 8, sz);
+            g_sim_n = sz / 2;
+            g_sim_mode = true;
+            break;
+        }
+        off += 8 + sz + (sz & 1);
+    }
+    free(d);
+}
+
+static int cmp_float(const void *a, const void *b)
+{
+    float x = *(const float *)a, y = *(const float *)b;
+    return (x > y) - (x < y);
+}
+
+/* Mide el ruido de fondo real al arrancar. Percentil 10 (no el promedio) para
+   que una tos o un portazo durante la medición no arruinen el número; y cuanto
+   más veces corrió, más corta la medición y más pesa el historial. */
+static void calibrate(void)
+{
+    int prev = 0, runs = 0;
+    bool has = load_calibration(&prev, &runs);
+    if (!has) runs = 0;
+    double duration = fmax(0.4, 2.0 - 0.15 * runs);
+    int frames = (int)(duration * MIC_RATE / MIC_FRAME);
+    if (frames < 1) frames = 1;
+    if (frames > 64) frames = 64;
+    float energies[64];
+    int got = 0;
+    int16_t f[MIC_FRAME];
+    input_flush();
+    while (got < frames && input_read(f, 2000)) energies[got++] = frame_energy(f, MIC_FRAME);
+    if (!got) return;
+    qsort(energies, (size_t)got, sizeof(float), cmp_float);
+    double pos = 0.1 * (got - 1);
+    int lo = (int)pos;
+    double noise = energies[lo] + (lo + 1 < got ? (energies[lo + 1] - energies[lo]) * (pos - lo) : 0);
+    int fresh = (int)(noise * 2.2);
+    if (fresh < 90) fresh = 90;
+    g_silence = has ? (int)lround((fresh + (double)prev * runs) / (runs + 1)) : fresh;
+    if (!g_sim_mode) save_calibration(g_silence, runs + 1);
+    log_msg("Umbral de silencio ajustado a tu ambiente: %d", g_silence);
+}
+
+static int16_t *record_command(size_t *out_n)
+{
+    size_t cap = (size_t)MAX_COMMAND_FRAMES * MIC_FRAME;
+    int16_t *buf = xmalloc(sizeof(int16_t) * cap);
+    int16_t pre[PREROLL_FRAMES][MIC_FRAME];
+    int npre = 0, pre_start = 0;
+    size_t n = 0;
+    bool heard = false;
+    int silence_run = 0, waited = 0;
+    int16_t f[MIC_FRAME];
+    for (int i = 0; i < MAX_COMMAND_FRAMES; i++) {
+        if (WaitForSingleObject(g_quit, 0) == WAIT_OBJECT_0 || !input_read(f, 2000)) break;
+        float e = frame_energy(f, MIC_FRAME);
+        float lvl = e / 3000.0f;
+        app_set_level(lvl > 1 ? 1 : lvl);
+        if (e > (float)g_silence) {
+            if (!heard) {
+                for (int k = 0; k < npre; k++) {
+                    memcpy(buf + n, pre[(pre_start + k) % PREROLL_FRAMES], sizeof(int16_t) * MIC_FRAME);
+                    n += MIC_FRAME;
+                }
+                heard = true;
+            }
+            silence_run = 0;
+        } else if (heard) {
+            silence_run++;
+        } else {
+            memcpy(pre[(pre_start + npre) % PREROLL_FRAMES], f, sizeof f);
+            if (npre < PREROLL_FRAMES) npre++;
+            else pre_start = (pre_start + 1) % PREROLL_FRAMES;
+            if (++waited >= LISTEN_TIMEOUT_FRAMES) break;
+            continue;
+        }
+        if (n + MIC_FRAME <= cap) {
+            memcpy(buf + n, f, sizeof f);
+            n += MIC_FRAME;
+        }
+        if (silence_run >= SILENCE_FRAMES_TO_STOP) break;
+    }
+    app_set_level(0);
+    *out_n = n;
+    return buf;
+}
+
+/* ------------------------------------------------------- conversación --- */
+
+static bool handle_turn(const int16_t *audio, size_t n)
+{
+    if (n < (size_t)(MIC_RATE * 3 / 10)) return true;
+    app_set_state(JV_THINKING);
+    app_status("Escuchando lo que dijiste…");
+    GroqError err = {0};
+    char *text = groq_transcribe(audio, n, MIC_RATE, &err);
+    app_status("");
+    if (!text) {
+        log_msg("Error transcribiendo: %s", err.detail ? err.detail : "?");
+        speak(err.status == GROQ_AUTH_ERROR ? "Tu API key de Groq no es válida. Revísala en Configuración."
+                                            : "No pude transcribir el audio.",
+              true);
+        groq_error_free(&err);
+        return true;
+    }
+    groq_error_free(&err);
+    if (!*text) {
+        free(text);
+        return true;
+    }
+    log_msg("Tú: %s", text);
+    app_subtitle(true, text);
+
+    state_lock();
+    TurnResult r = agent_process(g_conv, text);
+    state_unlock();
+    free(text);
+    if (r.reply) speak(r.reply, true);
+    free(r.reply);
+    if (r.shutdown) {
+        app_request_quit();
+        return false;
+    }
+    return r.keep_going;
+}
+
+static void conversation(void)
+{
+    app_set_state(JV_LISTENING);
+    if (!g_sim_mode) sound_activation();
+    input_flush();
+    conv_new_session(g_conv);
+    for (;;) {
+        app_set_state(JV_LISTENING);
+        size_t n;
+        int16_t *audio = record_command(&n);
+        bool cont = n >= (size_t)(MIC_RATE * 3 / 10) && handle_turn(audio, n);
+        free(audio);
+        if (!cont || WaitForSingleObject(g_quit, 0) == WAIT_OBJECT_0) break;
+    }
+    app_set_state(JV_IDLE);
+    log_msg("Escuchando \"Hey Jarvis\"...");
+}
+
+static void announce_due_reminders(void)
+{
+    state_lock();
+    DueReminder *due;
+    int n = reminders_take_due(&due);
+    state_unlock();
+    for (int i = 0; i < n; i++) {
+        char *who = strcmp(due[i].profile, DEFAULT_PROFILE) ? profile_display_name(due[i].profile) : NULL;
+        char *msg = who ? str_printf("%s, te quería recordar: %s", who, due[i].texto)
+                        : str_printf("Te quería recordar: %s", due[i].texto);
+        app_notify("Recordatorio", due[i].texto);
+        speak(msg, true);
+        free(msg);
+        free(who);
+    }
+    due_reminders_free(due, n);
+    if (n) app_set_state(JV_IDLE);
+}
+
+static char *mesh_handle(const char *cmd)
+{
+    if (!state_try_lock(8000)) return NULL;
+    log_msg("Malla: %s", cmd);
+    TurnResult r = agent_process(g_mesh_conv, cmd);
+    state_unlock();
+    if (r.shutdown) app_request_quit();
+    return r.reply ? r.reply : xstrdup("Listo.");
+}
+
+static void apply_settings(void)
+{
+    AppConfig c = config_snapshot();
+    EnterCriticalSection(&S.lock);
+    free(S.pending_voice);
+    S.pending_voice = xstrdup(c.voice);
+    WakeAllConditionVariable(&S.cv);
+    LeaveCriticalSection(&S.lock);
+    if (!g_sim_mode && strcmp(c.mic_name, g_mic_name ? g_mic_name : "")) {
+        free(g_mic_name);
+        g_mic_name = xstrdup(c.mic_name);
+        if (!mic_restart(g_mic_name)) mic_restart("");
+    }
+    config_free(&c);
+}
+
+static DWORD WINAPI voice_main(LPVOID arg)
+{
+    CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+    AppConfig cfg = config_snapshot();
+    g_mic_name = xstrdup(cfg.mic_name);
+
+    InitializeCriticalSection(&S.lock);
+    InitializeConditionVariable(&S.cv);
+    S.thread = CreateThread(NULL, 0, speech_worker, xstrdup(cfg.voice), 0, NULL);
+
+    size_t blen = 0;
+    const void *blob = res_data(IDR_WAKEWORD, &blen);
+    WakeWord *ww = ww_create(blob, blen);
+    if (!ww) {
+        app_notify("Jarvis", "No pude cargar el detector de \"Hey Jarvis\". Usa Ctrl+Alt+J para hablarle.");
+    }
+
+    if (!g_sim_mode && !mic_start(g_mic_name) && !mic_start("")) {
+        app_notify("Jarvis", "No encontré ningún micrófono. Conecta uno y vuelve a abrir Jarvis.");
+    }
+    state_lock();
+    memory_identify_on_start(cfg.user_name);
+    g_conv = conv_create(true);
+    g_mesh_conv = conv_create(false);
+    state_unlock();
+    config_free(&cfg);
+
+    log_msg("Calibrando nivel de silencio, no hace falta que digas nada...");
+    calibrate();
+    if (!g_sim_mode) mesh_start(mesh_handle);
+
+    speak("Jarvis en línea.", false);
+    app_set_state(JV_IDLE);
+    log_msg("Listo. Di \"Hey Jarvis\" (o Ctrl+Alt+J) para hablarle.");
+
+    int16_t f[MIC_FRAME];
+    int frame_count = 0;
+    uint64_t last_data = GetTickCount64();
+    while (WaitForSingleObject(g_quit, 0) != WAIT_OBJECT_0) {
+        if (InterlockedExchange(&g_settings_dirty, 0)) apply_settings();
+        bool triggered = WaitForSingleObject(g_trigger, 0) == WAIT_OBJECT_0;
+        bool got = input_read(f, 500);
+        if (!got) {
+            if (!g_sim_mode && GetTickCount64() - last_data > 5000) {
+                log_msg("El micrófono dejó de mandar audio; lo reabro.");
+                if (!mic_restart(g_mic_name)) mic_restart("");
+                last_data = GetTickCount64();
+            }
+            if (!triggered) continue;
+        } else {
+            last_data = GetTickCount64();
+        }
+        if (++frame_count % REMINDER_CHECK_FRAMES == 0) announce_due_reminders();
+        if (config_mic_muted()) {
+            if (triggered) app_notify("Jarvis", "El micrófono está silenciado (actívalo desde el ícono de la bandeja).");
+            continue;
+        }
+        float score = (got && ww) ? ww_process(ww, f) : 0.0f;
+        if (score > config_wake_threshold() || triggered) {
+            log_msg(triggered ? "Activado con el atajo." : "Wake word detectada (%.2f).", score);
+            if (ww) ww_reset(ww);
+            conversation();
+            if (ww) ww_reset(ww);
+            input_flush();
+        }
+    }
+
+    mesh_stop();
+    EnterCriticalSection(&S.lock);
+    S.quit = true;
+    S.cancel = true;
+    WakeAllConditionVariable(&S.cv);
+    LeaveCriticalSection(&S.lock);
+    WaitForSingleObject(S.thread, 3000);
+    if (!g_sim_mode) mic_stop();
+    ww_destroy(ww);
+    CoUninitialize();
+    return 0;
+}
+
+bool voice_start(void)
+{
+    g_quit = CreateEventW(NULL, TRUE, FALSE, NULL);
+    g_trigger = CreateEventW(NULL, FALSE, FALSE, NULL);
+    agent_init();
+    g_thread = CreateThread(NULL, 1 << 22, voice_main, NULL, 0, NULL);
+    return g_thread != NULL;
+}
+
+void voice_stop(void)
+{
+    if (!g_thread) return;
+    SetEvent(g_quit);
+    WaitForSingleObject(g_thread, 8000);
+    CloseHandle(g_thread);
+    g_thread = NULL;
+}
+
+bool voice_wait(unsigned ms)
+{
+    return g_thread && WaitForSingleObject(g_thread, ms) == WAIT_OBJECT_0;
+}
+
+void voice_trigger(void)
+{
+    if (g_trigger) SetEvent(g_trigger);
+}
+
+void voice_settings_changed(void)
+{
+    InterlockedExchange(&g_settings_dirty, 1);
+}

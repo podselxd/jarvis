@@ -1,62 +1,121 @@
 # Jarvis
 
-Asistente de voz personal para Windows. Se activa diciendo **"Hey Jarvis"**, corre en la nube gratis (Groq) y puede abrir apps, buscar en internet, controlar volumen/música/escritorio, crear sus propios comandos, y recordar cosas entre conversaciones.
+Asistente de voz personal para Windows. Le dices **"Hey Jarvis"** y te contesta con voz. Puede abrir apps, buscar en internet, controlar tu música y tus ventanas, manejar archivos, recordarte cosas y hablar con tus otras PCs.
+
+Es **un solo `Jarvis.exe`** de unos 4 MB, escrito en C. No necesita Python ni instaladores, y no usa archivos `.bat` ni DLLs extra.
 
 ## Instalación
 
-### Opción 1: .exe (más simple)
+1. Baja `Jarvis.exe` de la [última versión](https://github.com/podselxd/jarvis/releases/latest) y déjalo en la carpeta que quieras.
+2. Ábrelo. La primera vez te pide tu API key de Groq, que es gratis y no pide tarjeta: sácala en [console.groq.com/keys](https://console.groq.com/keys). Tu nombre y lo demás son opcionales.
+3. Listo. Aparece la esfera y un ícono en la bandeja, junto al reloj.
 
-1. Baja `Jarvis.exe` desde la [última versión](https://github.com/podselxd/jarvis/releases/latest).
-2. Haz doble clic. La primera vez se abre una ventana pidiendo tu API key de Groq (gratis, sin tarjeta, en [console.groq.com](https://console.groq.com)), tu nombre y una palabra de apagado, todo opcional salvo la key.
-3. Listo, arranca — sin consola, sin instalar Python.
+Se actualiza solo. Revisa GitHub al arrancar y cada 6 horas, y solo instala la versión nueva cuando no le estás hablando. Antes de reemplazarse comprueba la huella SHA-256 del archivo.
 
-### Opción 2: código fuente (para modificarlo)
-
-1. Instala [Python](https://python.org/downloads) si no lo tienes (marca "Add to PATH" al instalar).
-2. Descarga este repo — botón verde **Code → Download ZIP**, o clonándolo con git si prefieres — y descomprímelo.
-3. Haz doble clic en **`setup.bat`**. Instala dependencias y abre la misma ventana de configuración del .exe.
-
-### Actualizar
-
-Con el .exe: baja la última versión de los [releases](https://github.com/podselxd/jarvis/releases) y reemplaza el archivo — tu `.env`/memoria no se tocan porque viven aparte, en `%LOCALAPPDATA%`/`Desktop/Jarvis`.
-
-Con el código fuente: vuelve a correr **`setup.bat`** cuando quieras — antes de instalar nada, baja solo los cambios nuevos (con git si clonaste así, o bajando el último ZIP de GitHub si no) y sigue de ahí. Excepción: `setup.bat` no se actualiza a sí mismo por seguridad (un .bat modificándose mientras corre puede romperse) — si algún día cambia, hay que bajarlo a mano una vez.
-
-### Compilar tu propio .exe
-
-Con el código fuente descargado, corre **`build_exe.bat`** — genera `dist\Jarvis.exe` con PyInstaller (tarda varios minutos la primera vez).
+Si vienes de la versión en Python, se actualiza sola a esta. Si la bajas a mano, ponla en la misma carpeta que el `Jarvis.exe` viejo. La primera vez que la abras se trae tu `.env`, tus sonidos, tus dispositivos y el inicio con Windows. Tu memoria se queda donde estaba.
 
 ## Uso
 
-Di "Hey Jarvis", espera el sonido de activación, y habla. Se calla solo cuando dejas de hablar, o dile "adiós"/"listo, gracias" para cortar antes.
+- Di **"Hey Jarvis"**, espera el tono y habla. Deja de escuchar cuando te callas.
+- **Ctrl+Alt+J** sirve para hablarle sin decir "Hey Jarvis".
+- Si le hablas mientras está hablando, se calla y te escucha.
+- Para cerrar la conversación dile "adiós" o "eso es todo". Si configuraste una palabra de apagado y la dices, Jarvis se cierra al instante.
 
-Para apagarlo del todo: cierra la ventana (o el proceso desde el Administrador de tareas si corre en segundo plano), o la palabra de apagado que hayas configurado.
+Menú del ícono de la bandeja (clic derecho): **Hablar con Jarvis**, **Ocultar/Mostrar la esfera**, **Silenciar micrófono**, **⚙ Configuración…**, **Abrir carpeta de Jarvis** y **Salir**.
+
+### Configuración
+
+| Sección | Qué tiene |
+|---|---|
+| Cuenta | API key de Groq, tu nombre, contraseña de tu perfil y palabra de apagado |
+| Pantalla | Modo de pantalla, resolución de la esfera, estilo (halo de puntos o líneas) y subtítulos |
+| Voz y audio | Volumen, voz de Windows (Raúl de México por defecto), micrófono y sensibilidad de "Hey Jarvis" |
+| General | Iniciar con Windows, conectar tus PCs con Tailscale, sonido de activación, Obsidian y buscar actualizaciones |
+
+Modos de pantalla:
+
+- **Pantalla completa:** siempre encima de todo. Se aparta sola cuando Jarvis abre algo.
+- **Pantalla completa sin bordes:** ocupa la pantalla, pero tus ventanas pueden ir encima. Pasa al frente cuando le hablas.
+- **Ventana sin bordes:** una esfera flotante y transparente que puedes arrastrar a donde quieras.
 
 ## Qué puede hacer
 
-- Charlar y responder preguntas (GPT-OSS-120B vía Groq)
-- Abrir apps, carpetas y archivos
-- Buscar en internet
-- Controlar volumen, música y ventanas del escritorio
-- Encontrar y enfocar una ventana/pestaña ya abierta por título, y ver qué tienes abierto
-- Escribir texto donde esté el foco — decide solo cuándo es seguro enviarlo (buscar, navegar) y cuándo preguntar primero (mensajes a otras personas)
-- Crear comandos propios que combinan varias acciones ("crea un comando que abra X e Y")
-- Recordar datos entre conversaciones (12 horas de contexto automático + memoria permanente buscable)
-- Leer archivos y carpetas (Descargas/Escritorio/Documentos), buscar archivos por nombre
-- Leer y escribir el portapapeles
-- Ver el estado de la PC: batería, CPU, RAM, espacio en disco
-- Recordatorios con hora exacta: avisa solo, sin que nadie le hable primero, apenas llega el momento
-- Leer el contenido completo de una página web, no solo el fragmento de una búsqueda
-- Mover archivos para organizar, y "borrar" (siempre a la Papelera de Reciclaje, nunca para siempre)
-- Calcular matemática de verdad (no estimada) en un sandbox aislado, sin acceso a archivos ni red
-- Conectar tus propios dispositivos entre sí vía Tailscale y mandarles comandos ("dile a mi escritorio que...")
-- Una ventana visual (esfera animada) que cambia de color mientras habla
+- Platicar y responder preguntas. Usa los modelos gratis de Groq y rota entre GPT-OSS 120B, Qwen 3 y GPT-OSS 20B para no quedarse sin cupo.
+- Abrir apps (incluidas las del menú Inicio, como Discord, Steam o Spotify), carpetas, archivos y páginas.
+- Buscar en internet y leer páginas completas.
+- Controlar el volumen (también a un nivel exacto) y la música: pausa, siguiente y anterior.
+- Mostrar el escritorio, cambiar de ventana, minimizar todo, bloquear la PC, poner un video en pantalla completa y cerrar la pestaña.
+- Ver qué ventanas tienes abiertas y traer una al frente.
+- Escribir texto donde está el cursor. Nunca lo envía: tú decides si lo mandas.
+- Leer y copiar al portapapeles.
+- Listar, leer, buscar y mover archivos, sin sobrescribir nada. Si borra algo, siempre va a la Papelera.
+- Ver CPU, RAM, disco y batería.
+- Hacer cálculos exactos con su propia calculadora, sin acceso a nada más.
+- Poner recordatorios con hora (te avisa solo cuando llega el momento) o para la próxima vez que le hables.
+- Recordar datos para siempre, con perfiles por persona que puedes proteger con contraseña, y exportarlos a Obsidian.
+- Crear comandos propios que junten varias acciones ("crea un comando que abra X y ponga música").
+- Mandarle órdenes a tus otras PCs por Tailscale ("dile a mi laptop que…").
 
-## Notas
+## Privacidad y seguridad
 
-- **Sonidos**: pon tus propios `activacion.mp3` y `busqueda.mp3` en la carpeta `sounds/` (no vienen incluidos).
-- **Privacidad**: el audio y el texto pasan por Groq (voz y modelo), Microsoft Edge (voz de salida) y motores de búsqueda públicos. No hay nada corriendo local salvo la detección de "Hey Jarvis". Si le pides que lea un archivo, un título de ventana o el portapapeles, ese contenido también viaja a Groq como parte de la conversación — mismo nivel de confianza que todo lo demás, pero tenlo presente si es algo sensible.
-- **Seguridad**: a propósito Jarvis no puede ejecutar comandos de shell libres ni hacer clicks en cualquier parte de la pantalla — solo un set acotado de acciones seguras. Sí puede escribir texto (para dictar mensajes, notas, etc.), pero nunca presiona Enter ni envía nada por su cuenta: el texto queda escrito para que lo revises y decidas si lo mandas, así un audio mal entendido nunca termina enviando algo solo.
-- **Palabra de apagado**: opcional, se configura al arrancar por primera vez. Es un freno que el modelo de IA nunca conoce — se revisa en el texto transcrito antes de mandarle nada a Groq, así no depende de que la IA "decida" respetarlo.
-- **Multi-dispositivo**: si instalas Tailscale, Jarvis levanta un servidor que escucha *solo* en tu IP de Tailscale (nunca en internet público) protegido además por un secreto propio (`JARVIS_MESH_SECRET`, generado solo, no lo inventas tú) — pensado para tus propios dispositivos, no para exponerlo a terceros.
-- **Memoria**: se guarda en `Desktop/Jarvis/` (fuera del repo, no se sube a GitHub).
+- La detección de "Hey Jarvis" corre en tu PC y no sale nada hasta que la oye. Después, tu voz va a Groq para pasarla a texto y el texto va al modelo de Groq.
+- La voz de Jarvis se genera en tu PC con las voces de Windows. Las búsquedas van a DuckDuckGo, o a Bing si DuckDuckGo falla.
+- Lo que le pidas leer (un archivo, el portapapeles o el título de una ventana) viaja a Groq como parte de la conversación. Tenlo en cuenta si es algo delicado.
+- Jarvis no puede ejecutar comandos libres ni hacer clic en cualquier parte: solo tiene un set cerrado de acciones seguras.
+- La palabra de apagado se revisa en tu PC. Nunca se le manda al modelo ni se guarda en la memoria.
+- El servidor para tus otras PCs escucha solo en tu IP de Tailscale, nunca en internet, y pide un secreto que se genera solo.
+
+## Dónde guarda las cosas
+
+- `%LOCALAPPDATA%\Jarvis\`: configuración (`config.env`), registro (`jarvis.log`), sonidos y dispositivos.
+- `Escritorio\Jarvis\`: tu memoria (datos, conversación reciente, perfiles, recordatorios y comandos propios).
+
+Para usar sonidos propios, elige tu sonido de activación en Configuración → General. También puedes poner un `busqueda.mp3` en `%LOCALAPPDATA%\Jarvis\sounds\`, que suena mientras busca.
+
+## Compilar desde el código
+
+Necesitas Windows, [Git Bash](https://git-scm.com) y MinGW-w64 de WinLibs:
+
+```bash
+winget install BrechtSanders.WinLibs.POSIX.UCRT
+```
+
+Luego, desde Git Bash, en la carpeta del repo:
+
+```bash
+mingw32-make
+```
+
+Eso genera `dist/Jarvis.exe`. Si ese Jarvis está abierto, Windows no deja reemplazarlo; en ese caso compila en otro lado:
+
+```bash
+mingw32-make OUT=build/Jarvis.exe
+```
+
+`mingw32-make tests` compila las pruebas en `build/tests/`.
+
+Los recursos que van dentro del exe están en `res/`. Se regeneran con los scripts de `tools/`, que solo hacen falta para desarrollar:
+
+- `tools/build_prompts.py` genera las herramientas y el prompt del sistema.
+- `tools/export_wakeword.py` convierte los modelos ONNX de openWakeWord.
+
+### Cómo está organizado
+
+| Archivo | Qué hace |
+|---|---|
+| `main.c` | Arranque, una sola instancia y actualización |
+| `voice.c` | Ciclo de voz: escuchar, grabar, hablar e interrupciones |
+| `wakeword.c`, `nn_*.c` | Detector de "Hey Jarvis" (red neuronal con AVX2 si tu CPU lo tiene) |
+| `groq.c`, `http.c` | Groq (Whisper y chat) con rotación de modelos y control de cupo |
+| `agent.c`, `tools*.c`, `calc.c` | Conversación y herramientas |
+| `tts.c`, `audio.c`, `sounds.c` | Voces de Windows, micrófono, bocinas y tonos |
+| `sphere.c`, `ui_main.c` | Esfera animada, modos de pantalla y subtítulos |
+| `ui_settings.c`, `tray.c` | Ventana de configuración e ícono de la bandeja |
+| `memory.c`, `config.c`, `mesh.c`, `update.c` | Memoria, configuración, otras PCs y actualizaciones |
+
+## Créditos
+
+- [cJSON](https://github.com/DaveGamble/cJSON) (licencia MIT), en `src/third_party/`.
+- El modelo de "Hey Jarvis" es de [openWakeWord](https://github.com/dscripka/openWakeWord) y usa la licencia [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/): Jarvis es para uso personal, no comercial.
+
+La versión anterior en Python está en la rama [`python-legacy`](https://github.com/podselxd/jarvis/tree/python-legacy).

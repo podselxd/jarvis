@@ -1,13 +1,19 @@
+# Compilación
+build/
+dist/
+
+# Datos locales que dejaban las versiones viejas en esta carpeta.
+# Nunca se suben: tienen tu API key, tus dispositivos y tus sonidos.
 .env
-.merget/
-__pycache__/
-*.pyc
 commands.json
 dispositivos.json
 jarvis.pid
 jarvis.log
-sounds/*.mp3
-sounds/*.wav
-build/
-dist/
+sounds/
 icono.ico
+
+# Python (solo lo usan los scripts de tools/)
+__pycache__/
+*.pyc
+
+.merget/

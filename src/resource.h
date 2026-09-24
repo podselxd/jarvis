@@ -1,0 +1,9 @@
+#ifndef JARVIS_RESOURCE_H
+#define JARVIS_RESOURCE_H
+
+#define IDI_JARVIS 1
+#define IDR_TOOLS_JSON 101
+#define IDR_SYSTEM_PROMPT 102
+#define IDR_WAKEWORD 103
+
+#endif
