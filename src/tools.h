@@ -34,6 +34,7 @@ char *tool_buscar_archivo(const cJSON *a);
 char *tool_mover_archivo(const cJSON *a);
 char *tool_borrar_archivo(const cJSON *a);
 wchar_t *known_folder_alias(const char *alias);
+bool path_is_off_limits(const wchar_t *path);
 
 /* web */
 char *tool_web_search(const cJSON *a);
