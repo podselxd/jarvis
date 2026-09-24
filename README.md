@@ -96,6 +96,17 @@ mingw32-make OUT=build/Jarvis.exe
 
 `mingw32-make tests` compila las pruebas en `build/tests/`.
 
+En cada push, GitHub Actions compila en un Windows real (una advertencia del compilador cuenta como error) y corre las pruebas, menos `test_groq`, que necesita una API key. El `Jarvis.exe` de cada corrida queda en la pestaña **Actions** para probar una rama sin compilarla.
+
+### Publicar una versión
+
+1. Sube la versión en `src/config.h` (`JARVIS_VERSION` y `JARVIS_VERSION_W`), en `res/jarvis.rc` (las cuatro) y en `res/jarvis.manifest`. `sh tests/check_version.sh` revisa que coincidan.
+2. Con eso ya en `master`: `git tag v2.0.2 && git push origin v2.0.2`.
+3. Actions compila, prueba, revisa que el tag coincida con el código y deja un **borrador** de release con el exe.
+4. Revisa el borrador y publícalo. Hasta que lo publiques, nadie se actualiza.
+
+No crees el release a mano desde GitHub: te saltas las pruebas, y si el tag no coincide con la versión del código, el exe se vuelve a descargar cada 6 horas.
+
 Lo que va dentro del exe está en `res/`:
 
 - `tools.json`: las herramientas que Jarvis puede usar.
