@@ -100,7 +100,7 @@ En cada push, GitHub Actions compila en un Windows real (una advertencia del com
 
 ### Publicar una versión
 
-1. Sube la versión en `src/config.h` (`JARVIS_VERSION` y `JARVIS_VERSION_W`) y en `res/jarvis.rc` (las cuatro). `sh tests/check_version.sh` revisa que coincidan.
+1. Sube la versión en `src/config.h` (`JARVIS_VERSION` y `JARVIS_VERSION_W`), en `res/jarvis.rc` (las cuatro) y en `res/jarvis.manifest`. `sh tests/check_version.sh` revisa que coincidan.
 2. Con eso ya en `master`: `git tag v2.0.2 && git push origin v2.0.2`.
 3. Actions compila, prueba, revisa que el tag coincida con el código y deja un **borrador** de release con el exe.
 4. Revisa el borrador y publícalo. Hasta que lo publiques, nadie se actualiza.
