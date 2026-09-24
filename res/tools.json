@@ -3,7 +3,7 @@
     "type": "function",
     "function": {
       "name": "open_app",
-      "description": "Abre una app (también las del menú Inicio: Discord, Steam, Spotify, etc.), carpeta, archivo o página web.",
+      "description": "Abre una app (también las del menú Inicio: Discord, Steam, Spotify, etc.), carpeta, archivo o página web. No abre programas ni scripts sueltos (.exe, .bat, accesos directos): para una app, pasa su nombre.",
       "parameters": {
         "type": "object",
         "properties": {

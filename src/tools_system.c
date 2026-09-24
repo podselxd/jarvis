@@ -5,7 +5,9 @@
 #include <mmdeviceapi.h>
 #include <shellapi.h>
 #include <shlobj.h>
+#include <shlwapi.h>
 #include <shobjidl.h>
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -62,6 +64,40 @@ static bool looks_like_url(const char *s)
         free(end);
         if (m) return true;
     }
+    return false;
+}
+
+/* "esquema:" que no sea una letra de unidad (C:) ni http/https: ms-settings:,
+   search-ms:, file:, shell:... abren cosas que no son apps ni páginas. */
+static bool has_other_scheme(const char *s)
+{
+    const char *p = s;
+    if (!isalpha((unsigned char)*p)) return false;
+    while (isalnum((unsigned char)*p) || *p == '+' || *p == '-' || *p == '.') p++;
+    if (*p != ':') return false;
+    size_t n = (size_t)(p - s);
+    if (n == 1) return false;
+    return !(n == 4 && !_strnicmp(s, "http", 4)) && !(n == 5 && !_strnicmp(s, "https", 5));
+}
+
+/* Lo que Windows ejecuta en vez de abrir en un visor. AssocIsDangerous trae la
+   lista del sistema; la propia es por si en alguna versión falta alguno. */
+static const wchar_t *DANGEROUS_EXT[] = {
+    L".exe", L".com", L".bat", L".cmd", L".scr", L".pif", L".cpl", L".msi", L".msp", L".msc", L".vbs",
+    L".vbe", L".js", L".jse", L".wsf", L".wsh", L".ws", L".ps1", L".psm1", L".psd1", L".hta", L".jar",
+    L".lnk", L".url", L".reg", L".inf", L".scf", L".application", L".appref-ms", L".appx", L".appxbundle",
+    L".msix", L".msixbundle", L".appinstaller", L".settingcontent-ms", L".library-ms", L".search-ms",
+    L".searchconnector-ms", L".diagcab", L".chm", L".iso", L".img", L".vhd", L".vhdx", L".xll", L".gadget",
+    L".py", L".pyw", L".dll", L".sys", L".ocx",
+};
+
+bool open_target_is_dangerous(const wchar_t *path)
+{
+    const wchar_t *ext = PathFindExtensionW(path);
+    if (!*ext) return false;
+    if (AssocIsDangerous(ext)) return true;
+    for (size_t i = 0; i < sizeof DANGEROUS_EXT / sizeof *DANGEROUS_EXT; i++)
+        if (!_wcsicmp(ext, DANGEROUS_EXT[i])) return true;
     return false;
 }
 
@@ -187,7 +223,14 @@ char *tool_open_app(const cJSON *a)
     const char *target = name;
     for (size_t i = 0; i < sizeof APP_ALIASES / sizeof *APP_ALIASES; i++)
         if (!strcmp(low, APP_ALIASES[i].alias)) target = APP_ALIASES[i].target;
+    bool is_alias = target != name;
+    bool is_path = false;
 
+    if (has_other_scheme(target)) {
+        free(low);
+        free(name);
+        return xstrdup("Por seguridad solo abro apps, carpetas, archivos y páginas http o https.");
+    }
     wchar_t *folder = known_folder_alias(low);
     if (folder) {
         if (shell_open(folder, NULL)) result = str_printf("Abrí %s.", name);
@@ -202,13 +245,34 @@ char *tool_open_app(const cJSON *a)
     if (!result) {
         wchar_t *w = utf8_to_wide(target);
         wchar_t *expanded = expand_env(w);
-        bool is_path = wcschr(expanded, L'\\') || wcschr(expanded, L'/');
-        if ((!is_path || GetFileAttributesW(expanded) != INVALID_FILE_ATTRIBUTES) && shell_open(expanded, NULL))
+        is_path = wcschr(expanded, L'\\') || wcschr(expanded, L'/');
+        if (is_path) {
+            /* GetFullPathNameW también quita puntos y espacios del final:
+               "virus.exe." se abriría como virus.exe. */
+            wchar_t full[MAX_PATH * 2];
+            DWORD got = GetFullPathNameW(expanded, MAX_PATH * 2, full, NULL);
+            bool network = (expanded[0] == L'\\' || expanded[0] == L'/') && (expanded[1] == L'\\' || expanded[1] == L'/');
+            if (network || !got || got >= MAX_PATH * 2) {
+                result = xstrdup("Por seguridad no abro rutas de red.");
+            } else if (dir_exists(full)) {
+                if (shell_open(full, NULL)) result = str_printf("Abrí %s.", name);
+            } else if (file_exists(full)) {
+                if (open_target_is_dangerous(full))
+                    result = xstrdup("Por seguridad no abro programas ni scripts sueltos (.exe, .bat, accesos directos...). "
+                                     "Dime el nombre de la app y la busco en el menú Inicio.");
+                else if (shell_open(full, NULL))
+                    result = str_printf("Abrí %s.", name);
+            }
+        } else if (is_alias && shell_open(expanded, NULL)) {
+            /* Solo los alias fijos de arriba se abren por nombre directo; cualquier
+               otro nombre se busca en el menú Inicio (así "cmd" o "mshta" sueltos
+               no ejecutan lo que haya en el PATH). */
             result = str_printf("Abrí %s.", name);
+        }
         free(expanded);
         free(w);
     }
-    if (!result) {
+    if (!result && !is_path) {
         AppMatch best = {0};
         AppMatch similar[3] = {{0}};
         int ns = find_installed_apps(name, &best, similar, 3);
@@ -233,6 +297,7 @@ char *tool_open_app(const cJSON *a)
         free(best.parsing);
         for (int i = 0; i < 3; i++) free(similar[i].display);
     }
+    if (!result) result = str_printf("No encontré '%s'.", name);
     free(low);
     free(name);
     return result;

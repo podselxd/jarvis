@@ -115,11 +115,53 @@ static void test_archivos(void)
     free(cfg_u);
 }
 
+static void test_open_app(void)
+{
+    printf("-- open_app --\n");
+    const char *ESQUEMA = "solo abro apps, carpetas, archivos y páginas http";
+    check(tool_says(ESQUEMA, "open_app", "name", "ms-settings:display", NULL, NULL), "niega ms-settings:");
+    check(tool_says(ESQUEMA, "open_app", "name", "search-ms:query=x&crumb=location:\\\\srv\\c", NULL, NULL),
+          "niega search-ms:");
+    check(tool_says(ESQUEMA, "open_app", "name", "file:///C:/Windows/notepad.exe", NULL, NULL), "niega file:");
+    check(tool_says(ESQUEMA, "open_app", "name", "shell:startup", NULL, NULL), "niega shell:");
+    check(tool_says("no abro rutas de red", "open_app", "name", "\\\\servidor\\c\\x.exe", NULL, NULL),
+          "niega \\\\servidor\\...");
+    check(tool_says("no abro rutas de red", "open_app", "name", "//servidor/c/x.exe", NULL, NULL), "niega //servidor/...");
+
+    wchar_t tmp[MAX_PATH];
+    GetTempPathW(MAX_PATH, tmp);
+    const wchar_t *malos[] = {L"jv_prueba.exe", L"jv_prueba.bat", L"jv_prueba.vbs", L"jv_prueba.hta", L"jv_prueba.lnk",
+                              L"jv_prueba.ps1"};
+    for (size_t i = 0; i < sizeof malos / sizeof *malos; i++) {
+        wchar_t *f = path_join(tmp, malos[i]);
+        write_file_atomic(f, "x", 1);
+        char *u = w2u(f);
+        char what[160];
+        snprintf(what, sizeof what, "no ejecuta %s", u + strlen(u) - 13);
+        check(tool_says("no abro programas ni scripts", "open_app", "name", u, NULL, NULL), what);
+        char *dot = str_printf("%s.", u);
+        snprintf(what, sizeof what, "ni con punto al final: %s.", u + strlen(u) - 13);
+        check(tool_says("no abro programas ni scripts", "open_app", "name", dot, NULL, NULL), what);
+        free(dot);
+        free(u);
+        DeleteFileW(f);
+        free(f);
+    }
+    check(!open_target_is_dangerous(L"C:\\x\\notas.txt") && !open_target_is_dangerous(L"C:\\x\\tarea.pdf") &&
+              !open_target_is_dangerous(L"C:\\x\\foto.jpg"),
+          "txt, pdf y jpg sí se pueden abrir");
+    check(open_target_is_dangerous(L"C:\\X\\SETUP.EXE") && open_target_is_dangerous(L"C:\\x\\a.txt:b.exe"),
+          "EXE en mayúsculas y flujo alterno a.txt:b.exe se niegan");
+    check(tool_says("No encontré", "open_app", "name", "mshta", NULL, NULL),
+          "un nombre suelto que no es alias (mshta) no se ejecuta del PATH");
+}
+
 int wmain(void)
 {
     CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
     paths_init();
     test_archivos();
+    test_open_app();
     printf("%d/%d pruebas %s\n", g_total - g_fail, g_total, g_fail ? "— HAY FALLAS" : "ok");
     return g_fail ? 1 : 0;
 }

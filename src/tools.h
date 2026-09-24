@@ -26,6 +26,7 @@ char *tool_leer_portapapeles(const cJSON *a);
 char *tool_copiar_portapapeles(const cJSON *a);
 char *tool_info_sistema(const cJSON *a);
 char *focus_window_by_title(const char *needle, bool *ok);
+bool open_target_is_dangerous(const wchar_t *path);
 
 /* archivos */
 char *tool_list_files(const cJSON *a);
