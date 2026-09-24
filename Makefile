@@ -14,8 +14,12 @@ LIBS := -lwinhttp -lole32 -loleaut32 -luuid -lwinmm -lgdi32 -luser32 -lshell32 -
 SRC := $(filter-out src/main.c,$(wildcard src/*.c)) src/third_party/cJSON.c
 OBJ := $(patsubst src/%.c,build/obj/%.o,$(SRC))
 MAIN_OBJ := build/obj/main.o
-RES_OBJ := build/obj/jarvis_res.o
-RES_DEPS := res/jarvis.rc res/jarvis.manifest res/jarvis.ico res/tools.json res/system_prompt.txt res/wakeword.bin
+RES_OBJ := build/obj/sokari_res.o
+# El modelo de "Hey Sokari" entra al exe solo si res/hey_sokari.jww existe (lo
+# genera el cuaderno de herramientas/). Sin él, se le habla con Ctrl+Alt+J.
+HEY_SOKARI := $(wildcard res/hey_sokari.jww)
+RES_DEPS := res/sokari.rc res/sokari.manifest res/sokari.ico res/tools.json res/system_prompt.txt res/wakeword.bin \
+            $(HEY_SOKARI)
 
 # Con Sokari abierto, Windows no deja reemplazar dist/Sokari.exe:
 # mingw32-make OUT=build/Sokari.exe compila en otro lado.
@@ -50,7 +54,7 @@ build/obj/nn_generic.o: CFLAGS += -O3
 
 $(RES_OBJ): $(RES_DEPS)
 	@mkdir -p $(dir $@)
-	$(WINDRES) -I res -i res/jarvis.rc -o $@
+	$(WINDRES) $(if $(HEY_SOKARI),-DHAVE_HEY_SOKARI) -I res -i res/sokari.rc -o $@
 
 TEST_SRC := $(wildcard tests/*.c)
 TESTS := $(patsubst tests/%.c,build/tests/%.exe,$(TEST_SRC))

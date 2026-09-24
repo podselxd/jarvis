@@ -1,5 +1,5 @@
-#ifndef JARVIS_SPHERE_H
-#define JARVIS_SPHERE_H
+#ifndef SOKARI_SPHERE_H
+#define SOKARI_SPHERE_H
 
 #include <stdbool.h>
 #include <stdint.h>

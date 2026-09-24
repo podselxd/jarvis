@@ -48,7 +48,7 @@ int wmain(int argc, wchar_t **argv)
     for (int i = 0; i < n; i++) printf("  voz: %s\n", v[i].name);
     tts_free_voices(v, n);
 
-    const char *text = "Hola, soy Jarvis. Ya estoy listo para ayudarte en lo que necesites.";
+    const char *text = "Hola, soy Sokari. Ya estoy listo para ayudarte en lo que necesites.";
     size_t samples;
     t0 = now_ms();
     int16_t *pcm = tts_synthesize(text, &samples);

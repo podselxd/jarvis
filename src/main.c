@@ -8,17 +8,18 @@
 #include "app.h"
 #include "audio.h"
 #include "autostart.h"
+#include "compat_jarvis.h"
 #include "config.h"
 #include "http.h"
 #include "log.h"
 #include "memory.h"
+#include "resources.h"
 #include "ui.h"
 #include "update.h"
 #include "util.h"
 #include "voice.h"
 
-/* El mismo desde que se llamaba Jarvis: nunca corren los dos a la vez. */
-#define INSTANCE_MUTEX L"Local\\JarvisAsistenteDeVoz"
+#define INSTANCE_MUTEX L"Local\\SokariAsistenteDeVoz"
 
 static HINSTANCE g_inst;
 static bool g_voice_started;
@@ -47,7 +48,9 @@ static void on_settings_saved(bool first_run)
         update_start_background();
         ui_show_hud(HUD_SHOW_QUIET);
     }
-    if (first_run) app_notify("Sokari", "Listo. Di \"Hey Jarvis\" (o Ctrl+Alt+J) cuando quieras hablarle.");
+    if (first_run)
+        app_notify("Sokari", res_has_wake_word() ? "Listo. Di \"Hey Sokari\" (o Ctrl+Alt+J) cuando quieras hablarle."
+                                                 : "Listo. Háblame con Ctrl+Alt+J.");
 }
 
 static void wait_for_pid(const wchar_t *arg)
@@ -58,35 +61,6 @@ static void wait_for_pid(const wchar_t *arg)
         WaitForSingleObject(h, 15000);
         CloseHandle(h);
     }
-}
-
-/* Ya hay uno abierto. Si es Sokari, se le pide su ventana de Inicio. Si es el
-   Jarvis de antes (no contesta WM_APP_IDENT), se ofrece cerrarlo y seguir.
-   Devuelve true si este ya puede arrancar (tiene el mutex). */
-static bool take_over_from_old_jarvis(HANDLE mutex, bool from_autostart)
-{
-    HWND other = FindWindowW(JARVIS_MSG_CLASS, NULL);
-    DWORD_PTR ident = 0;
-    if (!other || !SendMessageTimeoutW(other, WM_APP_IDENT, 0, 0, SMTO_ABORTIFHUNG, 2000, &ident)) return false;
-    if (ident == APP_IDENT_SOKARI) {
-        if (!from_autostart) PostMessageW(other, WM_APP_HOME, 0, 0);
-        return false;
-    }
-    /* Al prender la PC no se pregunta nada: se queda el que ya arrancó. */
-    if (from_autostart) return false;
-    if (MessageBoxW(NULL,
-                    L"Jarvis (la versión anterior de Sokari) está abierto, y los dos no pueden correr a la vez.\n\n"
-                    L"¿Cierro Jarvis y abro Sokari?",
-                    L"Sokari", MB_YESNO | MB_ICONQUESTION | MB_SETFOREGROUND) != IDYES)
-        return false;
-    PostMessageW(other, WM_APP_QUIT, 0, 0);
-    DWORD w = WaitForSingleObject(mutex, 20000);
-    if (w == WAIT_OBJECT_0 || w == WAIT_ABANDONED) return true;
-    MessageBoxW(NULL,
-                L"Jarvis no se cerró. Ciérralo desde su ícono de la bandeja (clic derecho > Salir) y vuelve a "
-                L"abrir Sokari.",
-                L"Sokari", MB_ICONWARNING);
-    return false;
 }
 
 static int run_simulation(const wchar_t *wav)
@@ -130,15 +104,25 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmdline, int show)
     HANDLE mutex = NULL;
     if (!simulate) {
         mutex = CreateMutexW(NULL, TRUE, INSTANCE_MUTEX);
-        if (GetLastError() == ERROR_ALREADY_EXISTS && !take_over_from_old_jarvis(mutex, from_autostart)) {
+        if (GetLastError() == ERROR_ALREADY_EXISTS) {
+            /* Ya está abierto: abrirlo otra vez a mano muestra su ventana de Inicio. */
+            HWND other = FindWindowW(SOKARI_MSG_CLASS, NULL);
+            if (other && !from_autostart) PostMessageW(other, WM_APP_HOME, 0, 0);
+            CloseHandle(mutex);
+            return 0;
+        }
+        /* Nunca junto con la versión anterior: ofrece cerrarla. */
+        if (!compat_jarvis_take_over(from_autostart)) {
             CloseHandle(mutex);
             return 0;
         }
     }
 
-    log_msg("Sokari %s arrancando.", JARVIS_VERSION);
-    bool from_jarvis = !simulate && config_migrate_from_jarvis();
+    log_msg("Sokari %s arrancando.", SOKARI_VERSION);
+    bool migrated = !simulate && compat_jarvis_migrate_data();
     config_load();
+    /* Lo copiado se reescribe ya con las claves de ahora. */
+    if (migrated) config_save();
     config_migrate_legacy();
     memory_init();
     http_init();
@@ -146,8 +130,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmdline, int show)
 
     if (simulate) return run_simulation(simulate);
 
-    autostart_migrate_legacy();
-    autostart_migrate_from_jarvis(from_jarvis);
+    compat_jarvis_migrate_autostart(migrated);
     autostart_refresh();
     enable_dark_menus();
     AppConfig cfg = config_snapshot();
@@ -161,12 +144,12 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmdline, int show)
         MessageBoxW(NULL, L"No pude abrir la interfaz de Sokari.", L"Sokari", MB_ICONERROR);
         return 1;
     }
-    if (from_jarvis)
-        app_notify("Sokari", "Jarvis ahora se llama Sokari. Traje tu configuración y tu memoria; las carpetas de "
-                             "Jarvis se quedan como respaldo. Por ahora se despierta igual: \"Hey Jarvis\".");
+    if (migrated)
+        app_notify("Sokari", "Traje tu configuración y tu memoria de la versión anterior. Sus carpetas se quedan "
+                             "como respaldo.");
     if (kind == LAUNCH_DIRECT) {
         on_settings_saved(false);
-        if (updated && !from_jarvis) app_notify("Sokari", "Me actualicé a la versión " JARVIS_VERSION ".");
+        if (updated && !migrated) app_notify("Sokari", "Me actualicé a la versión " SOKARI_VERSION ".");
     } else if (kind == LAUNCH_HOME) {
         home_open(inst, true, on_settings_saved);
     } else {

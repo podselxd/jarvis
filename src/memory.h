@@ -1,5 +1,5 @@
-#ifndef JARVIS_MEMORY_H
-#define JARVIS_MEMORY_H
+#ifndef SOKARI_MEMORY_H
+#define SOKARI_MEMORY_H
 
 #include <stdbool.h>
 #include <wchar.h>

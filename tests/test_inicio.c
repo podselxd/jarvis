@@ -1,6 +1,6 @@
 /* Cómo arranca Sokari (Inicio, directo, primera vez), lo que se escribe en la
    clave Run, que los ajustes (modos de pantalla, salida de audio, tamaño de la
-   ventana) se guardan y se leen bien, la copia de datos desde Jarvis y qué exe
+   ventana) se guardan y se leen bien, la copia de datos desde Sokari y qué exe
    baja el actualizador. Todo en carpetas temporales: nunca toca tu
    configuración, tu memoria ni el registro. */
 #define WIN32_LEAN_AND_MEAN
@@ -10,10 +10,14 @@
 #include <string.h>
 
 #include "autostart.h"
+#include "compat_jarvis.h"
 #include "config.h"
 #include "third_party/cJSON.h"
 #include "update.h"
 #include "util.h"
+
+#define OLD_PREFIX COMPAT_JARVIS_KEY_PREFIX
+#define OLD_LOG COMPAT_JARVIS_LOG_NAME
 
 static int g_fail, g_total;
 
@@ -37,32 +41,32 @@ static void test_launch(void)
 static void test_run_key(void)
 {
     printf("-- clave Run --\n");
-    const wchar_t *exe = L"C:\\Users\\Ana Pérez\\Jarvis\\Jarvis.exe";
+    const wchar_t *exe = L"C:\\Users\\Ana Pérez\\Sokari\\Sokari.exe";
     wchar_t *cmd = autostart_command(exe);
-    check(!wcscmp(cmd, L"\"C:\\Users\\Ana Pérez\\Jarvis\\Jarvis.exe\" --autostart"),
+    check(!wcscmp(cmd, L"\"C:\\Users\\Ana Pérez\\Sokari\\Sokari.exe\" --autostart"),
           "ruta entre comillas (tiene espacios) y --autostart");
     check(!autostart_needs_refresh(cmd, exe), "la nueva no se vuelve a escribir");
     free(cmd);
-    check(autostart_needs_refresh(L"\"C:\\Users\\Ana Pérez\\Jarvis\\Jarvis.exe\"", exe),
+    check(autostart_needs_refresh(L"\"C:\\Users\\Ana Pérez\\Sokari\\Sokari.exe\"", exe),
           "la de la versión anterior (sin --autostart) se actualiza");
-    check(autostart_needs_refresh(L"\"c:\\users\\ana pérez\\jarvis\\JARVIS.EXE\"  ", exe),
+    check(autostart_needs_refresh(L"\"c:\\users\\ana pérez\\sokari\\SOKARI.EXE\"  ", exe),
           "sin importar mayúsculas ni espacios al final");
-    check(autostart_needs_refresh(L"C:\\Jarvis\\Jarvis.exe", L"C:\\Jarvis\\Jarvis.exe"), "también sin comillas");
-    check(!autostart_needs_refresh(L"\"D:\\Otra copia\\Jarvis.exe\"", exe), "si apunta a otra copia, no se toca");
-    check(!autostart_needs_refresh(L"\"C:\\Users\\Ana Pérez\\Jarvis\\Jarvis.exe\" --otra-cosa", exe),
+    check(autostart_needs_refresh(L"C:\\Sokari\\Sokari.exe", L"C:\\Sokari\\Sokari.exe"), "también sin comillas");
+    check(!autostart_needs_refresh(L"\"D:\\Otra copia\\Sokari.exe\"", exe), "si apunta a otra copia, no se toca");
+    check(!autostart_needs_refresh(L"\"C:\\Users\\Ana Pérez\\Sokari\\Sokari.exe\" --otra-cosa", exe),
           "si alguien le puso otros argumentos, no se toca");
-    check(!autostart_needs_refresh(L"\"C:\\Users\\Ana Pérez\\Jarvis\\Jarvis.exe.bak\"", exe),
+    check(!autostart_needs_refresh(L"\"C:\\Users\\Ana Pérez\\Sokari\\Sokari.exe.bak\"", exe),
           "una ruta que solo empieza igual no cuenta");
     check(!autostart_needs_refresh(NULL, exe) && !autostart_needs_refresh(L"", exe), "vacía o sin valor: nada");
 
-    const wchar_t *j = L"C:\\Jarvis\\Jarvis.exe";
-    check(autostart_value_points_to(L"\"C:\\Jarvis\\Jarvis.exe\" --autostart", j) &&
-              autostart_value_points_to(L"\"c:\\jarvis\\JARVIS.EXE\"", j) &&
-              autostart_value_points_to(L"C:\\Jarvis\\Jarvis.exe --autostart", j),
+    const wchar_t *j = L"C:\\Sokari\\Sokari.exe";
+    check(autostart_value_points_to(L"\"C:\\Sokari\\Sokari.exe\" --autostart", j) &&
+              autostart_value_points_to(L"\"c:\\sokari\\SOKARI.EXE\"", j) &&
+              autostart_value_points_to(L"C:\\Sokari\\Sokari.exe --autostart", j),
           "la clave vieja apunta a este exe (con o sin comillas y argumentos)");
-    check(!autostart_value_points_to(L"\"C:\\Otra\\Jarvis.exe\"", j) &&
-              !autostart_value_points_to(L"\"C:\\Jarvis\\Jarvis.exe.bak\"", j) &&
-              !autostart_value_points_to(L"C:\\Jarvis\\Jarvis.exe2", j) && !autostart_value_points_to(NULL, j),
+    check(!autostart_value_points_to(L"\"C:\\Otra\\Sokari.exe\"", j) &&
+              !autostart_value_points_to(L"\"C:\\Sokari\\Sokari.exe.bak\"", j) &&
+              !autostart_value_points_to(L"C:\\Sokari\\Sokari.exe2", j) && !autostart_value_points_to(NULL, j),
           "otra copia o una ruta que solo empieza igual no cuentan");
 }
 
@@ -103,49 +107,53 @@ static void remove_tree(const wchar_t *dir)
 
 static void test_migration(const wchar_t *base)
 {
-    printf("-- de Jarvis a Sokari --\n");
+    printf("-- desde la versión anterior --\n");
     AppPaths saved = g_paths;
     wchar_t *root = path_join(base, L"migracion");
     remove_tree(root);
-    g_paths.legacy_local_dir = path_join(root, L"Local\\Jarvis");
+    g_paths.legacy_local_dir = path_join(root, L"Local\\Anterior");
     g_paths.local_dir = path_join(root, L"Local\\Sokari");
-    g_paths.legacy_memory_dir = path_join(root, L"Escritorio\\Jarvis");
+    g_paths.legacy_memory_dir = path_join(root, L"Escritorio\\Anterior");
     g_paths.memory_dir = path_join(root, L"Escritorio\\Sokari");
     g_paths.config_file = path_join(g_paths.local_dir, L"config.env");
 
-    check(!config_migrate_from_jarvis(), "instalación nueva (sin Jarvis): no copia nada");
+    check(!compat_jarvis_migrate_data(), "instalación nueva (sin versión anterior): no copia nada");
 
-    touch(g_paths.legacy_local_dir, L"config.env", "GROQ_API_KEY=gsk_prueba\nJARVIS_USER_NAME=Ana\n");
+    /* config.env de la versión anterior, con sus claves de entonces. */
+    char old_cfg[128];
+    snprintf(old_cfg, sizeof old_cfg, "GROQ_API_KEY=gsk_prueba\n%sUSER_NAME=Ana\n%sVOLUME=40\n", OLD_PREFIX, OLD_PREFIX);
+    touch(g_paths.legacy_local_dir, L"config.env", old_cfg);
     touch(g_paths.legacy_local_dir, L"dispositivos.json", "{}");
-    touch(g_paths.legacy_local_dir, L"jarvis.log", "log viejo");
+    touch(g_paths.legacy_local_dir, OLD_LOG, "log viejo");
     wchar_t *snd = path_join(g_paths.legacy_local_dir, L"sounds");
     touch(snd, L"activacion.mp3", "mp3");
     wchar_t *upd = path_join(g_paths.legacy_local_dir, L"update");
-    touch(upd, L"Jarvis_nuevo.exe", "MZ");
+    touch(upd, L"nuevo.exe", "MZ");
     touch(g_paths.legacy_memory_dir, L"hechos.json", "{\"ana\":[]}");
     wchar_t *sub = path_join(g_paths.legacy_memory_dir, L"Datos");
     touch(sub, L"nota.md", "hola");
     /* Como hace el arranque: la carpeta nueva ya existe (con el log) antes de copiar. */
     touch(g_paths.local_dir, L"sokari.log", "log nuevo");
 
-    check(config_migrate_from_jarvis(), "la primera vez copia desde las carpetas de Jarvis");
+    check(compat_jarvis_migrate_data(), "la primera vez copia desde las carpetas anteriores");
     wchar_t *nsnd = path_join(g_paths.local_dir, L"sounds");
     wchar_t *nsub = path_join(g_paths.memory_dir, L"Datos");
     check(exists_in(g_paths.local_dir, L"config.env") && exists_in(g_paths.local_dir, L"dispositivos.json") &&
               exists_in(nsnd, L"activacion.mp3"),
           "configuración, dispositivos y sonidos");
     check(exists_in(g_paths.memory_dir, L"hechos.json") && exists_in(nsub, L"nota.md"), "memoria, con subcarpetas");
-    check(!exists_in(g_paths.local_dir, L"jarvis.log") && !exists_in(g_paths.local_dir, L"update"),
+    check(!exists_in(g_paths.local_dir, OLD_LOG) && !exists_in(g_paths.local_dir, L"update"),
           "el log viejo y las descargas de actualización no se copian");
     check(exists_in(g_paths.legacy_local_dir, L"config.env") && exists_in(g_paths.legacy_memory_dir, L"hechos.json"),
-          "copia, no mueve: las carpetas de Jarvis quedan de respaldo");
+          "copia, no mueve: las carpetas anteriores quedan de respaldo");
     config_load();
     char *name = config_user_name();
-    check(!strcmp(name, "Ana"), "la configuración copiada se lee (tu nombre sigue ahí)");
+    check(!strcmp(name, "Ana") && config_volume() == 40,
+          "la configuración copiada se lee, con las claves de antes (tu nombre y tu volumen siguen ahí)");
     free(name);
 
-    touch(g_paths.local_dir, L"config.env", "JARVIS_USER_NAME=Beto\n");
-    check(!config_migrate_from_jarvis(), "la segunda vez ya no copia");
+    touch(g_paths.local_dir, L"config.env", "SOKARI_USER_NAME=Beto\n");
+    check(!compat_jarvis_migrate_data(), "la segunda vez ya no copia");
     config_load();
     name = config_user_name();
     check(!strcmp(name, "Beto"), "y nunca pisa lo que cambiaste en Sokari");
@@ -189,13 +197,10 @@ static const char *picked(cJSON *arr)
 static void test_update_asset(void)
 {
     printf("-- actualizador --\n");
-    cJSON *both = assets("Jarvis.exe", "Sokari.exe"), *old = assets("Jarvis.exe", NULL),
-          *other = assets("notas.txt", NULL);
-    check(!strcmp(picked(both), "Sokari.exe"), "con los dos en el release, baja Sokari.exe");
-    check(!strcmp(picked(old), "Jarvis.exe"), "un release de antes (solo Jarvis.exe) también sirve");
-    check(update_pick_asset(other) == NULL && update_pick_asset(NULL) == NULL, "sin exe en el release: nada");
+    cJSON *both = assets("notas.txt", "Sokari.exe"), *other = assets("Otro.exe", NULL);
+    check(!strcmp(picked(both), "Sokari.exe"), "baja Sokari.exe del release");
+    check(update_pick_asset(other) == NULL && update_pick_asset(NULL) == NULL, "si el release no trae Sokari.exe: nada");
     cJSON_Delete(both);
-    cJSON_Delete(old);
     cJSON_Delete(other);
 }
 
@@ -237,14 +242,14 @@ static void test_config(const wchar_t *dir)
     check(c.display_mode == DISPLAY_MINIMIZED, "un modo fuera de rango no se guarda");
     config_free(&c);
 
-    write_config("JARVIS_DISPLAY_MODE=windowed_borderless\nJARVIS_WINDOW=10,20\nJARVIS_OUTPUT=\n");
+    write_config("SOKARI_DISPLAY_MODE=windowed_borderless\nSOKARI_WINDOW=10,20\nSOKARI_OUTPUT=\n");
     config_load();
     c = config_snapshot();
     check(c.display_mode == DISPLAY_WINDOWED_BORDERLESS, "la esfera flotante de antes se sigue leyendo");
     check(c.win_w == -1 && c.win_h == -1, "una posición de ventana incompleta se ignora");
     config_free(&c);
 
-    write_config("JARVIS_DISPLAY_MODE=inventado\nJARVIS_WINDOW=0,0,0,500\n");
+    write_config("SOKARI_DISPLAY_MODE=inventado\nSOKARI_WINDOW=0,0,0,500\n");
     config_load();
     c = config_snapshot();
     check(c.display_mode == DISPLAY_FULLSCREEN_BORDERLESS, "un modo desconocido deja el de por defecto");
@@ -263,7 +268,7 @@ int wmain(void)
     /* Todo en una carpeta temporal: nunca se toca tu config.env. */
     wchar_t tmp[MAX_PATH];
     GetTempPathW(MAX_PATH, tmp);
-    wchar_t *dir = path_join(tmp, L"jarvis_test_inicio");
+    wchar_t *dir = path_join(tmp, L"sokari_test_inicio");
     ensure_dir(dir);
     free(g_paths.local_dir);
     g_paths.local_dir = xwcsdup(dir);

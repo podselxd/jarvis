@@ -1,9 +1,10 @@
-#ifndef JARVIS_RESOURCE_H
-#define JARVIS_RESOURCE_H
+#ifndef SOKARI_RESOURCE_H
+#define SOKARI_RESOURCE_H
 
-#define IDI_JARVIS 1
+#define IDI_SOKARI 1
 #define IDR_TOOLS_JSON 101
 #define IDR_SYSTEM_PROMPT 102
-#define IDR_WAKEWORD 103
+#define IDR_WAKEWORD 103     /* parte común del detector */
+#define IDR_HEY_SOKARI 104   /* clasificador de "Hey Sokari"; solo si res/hey_sokari.jww existe */
 
 #endif

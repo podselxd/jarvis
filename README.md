@@ -1,12 +1,12 @@
 # Sokari
 
-Asistente de voz personal para Windows (antes se llamaba **Jarvis**). Le dices **"Hey Jarvis"** y te contesta con voz: se sigue despertando con "Hey Jarvis" hasta que esté listo el modelo de "Hey Sokari". Puede abrir apps, buscar en internet, controlar tu música y tus ventanas, manejar archivos, recordarte cosas y hablar con tus otras PCs.
+Asistente de voz personal para Windows. Le dices **"Hey Sokari"** y te contesta con voz. Puede abrir apps, buscar en internet, controlar tu música y tus ventanas, manejar archivos, recordarte cosas y hablar con tus otras PCs.
 
-Es **un solo `Sokari.exe`** de unos 4 MB, escrito en C. No necesita Python ni instaladores, y no usa archivos `.bat` ni DLLs extra.
+Es **un solo `Sokari.exe`** de unos 3 MB, escrito en C. No necesita Python ni instaladores, y no usa archivos `.bat` ni DLLs extra.
 
 ## Instalación
 
-1. Baja `Sokari.exe` de la [última versión](https://github.com/podselxd/jarvis/releases/latest) y déjalo en la carpeta que quieras.
+1. Baja `Sokari.exe` de la [última versión](https://github.com/podselxd/sokari/releases/latest) y déjalo en la carpeta que quieras.
 2. Ábrelo. La primera vez te pide tu API key de Groq, que es gratis y no pide tarjeta: sácala en [console.groq.com/keys](https://console.groq.com/keys). Tu nombre y lo demás son opcionales.
 3. Listo. Aparece la esfera y un ícono en la bandeja, junto al reloj.
 
@@ -14,21 +14,22 @@ Cuando lo abres a mano después de la primera vez, sale la **ventana de Inicio**
 
 Se actualiza solo. Revisa GitHub al arrancar y cada 6 horas, y solo instala la versión nueva cuando no le estás hablando. Antes de reemplazarse comprueba la huella SHA-256 del archivo.
 
-### Si vienes de Jarvis
+### Si tenías la versión anterior
 
-- **Si Jarvis se actualiza solo**, se convierte en Sokari. El archivo se sigue llamando `Jarvis.exe` para que tus accesos directos sigan funcionando; cada versión publica una copia idéntica con ese nombre.
-- **Si bajas `Sokari.exe` a mano** y Jarvis está abierto, Sokari te pregunta si lo cierra. Los dos nunca corren a la vez.
-- **La primera vez que abre, Sokari copia tus datos:** trae tu configuración de `%LOCALAPPDATA%\Jarvis` y tu memoria de `Escritorio\Jarvis` a sus carpetas nuevas. No borra nada: las de Jarvis se quedan como respaldo, y puedes borrarlas cuando veas que todo está bien. Si tenías el inicio con Windows prendido, ahora arranca Sokari.
-- **Si vienes de la versión en Python:** primero se actualiza sola a Jarvis y después a Sokari. Si la bajas a mano, ponla en la misma carpeta que el `Jarvis.exe` viejo: la primera vez se trae tu `.env`, tus sonidos, tus dispositivos y el inicio con Windows.
+Baja `Sokari.exe` y ábrelo; la versión anterior no se actualiza sola a esta.
+- Si la anterior está abierta, Sokari te pregunta si la cierra. Nunca corren las dos a la vez.
+- La primera vez se trae tu configuración y tu memoria a sus carpetas nuevas. No borra nada: las carpetas anteriores se quedan como respaldo, y puedes borrarlas cuando veas que todo está bien.
+- Si tenías el inicio con Windows prendido, ahora arranca Sokari.
 
 ## Uso
 
-- Di **"Hey Jarvis"** y habla. Puedes decirlo todo de corrido ("Hey Jarvis, abre Spotify") o hacer una pausa y esperar el tono. Deja de escuchar cuando te callas.
-- **Ctrl+Alt+J** sirve para hablarle sin decir "Hey Jarvis".
+- Di **"Hey Sokari"** y habla. Puedes decirlo todo de corrido ("Hey Sokari, abre Spotify") o hacer una pausa y esperar el tono. Deja de escuchar cuando te callas.
+- **Ctrl+Alt+J** sirve para hablarle sin decir "Hey Sokari".
+- **"Hey Sokari" todavía se está entrenando** (ver [Entrenar "Hey Sokari"](#entrenar-hey-sokari)). Mientras un exe no traiga el modelo, se le habla solo con **Ctrl+Alt+J** y así lo dicen sus mensajes.
 - Si le hablas mientras está hablando, se calla y te escucha.
 - Para cerrar la conversación dile "adiós" o "eso es todo". Si configuraste una palabra de apagado y la dices, Sokari se cierra al instante.
 
-Menú del ícono de la bandeja (clic derecho): **Hablar con Sokari**, **Ocultar/Mostrar la esfera**, **Modo de pantalla**, **Silenciar micrófono**, **Ventana de inicio…**, **⚙ Configuración…**, **Abrir carpeta de Jarvis** y **Salir**.
+Menú del ícono de la bandeja (clic derecho): **Hablar con Sokari**, **Ocultar/Mostrar la esfera**, **Modo de pantalla**, **Silenciar micrófono**, **Ventana de inicio…**, **⚙ Configuración…**, **Abrir carpeta de Sokari** y **Salir**.
 
 ### Ventana de Inicio
 
@@ -47,7 +48,7 @@ Sale al abrir `Sokari.exe` a mano, o desde **Ventana de inicio…** en la bandej
 | Inicio | Iniciar, modo de pantalla, salida de audio y botones rápidos (ver arriba) |
 | Cuenta | API key de Groq, tu nombre, contraseña de tu perfil y palabra de apagado |
 | Pantalla | Modo de pantalla, resolución de la esfera, estilo (halo de puntos o líneas) y subtítulos |
-| Voz y audio | Volumen, voz de Windows (Raúl de México por defecto), micrófono, salida de audio y sensibilidad de "Hey Jarvis" |
+| Voz y audio | Volumen, voz de Windows (Raúl de México por defecto), micrófono, salida de audio y sensibilidad de "Hey Sokari" |
 | General | Iniciar con Windows, conectar tus PCs con Tailscale, sonido de activación, Obsidian y buscar actualizaciones |
 
 Modos de pantalla:
@@ -82,7 +83,7 @@ La salida de audio elegida vale para la voz de Sokari y su tono. Si pusiste un s
 
 ## Privacidad y seguridad
 
-- La detección de "Hey Jarvis" corre en tu PC y no sale nada hasta que la oye. Después, tu voz va a Groq para pasarla a texto y el texto va al modelo de Groq.
+- La detección de "Hey Sokari" corre en tu PC y no sale nada hasta que la oye. Después, tu voz va a Groq para pasarla a texto y el texto va al modelo de Groq.
 - La voz de Sokari se genera en tu PC con las voces de Windows. Las búsquedas van a DuckDuckGo, o a Bing si DuckDuckGo falla.
 - Lo que le pidas leer (un archivo, el portapapeles o el título de una ventana) viaja a Groq como parte de la conversación. Tenlo en cuenta si es algo delicado.
 - Sokari no puede ejecutar comandos libres ni hacer clic en cualquier parte: solo tiene un set cerrado de acciones. No abre programas ni scripts sueltos y nunca escribe en terminales.
@@ -95,7 +96,7 @@ La salida de audio elegida vale para la voz de Sokari y su tono. Si pusiste un s
 
 - `%LOCALAPPDATA%\Sokari\`: configuración (`config.env`), registro (`sokari.log`), sonidos y dispositivos.
 - `Escritorio\Sokari\`: tu memoria (datos, conversación reciente, perfiles, recordatorios y comandos propios).
-- `%LOCALAPPDATA%\Jarvis\` y `Escritorio\Jarvis\`: si venías de Jarvis, el respaldo de lo de antes. Sokari ya no las usa. Igual que sus carpetas nuevas, sus herramientas de archivos no las pueden leer.
+- Las carpetas de la versión anterior, si la tenías: el respaldo de lo de antes. Sokari ya no las usa y, como tienen copia de tu API key y tu memoria, sus herramientas de archivos no las pueden leer.
 
 Para usar sonidos propios, elige tu sonido de activación en Configuración → General. También puedes poner un `busqueda.mp3` en `%LOCALAPPDATA%\Sokari\sounds\`, que suena mientras busca.
 
@@ -125,9 +126,9 @@ En cada push, GitHub Actions compila en un Windows real (una advertencia del com
 
 ### Publicar una versión
 
-1. Sube la versión en `src/config.h` (`JARVIS_VERSION` y `JARVIS_VERSION_W`), en `res/jarvis.rc` (las cuatro) y en `res/jarvis.manifest`. `sh tests/check_version.sh` revisa que coincidan.
+1. Sube la versión en `src/config.h` (`SOKARI_VERSION` y `SOKARI_VERSION_W`), en `res/sokari.rc` (las cuatro) y en `res/sokari.manifest`. `sh tests/check_version.sh` revisa que coincidan.
 2. Con eso ya en `master`: `git tag v2.1.0 && git push origin v2.1.0`.
-3. Actions compila, prueba, revisa que el tag coincida con el código y deja un **borrador** de release con `Sokari.exe` y una copia idéntica llamada `Jarvis.exe`, que es la que buscan los Jarvis de antes para actualizarse. No la borres.
+3. Actions compila, prueba, revisa que el tag coincida con el código y deja un **borrador** de release con `Sokari.exe`.
 4. Revisa el borrador y publícalo. Hasta que lo publiques, nadie se actualiza.
 
 No crees el release a mano desde GitHub: te saltas las pruebas, y si el tag no coincide con la versión del código, el exe se vuelve a descargar cada 6 horas.
@@ -136,7 +137,8 @@ Lo que va dentro del exe está en `res/`:
 
 - `tools.json`: las herramientas que Sokari puede usar.
 - `system_prompt.txt`: sus instrucciones.
-- `wakeword.bin`: el modelo de "Hey Jarvis".
+- `wakeword.bin`: la parte común del detector de la palabra (convierte el audio en rasgos; es igual para cualquier palabra).
+- `hey_sokari.jww`: el clasificador de "Hey Sokari". Solo entra al exe si el archivo existe.
 - El ícono.
 
 Si editas `tools.json` o `system_prompt.txt`, el siguiente `mingw32-make` los mete al exe.
@@ -147,7 +149,8 @@ Si editas `tools.json` o `system_prompt.txt`, el siguiente `mingw32-make` los me
 |---|---|
 | `main.c` | Arranque, una sola instancia y actualización |
 | `voice.c` | Ciclo de voz: escuchar, grabar, hablar e interrupciones |
-| `wakeword.c`, `nn_*.c` | Detector de "Hey Jarvis" (red neuronal con AVX2 si tu CPU lo tiene) |
+| `wakeword.c`, `nn_*.c` | Detector de "Hey Sokari" (red neuronal con AVX2 si tu CPU lo tiene) |
+| `compat_jarvis.c` | Paso desde la versión anterior (carpetas, configuración, inicio con Windows). Temporal |
 | `groq.c`, `http.c` | Groq (Whisper y chat) con rotación de modelos y control de cupo |
 | `agent.c`, `tools*.c`, `calc.c` | Conversación y herramientas |
 | `tts.c`, `audio.c`, `sounds.c` | Voces de Windows, micrófono, bocinas y tonos |
@@ -155,7 +158,12 @@ Si editas `tools.json` o `system_prompt.txt`, el siguiente `mingw32-make` los me
 | `ui_settings.c`, `tray.c` | Ventana de Inicio y de configuración, e ícono de la bandeja |
 | `memory.c`, `config.c`, `mesh.c`, `update.c` | Memoria, configuración, otras PCs y actualizaciones |
 
+## Entrenar "Hey Sokari"
+
+El clasificador de "Hey Sokari" se entrena una vez con voces sintéticas (muchas voces distintas, para que responda a cualquiera) y queda como `res/hey_sokari.jww`. Los pasos y el cuaderno de Google Colab están en `herramientas/`.
+
 ## Créditos
 
 - [cJSON](https://github.com/DaveGamble/cJSON) (licencia MIT), en `src/third_party/`.
-- El modelo de "Hey Jarvis" es de [openWakeWord](https://github.com/dscripka/openWakeWord) y usa la licencia [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/): Sokari es para uso personal, no comercial.
+- El detector de la palabra es un puerto a C de [openWakeWord](https://github.com/dscripka/openWakeWord) (código Apache 2.0).
+- Sus modelos (la parte común, `wakeword.bin`) y el clasificador de "Hey Sokari" que se entrena encima (`hey_sokari.jww`) están bajo [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/): uso no comercial y con crédito, y quien los modifique tiene que compartirlos igual. Por eso Sokari es gratis y no comercial. Detalles en `herramientas/LEEME.md`.

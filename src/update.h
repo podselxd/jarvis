@@ -1,5 +1,5 @@
-#ifndef JARVIS_UPDATE_H
-#define JARVIS_UPDATE_H
+#ifndef SOKARI_UPDATE_H
+#define SOKARI_UPDATE_H
 
 #include <stdbool.h>
 
@@ -12,7 +12,7 @@ void update_start_background(void);
    mostrar (heap). Si hay versión nueva, la baja e instala en segundo plano. */
 char *update_check_now(void);
 
-/* De la lista "assets" de un release: Sokari.exe, o si no hay, Jarvis.exe. */
+/* De la lista "assets" de un release, el Sokari.exe (o NULL). */
 const cJSON *update_pick_asset(const cJSON *assets);
 
 #endif

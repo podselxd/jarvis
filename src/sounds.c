@@ -66,11 +66,11 @@ void sound_chime(void)
 void sound_activation(void)
 {
     wchar_t *p = user_sound(L"activacion");
-    if (p && mci_open(p, L"jarvis_activacion")) {
-        mci(L"play jarvis_activacion");
+    if (p && mci_open(p, L"sokari_activacion")) {
+        mci(L"play sokari_activacion");
         Sleep(ACTIVATION_MAX_MS);
-        mci(L"stop jarvis_activacion");
-        mci(L"close jarvis_activacion");
+        mci(L"stop sokari_activacion");
+        mci(L"close sokari_activacion");
     } else {
         sound_chime();
     }
@@ -80,16 +80,16 @@ void sound_activation(void)
 void sound_search_start(void)
 {
     wchar_t *p = user_sound(L"busqueda");
-    if (p && mci_open(p, L"jarvis_busqueda")) {
+    if (p && mci_open(p, L"sokari_busqueda")) {
         wchar_t cmd[96];
-        swprintf(cmd, 96, L"play jarvis_busqueda from %d repeat", (int)(GetTickCount64() % 50) * 1000);
-        if (!mci(cmd)) mci(L"play jarvis_busqueda repeat");
+        swprintf(cmd, 96, L"play sokari_busqueda from %d repeat", (int)(GetTickCount64() % 50) * 1000);
+        if (!mci(cmd)) mci(L"play sokari_busqueda repeat");
     }
     free(p);
 }
 
 void sound_search_stop(void)
 {
-    mci(L"stop jarvis_busqueda");
-    mci(L"close jarvis_busqueda");
+    mci(L"stop sokari_busqueda");
+    mci(L"close sokari_busqueda");
 }

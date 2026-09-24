@@ -115,7 +115,7 @@ static bool path_inside(const wchar_t *path, const wchar_t *dir)
    de tu contraseña) ni las carpetas de datos de Sokari, donde están la API key,
    la palabra de apagado, el secreto de la malla, la memoria y los perfiles:
    nada de eso tiene que poder terminar en la conversación. Tampoco las de
-   cuando se llamaba Jarvis, que tienen una copia de lo mismo. */
+   la versión anterior, que tienen una copia de lo mismo. */
 static bool is_data_dir(const wchar_t *path, bool resolve)
 {
     const wchar_t *dirs[] = {g_paths.local_dir, g_paths.memory_dir, g_paths.legacy_local_dir, g_paths.legacy_memory_dir};

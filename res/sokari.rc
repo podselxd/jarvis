@@ -1,12 +1,15 @@
 #include <winver.h>
 #include "../src/resource.h"
 
-IDI_JARVIS ICON "jarvis.ico"
-1 24 "jarvis.manifest"
+IDI_SOKARI ICON "sokari.ico"
+1 24 "sokari.manifest"
 
 IDR_TOOLS_JSON RCDATA "tools.json"
 IDR_SYSTEM_PROMPT RCDATA "system_prompt.txt"
 IDR_WAKEWORD RCDATA "wakeword.bin"
+#ifdef HAVE_HEY_SOKARI
+IDR_HEY_SOKARI RCDATA "hey_sokari.jww"
+#endif
 
 VS_VERSION_INFO VERSIONINFO
 FILEVERSION 2,1,0,0

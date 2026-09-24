@@ -1,5 +1,5 @@
-#ifndef JARVIS_UTIL_H
-#define JARVIS_UTIL_H
+#ifndef SOKARI_UTIL_H
+#define SOKARI_UTIL_H
 
 #include <stdarg.h>
 #include <stdbool.h>

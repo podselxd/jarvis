@@ -1,5 +1,5 @@
-#ifndef JARVIS_GROQ_H
-#define JARVIS_GROQ_H
+#ifndef SOKARI_GROQ_H
+#define SOKARI_GROQ_H
 
 #include <stddef.h>
 #include <stdint.h>

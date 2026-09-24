@@ -1,7 +1,9 @@
-/* Detector de "Hey Jarvis": puerto exacto a C de los tres modelos ONNX de
-   openWakeWord (melspectrograma -> CNN de embeddings -> clasificador con
-   verificador) y de su lógica de streaming, así el .exe no necesita
-   onnxruntime ni Python. Los pesos vienen embebidos en el ejecutable. */
+/* Detector de "Hey Sokari": puerto exacto a C de los modelos ONNX de
+   openWakeWord (melspectrograma -> CNN de embeddings -> clasificador) y de su
+   lógica de streaming, así el .exe no necesita onnxruntime ni Python. Los
+   pesos vienen embebidos en el ejecutable: la parte común (mel y embeddings,
+   igual para cualquier palabra) y aparte el clasificador de la palabra, que
+   es lo único que se entrena para "Hey Sokari". */
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -34,7 +36,7 @@ typedef struct {
 
 typedef struct {
     float *fc1_wt, *fc1_b, *ln1_w, *ln1_b, *fc2_wt, *fc2_b, *ln2_w, *ln2_b, *fc3_wt, *fc3_b;
-    int hidden; /* 128 en la red principal, 64 en la verificadora */
+    int hidden;
 } DenseNet;
 
 typedef struct {
@@ -50,7 +52,7 @@ struct WakeWord {
     NnMatTFn mat;
     float *mel_rt, *mel_it, *mel_w;
     ConvLayer layers[CONV_LAYERS];
-    DenseNet net[2];
+    DenseNet net;
     float *act_a, *act_b;
 
     float raw[RAW_KEEP];
@@ -144,12 +146,10 @@ static void free_model(WakeWord *w)
         free(w->layers[i].wt);
         free(w->layers[i].b);
     }
-    for (int k = 0; k < 2; k++) {
-        DenseNet *d = &w->net[k];
-        float *fields[] = {d->fc1_wt, d->fc1_b, d->ln1_w, d->ln1_b, d->fc2_wt,
-                           d->fc2_b,  d->ln2_w, d->ln2_b, d->fc3_wt, d->fc3_b};
-        for (size_t j = 0; j < sizeof fields / sizeof *fields; j++) free(fields[j]);
-    }
+    DenseNet *d = &w->net;
+    float *fields[] = {d->fc1_wt, d->fc1_b, d->ln1_w, d->ln1_b, d->fc2_wt,
+                       d->fc2_b,  d->ln2_w, d->ln2_b, d->fc3_wt, d->fc3_b};
+    for (size_t j = 0; j < sizeof fields / sizeof *fields; j++) free(fields[j]);
     free(w->act_a);
     free(w->act_b);
     free(w->melbuf);
@@ -162,12 +162,14 @@ void ww_destroy(WakeWord *w)
     free(w);
 }
 
-static bool load_dense(WakeWord *w, int k, const BlobTensor *ts, int n)
+/* Clasificador: fc1 -> LayerNorm -> ReLU -> fc2 -> LayerNorm -> ReLU -> fc3
+   -> sigmoide, el modelo "dnn" de una capa oculta que entrena openWakeWord. */
+static bool load_dense(WakeWord *w, const BlobTensor *ts, int n)
 {
-    const char *pre = k == 0 ? "kw" : "kv";
+    const char *pre = "kw";
     char name[64];
     const BlobTensor *t;
-    DenseNet *d = &w->net[k];
+    DenseNet *d = &w->net;
 #define GET(layer, field)                                                  \
     snprintf(name, sizeof name, "%s.%s", pre, layer);                      \
     if (!(t = find(ts, n, name))) return false;                            \
@@ -176,13 +178,27 @@ static bool load_dense(WakeWord *w, int k, const BlobTensor *ts, int n)
     snprintf(name, sizeof name, "%s.%s", pre, layer);                      \
     if (!(t = find(ts, n, name)) || t->ndim != 2) return false;            \
     d->field = transpose(t, 0);
-    GET_T("fc1.w", fc1_wt) d->hidden = t->dims[0];
-    if (t->dims[1] != FEAT_FRAMES * EMB_DIM || d->hidden > 256) return false;
-    GET("fc1.b", fc1_b) GET("ln1.w", ln1_w) GET("ln1.b", ln1_b)
-    GET_T("fc2.w", fc2_wt) GET("fc2.b", fc2_b) GET("ln2.w", ln2_w) GET("ln2.b", ln2_b)
-    GET_T("fc3.w", fc3_wt) GET("fc3.b", fc3_b)
+#define SIZE(field, want)                                                  \
+    if (t->count != (want)) return false;
+    /* Tamaños exactos: el archivo puede venir de afuera (un entrenamiento). */
+    snprintf(name, sizeof name, "%s.fc1.w", pre);
+    if (!(t = find(ts, n, name)) || t->ndim != 2 || t->dims[1] != FEAT_FRAMES * EMB_DIM || t->dims[0] < 1 ||
+        t->dims[0] > 256)
+        return false;
+    int h = d->hidden = t->dims[0];
+    GET_T("fc1.w", fc1_wt)
+    GET("fc1.b", fc1_b) SIZE(fc1_b, h)
+    GET("ln1.w", ln1_w) SIZE(ln1_w, h)
+    GET("ln1.b", ln1_b) SIZE(ln1_b, h)
+    GET_T("fc2.w", fc2_wt) if (t->dims[0] != h || t->dims[1] != h) return false;
+    GET("fc2.b", fc2_b) SIZE(fc2_b, h)
+    GET("ln2.w", ln2_w) SIZE(ln2_w, h)
+    GET("ln2.b", ln2_b) SIZE(ln2_b, h)
+    GET_T("fc3.w", fc3_wt) if (t->dims[0] != 1 || t->dims[1] != h) return false;
+    GET("fc3.b", fc3_b) SIZE(fc3_b, 1)
 #undef GET
 #undef GET_T
+#undef SIZE
     return true;
 }
 
@@ -218,12 +234,17 @@ static void compute_noise_features(WakeWord *w)
     free(mel);
 }
 
-WakeWord *ww_create(const void *blob, size_t len)
+WakeWord *ww_create(const void *blob, size_t len, const void *word, size_t word_len)
 {
-    BlobTensor *ts = NULL;
-    int n = 0;
+    BlobTensor *ts = NULL, *ws = NULL;
+    int n = 0, wn = 0;
     if (!blob || !parse_blob(blob, len, &ts, &n)) {
         log_msg("wakeword: blob de pesos inválido");
+        return NULL;
+    }
+    if (!word || !parse_blob(word, word_len, &ws, &wn)) {
+        log_msg("wakeword: modelo de la palabra inválido");
+        free(ts);
         return NULL;
     }
     WakeWord *w = xcalloc(1, sizeof *w);
@@ -264,8 +285,9 @@ WakeWord *ww_create(const void *blob, size_t len)
         const BlobTensor *bt = find(ts, n, name);
         L->b = bt ? copy_floats(bt) : NULL;
     }
-    if (!load_dense(w, 0, ts, n) || !load_dense(w, 1, ts, n)) goto fail;
+    if (!load_dense(w, ws, wn)) goto fail;
     free(ts);
+    free(ws);
 
     w->act_a = xmalloc(sizeof(float) * ACT_MAX);
     w->act_b = xmalloc(sizeof(float) * ACT_MAX);
@@ -278,6 +300,7 @@ WakeWord *ww_create(const void *blob, size_t len)
 fail:
     log_msg("wakeword: faltan tensores o tienen otra forma");
     free(ts);
+    free(ws);
     ww_destroy(w);
     return NULL;
 }
@@ -385,12 +408,9 @@ static float run_dense(WakeWord *w, const DenseNet *d, const float *x)
     return 1.0f / (1.0f + expf(-z));
 }
 
-float ww_classify(WakeWord *w, const float *feat, float *p1_out)
+float ww_classify(WakeWord *w, const float *feat)
 {
-    float p1 = run_dense(w, &w->net[0], feat);
-    if (p1_out) *p1_out = p1;
-    if (p1 < 0.5f) return p1;
-    return run_dense(w, &w->net[1], feat);
+    return run_dense(w, &w->net, feat);
 }
 
 float ww_process(WakeWord *w, const int16_t *chunk)
@@ -422,7 +442,7 @@ float ww_process(WakeWord *w, const int16_t *chunk)
         w->feat_rows++;
     }
 
-    float score = ww_classify(w, w->feat[w->feat_rows - FEAT_FRAMES], NULL);
+    float score = ww_classify(w, w->feat[w->feat_rows - FEAT_FRAMES]);
     if (w->predictions < 5) score = 0.0f;
     w->predictions++;
     return score;

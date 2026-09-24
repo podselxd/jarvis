@@ -31,7 +31,7 @@ jobs:
             make
             mingw-w64-ucrt-x86_64-gcc
 
-      - name: Misma versión en config.h y jarvis.rc
+      - name: Misma versión en config.h y sokari.rc
         run: sh tests/check_version.sh
 
       - name: Compilar Sokari.exe (una advertencia cuenta como error)

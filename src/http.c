@@ -46,7 +46,7 @@ static HINTERNET open_session(const wchar_t *ua)
 
 bool http_init(void)
 {
-    g_api_session = open_session(L"Sokari/" JARVIS_VERSION_W " (Windows)");
+    g_api_session = open_session(L"Sokari/" SOKARI_VERSION_W " (Windows)");
     g_web_session = open_session(L"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
                                  L"Chrome/128.0.0.0 Safari/537.36");
     return g_api_session && g_web_session;

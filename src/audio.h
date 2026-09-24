@@ -1,5 +1,5 @@
-#ifndef JARVIS_AUDIO_H
-#define JARVIS_AUDIO_H
+#ifndef SOKARI_AUDIO_H
+#define SOKARI_AUDIO_H
 
 #include <stdbool.h>
 #include <stddef.h>
