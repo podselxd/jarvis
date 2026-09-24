@@ -186,6 +186,33 @@ static void test_malla(void)
     free(df);
 }
 
+static void test_web(void)
+{
+    printf("-- leer_pagina: red local --\n");
+    const char *locales[] = {"http://127.0.0.1/", "http://127.1/", "http://2130706433/", "http://x@127.0.0.1/",
+                             "http://evil.com@192.168.1.1/", "http://localhost./", "http://[::1]/",
+                             "http://[::ffff:192.168.1.1]/", "http://[fe80::1]/", "http://[fd00::1]/",
+                             "http://[64:ff9b::7f00:1]/", "http://[2002:c0a8:101::1]/", "http://10.0.0.5:8080/",
+                             "http://100.100.1.1/", "http://169.254.169.254/latest/meta-data", "http://0.0.0.0/",
+                             "http://router/", "http://nas.local/", "https://casa.home.arpa/", "http://pc.tail1.ts.net/"};
+    bool ok = true;
+    for (size_t i = 0; i < sizeof locales / sizeof *locales; i++) {
+        UrlCheck c = web_url_check(locales[i]);
+        if (c == URL_OK) ok = false, printf("      debió negar %s\n", locales[i]);
+    }
+    check(ok, "niega localhost, IPs privadas (también escritas raro), IPv6 local, nombres de la red de casa");
+    const char *malos[] = {"ftp://x.com/", "file:///C:/Windows/win.ini", "javascript:alert(1)"};
+    ok = true;
+    for (size_t i = 0; i < sizeof malos / sizeof *malos; i++)
+        if (web_url_check(malos[i]) != URL_BAD) ok = false, printf("      debió negar %s\n", malos[i]);
+    check(ok, "niega esquemas que no son http/https");
+    check(web_url_check("http://93.184.215.14/") == URL_OK && web_url_check("https://8.8.8.8/dns") == URL_OK,
+          "una IP pública sí se permite");
+    check(tool_says("no leo direcciones de tu red local", "leer_pagina", "url", "http://x@127.0.0.1:8765/comando", NULL,
+                    NULL),
+          "leer_pagina niega http://x@127.0.0.1 (antes pasaba)");
+}
+
 int wmain(void)
 {
     CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
@@ -193,6 +220,7 @@ int wmain(void)
     test_archivos();
     test_open_app();
     test_malla();
+    test_web();
     printf("%d/%d pruebas %s\n", g_total - g_fail, g_total, g_fail ? "— HAY FALLAS" : "ok");
     return g_fail ? 1 : 0;
 }

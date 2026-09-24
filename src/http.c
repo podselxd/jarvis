@@ -57,6 +57,7 @@ void http_response_free(HttpResponse *r)
     free(r->body);
     free(r->content_type);
     free(r->error);
+    free(r->location);
     memset(r, 0, sizeof *r);
 }
 
@@ -179,6 +180,10 @@ HttpResponse http_request(const HttpRequest *r)
     }
     int t = r->timeout_ms > 0 ? r->timeout_ms : 60000;
     WinHttpSetTimeouts(req, t, t, t, t);
+    if (r->no_redirects) {
+        DWORD feature = WINHTTP_DISABLE_REDIRECTS;
+        WinHttpSetOption(req, WINHTTP_OPTION_DISABLE_FEATURE, &feature, sizeof feature);
+    }
 
     wchar_t *headers = r->headers ? utf8_to_wide(r->headers) : NULL;
     BOOL sent = WinHttpSendRequest(req, headers ? headers : WINHTTP_NO_ADDITIONAL_HEADERS, headers ? (DWORD)-1L : 0,
@@ -200,6 +205,18 @@ HttpResponse http_request(const HttpRequest *r)
     if (WinHttpQueryHeaders(req, WINHTTP_QUERY_CONTENT_TYPE, WINHTTP_HEADER_NAME_BY_INDEX, ctype, &size,
                             WINHTTP_NO_HEADER_INDEX))
         resp.content_type = wide_to_utf8(ctype);
+    if (r->no_redirects && status >= 300 && status < 400) {
+        DWORD lsize = 0;
+        WinHttpQueryHeaders(req, WINHTTP_QUERY_LOCATION, WINHTTP_HEADER_NAME_BY_INDEX, NULL, &lsize,
+                            WINHTTP_NO_HEADER_INDEX);
+        if (lsize && lsize < 64 * 1024) {
+            wchar_t *loc = xmalloc(lsize + sizeof(wchar_t));
+            if (WinHttpQueryHeaders(req, WINHTTP_QUERY_LOCATION, WINHTTP_HEADER_NAME_BY_INDEX, loc, &lsize,
+                                    WINHTTP_NO_HEADER_INDEX))
+                resp.location = wide_to_utf8(loc);
+            free(loc);
+        }
+    }
 
     if (r->download_to && status == 200) {
         out_file = CreateFileW(r->download_to, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);

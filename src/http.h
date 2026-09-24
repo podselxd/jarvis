@@ -14,6 +14,7 @@ typedef struct {
     int rl_remaining_tokens; /* x-ratelimit-remaining-tokens de Groq, -1 si no vino */
     double rl_reset_tokens;  /* segundos hasta que se repone ese cupo, -1 si no vino */
     char *error;       /* descripción del error de red, NULL si hubo respuesta */
+    char *location;    /* header Location de una redirección (solo con no_redirects), o NULL */
 } HttpResponse;
 
 typedef struct {
@@ -25,6 +26,7 @@ typedef struct {
     int timeout_ms;
     size_t max_bytes;
     bool browser_ua;
+    bool no_redirects; /* no seguir redirecciones: devuelve el 3xx con location */
     const wchar_t *download_to;
 } HttpRequest;
 

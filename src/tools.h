@@ -40,6 +40,8 @@ bool path_is_off_limits(const wchar_t *path);
 /* web */
 char *tool_web_search(const cJSON *a);
 char *tool_leer_pagina(const cJSON *a);
+typedef enum { URL_OK, URL_PRIVATE, URL_UNRESOLVED, URL_BAD } UrlCheck;
+UrlCheck web_url_check(const char *url);
 
 /* memoria y perfiles */
 char *tool_guardar_dato(const cJSON *a);
