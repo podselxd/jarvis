@@ -4,8 +4,8 @@
 #include <stdbool.h>
 #include <wchar.h>
 
-#define JARVIS_VERSION "2.0.3"
-#define JARVIS_VERSION_W L"2.0.3"
+#define JARVIS_VERSION "2.1.0"
+#define JARVIS_VERSION_W L"2.1.0"
 #define GITHUB_REPO "podselxd/jarvis"
 
 typedef enum {
