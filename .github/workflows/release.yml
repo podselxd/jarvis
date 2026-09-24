@@ -1,0 +1,37 @@
+# Al subir un tag vX.Y.Z: compila y prueba en Windows, revisa que el tag
+# coincida con la versión del código y deja el release como BORRADOR con el
+# Jarvis.exe adjunto. Nadie se actualiza hasta que lo publiques a mano en
+# GitHub (el actualizador solo ve releases publicados).
+name: Borrador de release
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  compilar:
+    uses: ./.github/workflows/compilar.yml
+
+  borrador:
+    needs: compilar
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: El tag coincide con la versión del código
+        run: sh tests/check_version.sh "$GITHUB_REF_NAME"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: Jarvis-exe
+          path: dist
+
+      - name: Crear el borrador
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sha256sum dist/Jarvis.exe
+          gh release create "$GITHUB_REF_NAME" dist/Jarvis.exe --draft \
+            --title "Jarvis $GITHUB_REF_NAME" --generate-notes --verify-tag

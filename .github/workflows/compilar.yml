@@ -1,0 +1,78 @@
+# Compila Jarvis.exe y corre las pruebas en un Windows real en cada push. El
+# exe y las capturas de la interfaz quedan como artefactos de la corrida, así
+# se puede probar una rama sin compilarla.
+name: Compilar y probar
+
+on:
+  push:
+    branches: ['**']
+  workflow_dispatch:
+  workflow_call:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - name: Sin conversión de fines de línea
+        shell: pwsh
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@v4
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: false
+          install: >-
+            make
+            mingw-w64-ucrt-x86_64-gcc
+
+      - name: Misma versión en config.h y jarvis.rc
+        run: sh tests/check_version.sh
+
+      - name: Compilar Jarvis.exe (una advertencia cuenta como error)
+        run: |
+          set -o pipefail
+          make -j4 OUT=build/Jarvis.exe 2>&1 | tee build.log || exit 1
+          if grep -q "warning:" build.log; then echo "::error::El compilador dio advertencias"; exit 1; fi
+
+      - name: Compilar las pruebas
+        run: |
+          set -o pipefail
+          make -j4 tests 2>&1 | tee tests.log || exit 1
+          if grep -q "warning:" tests.log; then echo "::error::El compilador dio advertencias"; exit 1; fi
+
+      - name: Correr las pruebas
+        run: |
+          mkdir -p build/capturas
+          fail=0
+          for t in build/tests/*.exe; do
+            n=$(basename "$t" .exe)
+            case "$n" in
+              test_groq) echo "Se omite test_groq: necesita una API key de Groq."; continue ;;
+              test_sphere|test_settings_ui) args=build/capturas ;;
+              *) args= ;;
+            esac
+            echo "::group::$n"
+            if "$t" $args; then echo "::endgroup::"; else
+              rc=$?; echo "::endgroup::"; echo "::error::$n falló (código $rc)"; fail=1
+            fi
+          done
+          exit $fail
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Jarvis-exe
+          path: build/Jarvis.exe
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: capturas-interfaz
+          path: build/capturas
+          if-no-files-found: ignore
