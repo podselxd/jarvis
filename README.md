@@ -127,7 +127,7 @@ En cada push, GitHub Actions compila en un Windows real (una advertencia del com
 ### Publicar una versión
 
 1. Sube la versión en `src/config.h` (`SOKARI_VERSION` y `SOKARI_VERSION_W`), en `res/sokari.rc` (las cuatro) y en `res/sokari.manifest`. `sh tests/check_version.sh` revisa que coincidan.
-2. Con eso ya en `master`: `git tag v2.1.0 && git push origin v2.1.0`.
+2. Con eso ya en `master`: `git tag v2.2.0 && git push origin v2.2.0`.
 3. Actions compila, prueba, revisa que el tag coincida con el código y deja un **borrador** de release con `Sokari.exe`.
 4. Revisa el borrador y publícalo. Hasta que lo publiques, nadie se actualiza.
 
