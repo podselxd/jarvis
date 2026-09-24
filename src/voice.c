@@ -532,6 +532,7 @@ static DWORD WINAPI voice_main(LPVOID arg)
     memory_identify_on_start(cfg.user_name);
     g_conv = conv_create(true);
     g_mesh_conv = conv_create(false);
+    conv_set_remote(g_mesh_conv, true);
     state_unlock();
     config_free(&cfg);
 

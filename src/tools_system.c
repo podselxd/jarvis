@@ -211,6 +211,22 @@ done:
     return n_similar;
 }
 
+/* ¿open_app apunta a una ruta (archivo o carpeta) y no a una app o página? */
+bool open_app_targets_file(const cJSON *a)
+{
+    char *name = str_trim(arg_str(a, "name"));
+    bool file = false;
+    if (!looks_like_url(name)) {
+        wchar_t *w = utf8_to_wide(name);
+        wchar_t *e = expand_env(w);
+        file = wcschr(e, L'\\') || wcschr(e, L'/');
+        free(e);
+        free(w);
+    }
+    free(name);
+    return file;
+}
+
 char *tool_open_app(const cJSON *a)
 {
     char *name = str_trim(arg_str(a, "name"));
