@@ -1,7 +1,7 @@
-/* Voz de Jarvis con las voces nativas de Windows (SAPI 5), incluidas las
+/* Voz de Sokari con las voces nativas de Windows (SAPI 5), incluidas las
    "OneCore" (Raúl, Sabina) que SAPI no lista por defecto. Se sintetiza a un
    buffer en memoria en vez de mandarlo directo a los parlantes: así el volumen
-   es propio de Jarvis, se puede cortar al instante si lo interrumpes, y la
+   es propio de Sokari, se puede cortar al instante si lo interrumpes, y la
    esfera puede moverse con la voz. */
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -22,7 +22,7 @@ static const wchar_t *VOICE_CATEGORIES[] = {
 };
 
 /* Preferencia por defecto: voz masculina de México, la más parecida a la
-   voz que usaba Jarvis antes (es-MX-JorgeNeural). */
+   voz que usaba la versión en Python (es-MX-JorgeNeural). */
 static const char *PREFERRED[] = {"Raul", "Jorge", "Sabina", "Spanish", "Español"};
 
 static ISpVoice *g_voice;
@@ -117,7 +117,7 @@ bool tts_init(const char *preferred_voice)
     HRESULT hr = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
     g_com = SUCCEEDED(hr);
     if (FAILED(CoCreateInstance(&CLSID_SpVoice, NULL, CLSCTX_ALL, &IID_ISpVoice, (void **)&g_voice))) {
-        log_msg("SAPI no está disponible: Jarvis no va a poder hablar.");
+        log_msg("SAPI no está disponible: Sokari no va a poder hablar.");
         g_voice = NULL;
         return false;
     }

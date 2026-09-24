@@ -1,7 +1,8 @@
-/* Cómo arranca Jarvis (Inicio, directo, primera vez), lo que se escribe en la
-   clave Run y que los ajustes nuevos (modos de pantalla, salida de audio,
-   tamaño de la ventana) se guardan y se leen bien. Usa un config.env
-   temporal: nunca toca tu configuración ni el registro. */
+/* Cómo arranca Sokari (Inicio, directo, primera vez), lo que se escribe en la
+   clave Run, que los ajustes (modos de pantalla, salida de audio, tamaño de la
+   ventana) se guardan y se leen bien, la copia de datos desde Jarvis y qué exe
+   baja el actualizador. Todo en carpetas temporales: nunca toca tu
+   configuración, tu memoria ni el registro. */
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <stdio.h>
@@ -10,6 +11,8 @@
 
 #include "autostart.h"
 #include "config.h"
+#include "third_party/cJSON.h"
+#include "update.h"
 #include "util.h"
 
 static int g_fail, g_total;
@@ -51,6 +54,149 @@ static void test_run_key(void)
     check(!autostart_needs_refresh(L"\"C:\\Users\\Ana Pérez\\Jarvis\\Jarvis.exe.bak\"", exe),
           "una ruta que solo empieza igual no cuenta");
     check(!autostart_needs_refresh(NULL, exe) && !autostart_needs_refresh(L"", exe), "vacía o sin valor: nada");
+
+    const wchar_t *j = L"C:\\Jarvis\\Jarvis.exe";
+    check(autostart_value_points_to(L"\"C:\\Jarvis\\Jarvis.exe\" --autostart", j) &&
+              autostart_value_points_to(L"\"c:\\jarvis\\JARVIS.EXE\"", j) &&
+              autostart_value_points_to(L"C:\\Jarvis\\Jarvis.exe --autostart", j),
+          "la clave vieja apunta a este exe (con o sin comillas y argumentos)");
+    check(!autostart_value_points_to(L"\"C:\\Otra\\Jarvis.exe\"", j) &&
+              !autostart_value_points_to(L"\"C:\\Jarvis\\Jarvis.exe.bak\"", j) &&
+              !autostart_value_points_to(L"C:\\Jarvis\\Jarvis.exe2", j) && !autostart_value_points_to(NULL, j),
+          "otra copia o una ruta que solo empieza igual no cuentan");
+}
+
+static void touch(const wchar_t *dir, const wchar_t *name, const char *text)
+{
+    ensure_dir(dir);
+    wchar_t *p = path_join(dir, name);
+    write_file_atomic(p, text, strlen(text));
+    free(p);
+}
+
+static bool exists_in(const wchar_t *dir, const wchar_t *name)
+{
+    wchar_t *p = path_join(dir, name);
+    bool r = GetFileAttributesW(p) != INVALID_FILE_ATTRIBUTES;
+    free(p);
+    return r;
+}
+
+static void remove_tree(const wchar_t *dir)
+{
+    wchar_t *pattern = path_join(dir, L"*");
+    WIN32_FIND_DATAW fd;
+    HANDLE h = FindFirstFileW(pattern, &fd);
+    free(pattern);
+    if (h != INVALID_HANDLE_VALUE) {
+        do {
+            if (!wcscmp(fd.cFileName, L".") || !wcscmp(fd.cFileName, L"..")) continue;
+            wchar_t *p = path_join(dir, fd.cFileName);
+            if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) remove_tree(p);
+            else DeleteFileW(p);
+            free(p);
+        } while (FindNextFileW(h, &fd));
+        FindClose(h);
+    }
+    RemoveDirectoryW(dir);
+}
+
+static void test_migration(const wchar_t *base)
+{
+    printf("-- de Jarvis a Sokari --\n");
+    AppPaths saved = g_paths;
+    wchar_t *root = path_join(base, L"migracion");
+    remove_tree(root);
+    g_paths.legacy_local_dir = path_join(root, L"Local\\Jarvis");
+    g_paths.local_dir = path_join(root, L"Local\\Sokari");
+    g_paths.legacy_memory_dir = path_join(root, L"Escritorio\\Jarvis");
+    g_paths.memory_dir = path_join(root, L"Escritorio\\Sokari");
+    g_paths.config_file = path_join(g_paths.local_dir, L"config.env");
+
+    check(!config_migrate_from_jarvis(), "instalación nueva (sin Jarvis): no copia nada");
+
+    touch(g_paths.legacy_local_dir, L"config.env", "GROQ_API_KEY=gsk_prueba\nJARVIS_USER_NAME=Ana\n");
+    touch(g_paths.legacy_local_dir, L"dispositivos.json", "{}");
+    touch(g_paths.legacy_local_dir, L"jarvis.log", "log viejo");
+    wchar_t *snd = path_join(g_paths.legacy_local_dir, L"sounds");
+    touch(snd, L"activacion.mp3", "mp3");
+    wchar_t *upd = path_join(g_paths.legacy_local_dir, L"update");
+    touch(upd, L"Jarvis_nuevo.exe", "MZ");
+    touch(g_paths.legacy_memory_dir, L"hechos.json", "{\"ana\":[]}");
+    wchar_t *sub = path_join(g_paths.legacy_memory_dir, L"Datos");
+    touch(sub, L"nota.md", "hola");
+    /* Como hace el arranque: la carpeta nueva ya existe (con el log) antes de copiar. */
+    touch(g_paths.local_dir, L"sokari.log", "log nuevo");
+
+    check(config_migrate_from_jarvis(), "la primera vez copia desde las carpetas de Jarvis");
+    wchar_t *nsnd = path_join(g_paths.local_dir, L"sounds");
+    wchar_t *nsub = path_join(g_paths.memory_dir, L"Datos");
+    check(exists_in(g_paths.local_dir, L"config.env") && exists_in(g_paths.local_dir, L"dispositivos.json") &&
+              exists_in(nsnd, L"activacion.mp3"),
+          "configuración, dispositivos y sonidos");
+    check(exists_in(g_paths.memory_dir, L"hechos.json") && exists_in(nsub, L"nota.md"), "memoria, con subcarpetas");
+    check(!exists_in(g_paths.local_dir, L"jarvis.log") && !exists_in(g_paths.local_dir, L"update"),
+          "el log viejo y las descargas de actualización no se copian");
+    check(exists_in(g_paths.legacy_local_dir, L"config.env") && exists_in(g_paths.legacy_memory_dir, L"hechos.json"),
+          "copia, no mueve: las carpetas de Jarvis quedan de respaldo");
+    config_load();
+    char *name = config_user_name();
+    check(!strcmp(name, "Ana"), "la configuración copiada se lee (tu nombre sigue ahí)");
+    free(name);
+
+    touch(g_paths.local_dir, L"config.env", "JARVIS_USER_NAME=Beto\n");
+    check(!config_migrate_from_jarvis(), "la segunda vez ya no copia");
+    config_load();
+    name = config_user_name();
+    check(!strcmp(name, "Beto"), "y nunca pisa lo que cambiaste en Sokari");
+    free(name);
+
+    free(nsnd);
+    free(nsub);
+    free(snd);
+    free(upd);
+    free(sub);
+    free(g_paths.legacy_local_dir);
+    free(g_paths.local_dir);
+    free(g_paths.legacy_memory_dir);
+    free(g_paths.memory_dir);
+    free(g_paths.config_file);
+    remove_tree(root);
+    free(root);
+    g_paths = saved;
+}
+
+static cJSON *assets(const char *a, const char *b)
+{
+    cJSON *arr = cJSON_CreateArray();
+    const char *names[] = {a, b};
+    for (int i = 0; i < 2; i++) {
+        if (!names[i]) continue;
+        cJSON *o = cJSON_CreateObject();
+        cJSON_AddStringToObject(o, "name", names[i]);
+        cJSON_AddItemToArray(arr, o);
+    }
+    return arr;
+}
+
+static const char *picked(cJSON *arr)
+{
+    const cJSON *a = update_pick_asset(arr);
+    const cJSON *n = a ? cJSON_GetObjectItemCaseSensitive(a, "name") : NULL;
+    return n ? n->valuestring : "(ninguno)";
+}
+
+static void test_update_asset(void)
+{
+    printf("-- actualizador --\n");
+    cJSON *both = assets("Jarvis.exe", "Sokari.exe"), *old = assets("Jarvis.exe", NULL),
+          *other = assets("notas.txt", NULL);
+    check(!strcmp(picked(both), "Sokari.exe"), "con los dos en el release, baja Sokari.exe");
+    check(!strcmp(picked(old), "Jarvis.exe"), "un release de antes (solo Jarvis.exe) también sirve");
+    check(update_pick_asset(other) == NULL && update_pick_asset(NULL) == NULL, "sin exe en el release: nada");
+    cJSON_Delete(both);
+    cJSON_Delete(old);
+    cJSON_Delete(other);
 }
 
 static void write_config(const char *text)
@@ -127,6 +273,8 @@ int wmain(void)
     test_launch();
     test_run_key();
     test_config(dir);
+    test_migration(dir);
+    test_update_asset();
 
     DeleteFileW(g_paths.config_file);
     RemoveDirectoryW(dir);

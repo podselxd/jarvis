@@ -9,7 +9,7 @@
 #define MIC_FRAME 1280
 
 /* Micrófono: un hilo propio drena waveIn a un buffer circular; el hilo de voz
-   lee de a 80 ms. Así, mientras Jarvis piensa o habla, no se pierde audio. */
+   lee de a 80 ms. Así, mientras Sokari piensa o habla, no se pierde audio. */
 bool mic_start(const char *device_name);
 void mic_stop(void);
 bool mic_restart(const char *device_name);

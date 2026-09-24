@@ -85,7 +85,7 @@ static struct {
     HINSTANCE inst;
     bool first_run;
     bool home_mode;     /* abierta como ventana de Inicio: Guardar/Cancelar regresan a Inicio */
-    bool quit_on_close; /* primera vez, o Inicio antes de arrancar: cerrarla cierra Jarvis */
+    bool quit_on_close; /* primera vez, o Inicio antes de arrancar: cerrarla cierra Sokari */
     SettingsSavedFn on_saved;
     int section;
     int dpi;
@@ -124,7 +124,7 @@ const wchar_t *const DISPLAY_MODE_LABELS[DISPLAY_MODE_COUNT] = {
     L"Pantalla completa", L"Pantalla completa sin bordes", L"Esfera flotante", L"Ventana", L"Minimizado",
 };
 static const wchar_t *const MODE_DESCS[DISPLAY_MODE_COUNT] = {
-    L"Siempre encima de todo. Se aparta sola cuando Jarvis abre algo.",
+    L"Siempre encima de todo. Se aparta sola cuando Sokari abre algo.",
     L"Tus ventanas pueden ir encima; sale al frente cuando le hablas.",
     L"Una esfera transparente, siempre visible. Arrástrala a donde quieras.",
     L"Una ventana normal: muévela, agrándala. F11 = pantalla completa.",
@@ -396,18 +396,18 @@ static void layout_home(int x, int y, int w)
     bool muted = c.mic_muted, running = voice_running();
     config_free(&c);
     swprintf(g_home_text, 200, L"%ls%ls",
-             running ? L"Jarvis está activo: di \"Hey Jarvis\" (o Ctrl+Alt+J) para hablarle."
+             running ? L"Sokari está activo: di \"Hey Jarvis\" (o Ctrl+Alt+J) para hablarle."
                      : L"Todo listo. Dale a Iniciar y di \"Hey Jarvis\" (o Ctrl+Alt+J) cuando quieras hablarle.",
              muted ? L" El micrófono está silenciado." : L"");
     y = layout_help(x, y - dp(6), w, g_home_text);
-    y = layout_button(x, y + dp(6), dp(220), running ? L"Mostrar la esfera" : L"Iniciar Jarvis", A_START, true) + dp(8);
+    y = layout_button(x, y + dp(6), dp(220), running ? L"Mostrar la esfera" : L"Iniciar Sokari", A_START, true) + dp(8);
     y = layout_label(x, y, w, L"Modo de pantalla");
     y = layout_dropdown(x, y, w, &S.home_display, DISPLAY_MODE_LABELS, DISPLAY_MODE_COUNT, A_MODE_CHANGED);
     y = layout_help(x, y - dp(10), w, MODE_DESCS[S.home_display]);
     y = layout_label(x, y, w, L"Salida de audio (bocinas o audífonos)");
     y = layout_dropdown(x, y, w, &S.home_output, g_output_labels, S.nouts + 1, A_OUTPUT_CHANGED);
     y = layout_help(x, y - dp(10), w,
-                    L"Por aquí sale la voz de Jarvis y su tono. Si pusiste un sonido de activación propio, ese "
+                    L"Por aquí sale la voz de Sokari y su tono. Si pusiste un sonido de activación propio, ese "
                     L"sale por la predeterminada de Windows.") + dp(6);
     int bw = (w - dp(24)) / 3;
     layout_button(x, y, bw, L"Configuración", A_GO_SETTINGS, false);
@@ -429,7 +429,7 @@ static void layout(void)
     int x = side + dp(40), w = cr.right - x - dp(40);
     int y = dp(34);
     Widget *title = add(W_LABEL, (RECT){x, y, x + w, y + dp(32)});
-    title->text = S.first_run ? L"Configuremos tu Jarvis" : SECTION_NAMES[S.section];
+    title->text = S.first_run ? L"Configuremos Sokari" : SECTION_NAMES[S.section];
     if (S.section == SEC_HOME && !S.first_run) {
         char *name = config_user_name();
         wchar_t *wn = utf8_to_wide(name);
@@ -454,12 +454,12 @@ static void layout(void)
     case SEC_ACCOUNT:
         y = layout_edit(x, y, w, L"API key de Groq", F_API, NULL);
         y = layout_link(x, y - dp(10), L"Consíguela gratis en console.groq.com  →", A_GROQ_LINK) + dp(6);
-        y = layout_edit(x, y, w, L"Tu nombre", F_NAME, L"Para que Jarvis sepa con quién habla desde que arranca.");
+        y = layout_edit(x, y, w, L"Tu nombre", F_NAME, L"Para que Sokari sepa con quién habla desde que arranca.");
         y = layout_edit(x, y, w, L"Contraseña de tu perfil (opcional)", F_PROFILE_PW,
-                        L"Protege tus datos guardados si otras personas usan este Jarvis. Déjala vacía para no cambiarla.");
+                        L"Protege tus datos guardados si otras personas usan Sokari en esta PC. Déjala vacía para no cambiarla.");
         y = layout_link(x, y - dp(8), L"¿Olvidaste una contraseña de perfil? Restablecer todas", A_RESET_PW) + dp(6);
         y = layout_edit(x, y, w, L"Palabra de apagado (opcional)", F_STOP,
-                        L"Si la dices, Jarvis se apaga al instante. Se revisa en tu PC: nunca se le manda a la IA.");
+                        L"Si la dices, Sokari se apaga al instante. Se revisa en tu PC: nunca se le manda a la IA.");
         break;
     case SEC_DISPLAY: {
         y = layout_label(x, y, w, L"Modo de pantalla");
@@ -478,7 +478,7 @@ static void layout(void)
         break;
     }
     case SEC_AUDIO:
-        y = layout_label(x, y, w, L"Volumen de la voz de Jarvis");
+        y = layout_label(x, y, w, L"Volumen de la voz de Sokari");
         y = layout_slider(x, y, w, &S.volume);
         y = layout_label(x, y, w, L"Voz");
         y = layout_dropdown(x, y, w, &S.voice_index, g_voice_labels, S.nvoices, A_NONE);
@@ -492,7 +492,7 @@ static void layout(void)
                         L"Más alta: te escucha aunque lo digas bajito o lejos, pero puede activarse solo con ruido.");
         break;
     case SEC_GENERAL:
-        y = layout_toggle(x, y, w, &S.autostart, L"Iniciar Jarvis con Windows");
+        y = layout_toggle(x, y, w, &S.autostart, L"Iniciar Sokari con Windows");
         y = layout_help(x, y - dp(6), w, L"Atajo: Ctrl+Alt+J para hablarle sin decir \"Hey Jarvis\".") + dp(6);
         y = layout_edit(x, y, w, L"Tus otros dispositivos (Tailscale) — secreto de malla", F_MESH, g_tailscale_text);
         {
@@ -507,15 +507,15 @@ static void layout(void)
         y = layout_label(x, y, w, L"Sonido de activación");
         y = layout_help(x, y - dp(4), w, g_sound_text);
         layout_button(x, y, dp(170), L"Elegir archivo…", A_PICK_SOUND, false);
-        layout_button(x + dp(182), y, dp(150), L"Usar el de Jarvis", A_CLEAR_SOUND, false);
+        layout_button(x + dp(182), y, dp(150), L"Usar el de Sokari", A_CLEAR_SOUND, false);
         y += dp(50);
         {
             wchar_t *ob = expand_env(L"%LOCALAPPDATA%\\Programs\\obsidian\\Obsidian.exe");
             if (!file_exists(ob)) {
                 layout_button(x, y, dp(170), L"Instalar Obsidian", A_OBSIDIAN, false);
-                layout_button(x + dp(182), y, dp(210), L"Abrir carpeta de Jarvis", A_OPEN_FOLDER, false);
+                layout_button(x + dp(182), y, dp(210), L"Abrir carpeta de Sokari", A_OPEN_FOLDER, false);
             } else {
-                layout_button(x, y, dp(210), L"Abrir carpeta de Jarvis", A_OPEN_FOLDER, false);
+                layout_button(x, y, dp(210), L"Abrir carpeta de Sokari", A_OPEN_FOLDER, false);
             }
             free(ob);
             y += dp(50);
@@ -531,7 +531,7 @@ static void layout(void)
         if (!S.first_run)
             layout_button(cr.right - dp(40) - dp(150) - dp(12) - dp(120), by, dp(120), L"Cancelar", A_CANCEL, false);
     }
-    if (!S.first_run) SetWindowTextW(S.hwnd, S.section == SEC_HOME ? L"Jarvis" : L"Jarvis — Configuración");
+    if (!S.first_run) SetWindowTextW(S.hwnd, S.section == SEC_HOME ? L"Sokari" : L"Sokari — Configuración");
     /* Que no quede el foco en un campo que ya no se ve (lo que escribas iría a
        parar ahí sin que lo notes). */
     HWND f = GetFocus();
@@ -666,7 +666,7 @@ static void paint(HDC dc)
     GdiFlush();
 
     RECT brand = {dp(24), dp(28), side - dp(12), dp(62)};
-    text(L"Jarvis", brand, S.f_title, C_TEXT, DT_LEFT | DT_SINGLELINE | DT_VCENTER);
+    text(L"Sokari", brand, S.f_title, C_TEXT, DT_LEFT | DT_SINGLELINE | DT_VCENTER);
     RECT ver = {dp(24), dp(62), side - dp(12), dp(84)};
     text(L"versión " JARVIS_VERSION_W, ver, S.f_small, C_MUTED, DT_LEFT | DT_SINGLELINE | DT_VCENTER);
     GdiFlush();
@@ -738,7 +738,7 @@ static void refresh_sound_text(void)
         custom = file_exists(p);
         free(p);
     }
-    wcscpy(g_sound_text, custom ? L"Usando tu sonido personalizado." : L"Usando el tono de Jarvis.");
+    wcscpy(g_sound_text, custom ? L"Usando tu sonido personalizado." : L"Usando el tono de Sokari.");
 }
 
 static void load_values(void)
@@ -943,7 +943,7 @@ static void pick_sound(void)
     free(dst);
     free(other);
     refresh_sound_text();
-    set_status(ok ? L"Listo, Jarvis va a usar ese sonido al activarse." : L"No pude copiar ese archivo.");
+    set_status(ok ? L"Listo, Sokari va a usar ese sonido al activarse." : L"No pude copiar ese archivo.");
     layout();
 }
 
@@ -956,7 +956,7 @@ static void clear_sound(void)
         free(p);
     }
     refresh_sound_text();
-    set_status(L"Listo, vuelve a usar el tono de Jarvis.");
+    set_status(L"Listo, vuelve a usar el tono de Sokari.");
     layout();
 }
 
@@ -1068,7 +1068,7 @@ static void do_action(int action)
         } else {
             HANDLE t = CreateThread(NULL, 0, chime_worker, NULL, 0, NULL);
             if (t) CloseHandle(t);
-            swprintf(msg, 200, L"Sonó el tono por «%ls». La voz se prueba con Jarvis iniciado.", out);
+            swprintf(msg, 200, L"Sonó el tono por «%ls». La voz se prueba con Sokari iniciado.", out);
         }
         set_status(msg);
         break;
@@ -1285,7 +1285,7 @@ static LRESULT CALLBACK proc(HWND h, UINT m, WPARAM w, LPARAM l)
         return 0;
     case WM_KEYDOWN:
         /* Esc: en una sección vuelve a Inicio (o cierra, si se abrió como
-           Configuración); en Inicio cierra, salvo que Jarvis no haya arrancado. */
+           Configuración); en Inicio cierra, salvo que Sokari no haya arrancado. */
         if (w == VK_ESCAPE && !S.first_run) {
             if (S.section != SEC_HOME) do_action(A_CANCEL);
             else if (!S.quit_on_close) DestroyWindow(h);
@@ -1302,7 +1302,7 @@ static LRESULT CALLBACK proc(HWND h, UINT m, WPARAM w, LPARAM l)
     }
     case WM_CLOSE:
         if (S.first_run &&
-            MessageBoxW(h, L"Sin una API key de Groq, Jarvis no puede funcionar. ¿Cerrar Jarvis?", L"Jarvis",
+            MessageBoxW(h, L"Sin una API key de Groq, Sokari no puede funcionar. ¿Cerrar Sokari?", L"Sokari",
                         MB_YESNO | MB_ICONQUESTION) != IDYES)
             return 0;
         DestroyWindow(h);
@@ -1381,7 +1381,7 @@ static void open_window(HINSTANCE inst, bool first_run, bool home, bool starting
     RECT r = {0, 0, cw, ch};
     AdjustWindowRectExForDpi(&r, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX, FALSE, 0, dpi);
     int ww = r.right - r.left, wh = r.bottom - r.top;
-    CreateWindowExW(0, SETTINGS_CLASS, first_run ? L"Bienvenido a Jarvis" : home ? L"Jarvis" : L"Jarvis — Configuración",
+    CreateWindowExW(0, SETTINGS_CLASS, first_run ? L"Bienvenido a Sokari" : home ? L"Sokari" : L"Sokari — Configuración",
                     WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
                     wa.left + (wa.right - wa.left - ww) / 2, wa.top + (wa.bottom - wa.top - wh) / 2, ww, wh, NULL,
                     NULL, inst, NULL);

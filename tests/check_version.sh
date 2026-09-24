@@ -14,7 +14,7 @@ fv=$(printf '%s\n' "$rc" | sed -n 's/^FILEVERSION \([0-9]*\),\([0-9]*\),\([0-9]*
 pv=$(printf '%s\n' "$rc" | sed -n 's/^PRODUCTVERSION \([0-9]*\),\([0-9]*\),\([0-9]*\),.*/\1.\2.\3/p')
 fs=$(printf '%s\n' "$rc" | sed -n 's/.*VALUE "FileVersion", "\(.*\)".*/\1/p')
 ps=$(printf '%s\n' "$rc" | sed -n 's/.*VALUE "ProductVersion", "\(.*\)".*/\1/p')
-mv=$(printf '%s\n' "$mf" | grep 'name="Podsel\.Jarvis"' | sed -n 's/.* version="\([0-9]*\.[0-9]*\.[0-9]*\)\.[0-9]*".*/\1/p')
+mv=$(printf '%s\n' "$mf" | grep 'name="Podsel\.Sokari"' | sed -n 's/.* version="\([0-9]*\.[0-9]*\.[0-9]*\)\.[0-9]*".*/\1/p')
 echo "config.h: $v / $vw | jarvis.rc: $fv, $pv, $fs, $ps | manifest: $mv${1:+ | tag: $1}"
 [ -n "$v" ] || { echo "FALLA: no encontré JARVIS_VERSION en src/config.h"; exit 1; }
 for x in "$vw" "$fv" "$pv" "$fs" "$ps" "$mv"; do

@@ -1,6 +1,6 @@
 /* Calculadora en sandbox: un parser recursivo propio (sin evaluar código),
    con la misma lista blanca de operaciones y funciones que la versión en
-   Python y el mismo tope de exponente — 9**9**9 no puede colgar a Jarvis. */
+   Python y el mismo tope de exponente — 9**9**9 no puede colgar a Sokari. */
 #include <ctype.h>
 #include <float.h>
 #include <math.h>
@@ -236,7 +236,7 @@ static Value power(Parser *ps)
 }
 
 /* Los signos seguidos ("--5") se cuentan en un bucle y no por recursión:
-   unos cientos de "-" agotaban la pila del hilo y cerraban Jarvis. */
+   unos cientos de "-" agotaban la pila del hilo y cerraban Sokari. */
 static Value unary(Parser *ps)
 {
     bool neg = false;

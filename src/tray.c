@@ -13,7 +13,7 @@ static bool g_added;
 
 /* La tuerca junto a "Configuración…": el glifo de ajustes de Segoe Fluent
    Icons (Windows 11) o Segoe MDL2 Assets (Windows 10), pintado blanco sobre
-   negro y convertido a un mapa de bits con alfa en el color de Jarvis, que se
+   negro y convertido a un mapa de bits con alfa en el color de Sokari, que se
    ve igual de bien en menús oscuros y claros. */
 static HBITMAP gear_bitmap(void)
 {
@@ -87,7 +87,7 @@ bool tray_init(HWND owner, HICON icon)
     g_nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP | NIF_SHOWTIP;
     g_nid.uCallbackMessage = WM_APP_TRAY;
     g_nid.hIcon = icon;
-    wcscpy(g_nid.szTip, L"Jarvis");
+    wcscpy(g_nid.szTip, L"Sokari");
     add_icon();
     return g_added;
 }
@@ -119,7 +119,7 @@ void tray_notify(const wchar_t *title, const wchar_t *text)
 void tray_show_menu(HWND owner, bool hud_visible, bool muted, int display_mode)
 {
     HMENU m = CreatePopupMenu();
-    AppendMenuW(m, MF_STRING, IDM_TALK, L"Hablar con Jarvis\tCtrl+Alt+J");
+    AppendMenuW(m, MF_STRING, IDM_TALK, L"Hablar con Sokari\tCtrl+Alt+J");
     AppendMenuW(m, MF_STRING, IDM_TOGGLE_HUD, hud_visible ? L"Ocultar la esfera" : L"Mostrar la esfera");
     HMENU modes = CreatePopupMenu();
     for (int i = 0; i < DISPLAY_MODE_COUNT; i++)
@@ -136,7 +136,7 @@ void tray_show_menu(HWND owner, bool hud_visible, bool muted, int display_mode)
         MENUITEMINFOW mii = {.cbSize = sizeof mii, .fMask = MIIM_BITMAP, .hbmpItem = gear};
         SetMenuItemInfoW(m, IDM_SETTINGS, FALSE, &mii);
     }
-    AppendMenuW(m, MF_STRING, IDM_OPEN_DATA, L"Abrir carpeta de Jarvis");
+    AppendMenuW(m, MF_STRING, IDM_OPEN_DATA, L"Abrir carpeta de Sokari");
     AppendMenuW(m, MF_SEPARATOR, 0, NULL);
     AppendMenuW(m, MF_STRING, IDM_QUIT, L"Salir");
     SetMenuDefaultItem(m, IDM_TOGGLE_HUD, FALSE);

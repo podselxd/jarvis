@@ -4,8 +4,8 @@
 #include <stdbool.h>
 #include <wchar.h>
 
-#define JARVIS_VERSION "2.0.3"
-#define JARVIS_VERSION_W L"2.0.3"
+#define JARVIS_VERSION "2.1.0"
+#define JARVIS_VERSION_W L"2.1.0"
 #define GITHUB_REPO "podselxd/jarvis"
 
 typedef enum {
@@ -27,7 +27,7 @@ typedef struct {
     char *output_name; /* salida de audio; "" = la predeterminada de Windows */
     int display_mode;
     int resolution; /* 0 = automática, si no el alto en píxeles (720, 1080, 1440, 2160) */
-    int volume;     /* 0-100, volumen de la voz de Jarvis (no el del sistema) */
+    int volume;     /* 0-100, volumen de la voz de Sokari (no el del sistema) */
     int wake_sensitivity; /* 0-100 */
     int sphere_style;     /* 0 = halo de puntos, 1 = líneas */
     int orb_x, orb_y;     /* posición de la ventana flotante; -1 = centrada */
@@ -38,8 +38,13 @@ typedef struct {
 } AppConfig;
 
 typedef struct {
-    wchar_t *local_dir;  /* %LOCALAPPDATA%\Jarvis: config, log, dispositivos */
-    wchar_t *memory_dir; /* <OneDrive o perfil>\Desktop\Jarvis: memoria, datos, perfiles (igual que antes) */
+    wchar_t *local_dir;  /* %LOCALAPPDATA%\Sokari: config, log, dispositivos */
+    wchar_t *memory_dir; /* <OneDrive o perfil>\Desktop\Sokari: memoria, datos, perfiles */
+    /* Las de cuando se llamaba Jarvis: se copian la primera vez y se quedan
+       como respaldo (con tu API key y tu memoria adentro, así que también
+       están protegidas). */
+    wchar_t *legacy_local_dir;
+    wchar_t *legacy_memory_dir;
     wchar_t *config_file;
     wchar_t *log_file;
     wchar_t *sounds_dir;
@@ -53,6 +58,7 @@ void paths_init(void);
 void config_load(void);
 bool config_save(void);
 void config_migrate_legacy(void);
+bool config_migrate_from_jarvis(void);
 
 AppConfig config_snapshot(void);
 void config_free(AppConfig *c);

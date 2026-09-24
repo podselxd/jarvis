@@ -9,8 +9,8 @@ IDR_SYSTEM_PROMPT RCDATA "system_prompt.txt"
 IDR_WAKEWORD RCDATA "wakeword.bin"
 
 VS_VERSION_INFO VERSIONINFO
-FILEVERSION 2,0,3,0
-PRODUCTVERSION 2,0,3,0
+FILEVERSION 2,1,0,0
+PRODUCTVERSION 2,1,0,0
 FILEOS VOS_NT_WINDOWS32
 FILETYPE VFT_APP
 BEGIN
@@ -19,12 +19,12 @@ BEGIN
         BLOCK "080a04b0"
         BEGIN
             VALUE "CompanyName", "podselxd"
-            VALUE "FileDescription", "Jarvis - asistente de voz"
-            VALUE "FileVersion", "2.0.3"
-            VALUE "InternalName", "Jarvis"
-            VALUE "OriginalFilename", "Jarvis.exe"
-            VALUE "ProductName", "Jarvis"
-            VALUE "ProductVersion", "2.0.3"
+            VALUE "FileDescription", "Sokari - asistente de voz"
+            VALUE "FileVersion", "2.1.0"
+            VALUE "InternalName", "Sokari"
+            VALUE "OriginalFilename", "Sokari.exe"
+            VALUE "ProductName", "Sokari"
+            VALUE "ProductVersion", "2.1.0"
             VALUE "LegalCopyright", "Modelo de wake word: openWakeWord (CC BY-NC-SA 4.0)"
         END
     END

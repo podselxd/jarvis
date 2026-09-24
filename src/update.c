@@ -1,7 +1,9 @@
 /* Auto-actualización del .exe sin scripts: Windows no deja sobreescribir un
    .exe que está corriendo, pero sí renombrarlo. Se renombra el actual a
-   Jarvis.exe.old, se pone el nuevo en su lugar, se lanza, y el nuevo borra
-   el .old al arrancar. Solo se aplica con Jarvis en reposo. */
+   <nombre>.exe.old, se pone el nuevo en su lugar, se lanza, y el nuevo borra
+   el .old al arrancar. Solo se aplica con Sokari en reposo. El archivo
+   conserva su nombre: si era Jarvis.exe sigue llamándose así (los accesos
+   directos y el inicio con Windows apuntan ahí). */
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <bcrypt.h>
@@ -112,11 +114,8 @@ static bool fetch_latest(Release *out, char **error)
     cJSON *j = cJSON_Parse(r.body);
     http_response_free(&r);
     cJSON *tag = cJSON_GetObjectItem(j, "tag_name");
-    cJSON *asset;
-    cJSON_ArrayForEach(asset, cJSON_GetObjectItem(j, "assets"))
-    {
-        cJSON *name = cJSON_GetObjectItem(asset, "name");
-        if (!cJSON_IsString(name) || strcmp(name->valuestring, "Jarvis.exe")) continue;
+    const cJSON *asset = update_pick_asset(cJSON_GetObjectItem(j, "assets"));
+    if (asset) {
         cJSON *url = cJSON_GetObjectItem(asset, "browser_download_url");
         cJSON *size = cJSON_GetObjectItem(asset, "size");
         cJSON *digest = cJSON_GetObjectItem(asset, "digest");
@@ -128,11 +127,26 @@ static bool fetch_latest(Release *out, char **error)
     if (cJSON_IsString(tag)) out->tag = xstrdup(tag->valuestring);
     cJSON_Delete(j);
     if (!out->tag || !out->url) {
-        *error = xstrdup("la última versión en GitHub no trae Jarvis.exe");
+        *error = xstrdup("la última versión en GitHub no trae Sokari.exe");
         release_free(out);
         return false;
     }
     return true;
+}
+
+/* Desde que se llama Sokari, el release trae Sokari.exe y una copia idéntica
+   como Jarvis.exe para los Jarvis de antes, que buscan ese nombre. */
+const cJSON *update_pick_asset(const cJSON *assets)
+{
+    const cJSON *fallback = NULL, *a;
+    cJSON_ArrayForEach(a, assets)
+    {
+        const cJSON *name = cJSON_GetObjectItemCaseSensitive(a, "name");
+        if (!cJSON_IsString(name)) continue;
+        if (!strcmp(name->valuestring, "Sokari.exe")) return a;
+        if (!fallback && !strcmp(name->valuestring, "Jarvis.exe")) fallback = a;
+    }
+    return fallback;
 }
 
 static bool download_verified(const Release *rel, const wchar_t *dest, char **error)
@@ -208,7 +222,7 @@ static bool apply_update(const wchar_t *new_exe, char **error)
 }
 
 /* Devuelve un mensaje para el usuario, o NULL si no había nada nuevo y
-   quiet es true. Si se aplicó una versión nueva, Jarvis se reinicia solo. */
+   quiet es true. Si se aplicó una versión nueva, Sokari se reinicia solo. */
 static char *check_and_update(bool quiet)
 {
     if (InterlockedExchange(&g_busy, 1)) return quiet ? NULL : xstrdup("Ya estoy revisando actualizaciones.");
@@ -228,7 +242,7 @@ static char *check_and_update(bool quiet)
         return msg;
     }
     log_msg("Hay una versión nueva: %s (tengo %s). Descargando...", rel.tag, JARVIS_VERSION);
-    wchar_t *dest = path_join(g_paths.update_dir, L"Jarvis_nuevo.exe");
+    wchar_t *dest = path_join(g_paths.update_dir, L"Sokari_nuevo.exe");
     if (!download_verified(&rel, dest, &error)) {
         log_msg("Actualización: %s", error);
         msg = str_printf("Hay una versión nueva (%s) pero no pude bajarla: %s.", rel.tag, error);
@@ -236,7 +250,7 @@ static char *check_and_update(bool quiet)
     } else {
         for (int i = 0; i < 600 && app_get_state() != JV_IDLE; i++) Sleep(1000);
         char *text = str_printf("Actualizando a la versión %s, vuelvo en un segundo.", rel.tag);
-        app_notify("Jarvis", text);
+        app_notify("Sokari", text);
         free(text);
         Sleep(1500);
         if (apply_update(dest, &error)) {
@@ -248,7 +262,7 @@ static char *check_and_update(bool quiet)
             msg = str_printf("Hay una versión nueva (%s) pero no pude instalarla sola: %s. Bájala de "
                              "github.com/" GITHUB_REPO "/releases.",
                              rel.tag, error);
-            app_notify("Jarvis", msg);
+            app_notify("Sokari", msg);
             free(error);
         }
     }
@@ -263,7 +277,7 @@ static DWORD WINAPI background(LPVOID arg)
     Sleep(FIRST_CHECK_DELAY_MS);
     for (;;) {
         char *msg = check_and_update(true);
-        if (msg) app_notify("Jarvis", msg);
+        if (msg) app_notify("Sokari", msg);
         free(msg);
         Sleep(CHECK_INTERVAL_MS);
     }

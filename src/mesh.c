@@ -215,7 +215,7 @@ static void handle_client(SOCKET c)
     } else {
         char *reply = g_handler ? g_handler(comando) : NULL;
         if (reply) respond(c, 200, "OK", *reply ? reply : "Listo.");
-        else respond(c, 503, "Service Unavailable", "Jarvis está ocupado ahora, prueba en un momento.");
+        else respond(c, 503, "Service Unavailable", "Sokari está ocupado ahora, prueba en un momento.");
         free(reply);
     }
     free(comando);
@@ -246,7 +246,7 @@ bool mesh_start(MeshHandler handler)
     WSAStartup(MAKEWORD(2, 2), &wsa);
     char *ip = mesh_tailscale_ip();
     if (!ip) {
-        log_msg("Tailscale no está activo: el servidor de malla no arranca (Jarvis sigue normal).");
+        log_msg("Tailscale no está activo: el servidor de malla no arranca (Sokari sigue normal).");
         return false;
     }
     char *secret = config_mesh_secret(true);

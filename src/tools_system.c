@@ -522,7 +522,7 @@ char *tool_list_windows(const cJSON *a)
     return sb_steal(&sb);
 }
 
-/* Terminales: ahí lo que escribe Jarvis se ejecuta como comando (con Enter,
+/* Terminales: ahí lo que escribe Sokari se ejecuta como comando (con Enter,
    y en cmd hasta con el Shift+Enter de los saltos de línea). Se reconocen por
    la clase de la ventana o por el programa. */
 static const wchar_t *TERMINAL_CLASSES[] = {L"ConsoleWindowClass", L"CASCADIA_HOSTING_WINDOW_CLASS",

@@ -60,7 +60,7 @@ static const struct {
 
 /* Decodifica &algo; en p (que apunta a '&'). Devuelve cuántos bytes consumió.
    El ';' se busca solo en los 12 bytes siguientes: buscarlo en todo el resto
-   de la página hacía que una página con miles de '&' congelara a Jarvis. */
+   de la página hacía que una página con miles de '&' congelara a Sokari. */
 static size_t decode_entity(const char *p, StrBuf *sb)
 {
     const char *semi = NULL;

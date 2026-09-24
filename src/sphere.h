@@ -27,7 +27,7 @@ void sphere_destroy(SphereRenderer *r);
 int sphere_size(const SphereRenderer *r);
 
 /* Dibuja un cuadro size x size en out (BGRA, stride en píxeles). voice (0..1)
-   es la energía de la voz de Jarvis en este instante: agranda la esfera,
+   es la energía de la voz de Sokari en este instante: agranda la esfera,
    agrega una ondulación rápida y más destellos, así "palpita" al hablar.
    Con premultiplied, el alfa sale de la intensidad (ventana flotante
    transparente); si no, fondo negro opaco. */

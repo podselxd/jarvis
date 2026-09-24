@@ -112,22 +112,33 @@ static bool path_inside(const wchar_t *path, const wchar_t *dir)
 
 /* Ninguna herramienta de archivos toca rutas de red (\\servidor\...: con solo
    preguntar si existen, Windows le manda a ese servidor tu usuario y el hash
-   de tu contraseña) ni las carpetas de datos de Jarvis, donde están la API key,
+   de tu contraseña) ni las carpetas de datos de Sokari, donde están la API key,
    la palabra de apagado, el secreto de la malla, la memoria y los perfiles:
-   nada de eso tiene que poder terminar en la conversación. */
+   nada de eso tiene que poder terminar en la conversación. Tampoco las de
+   cuando se llamaba Jarvis, que tienen una copia de lo mismo. */
+static bool is_data_dir(const wchar_t *path, bool resolve)
+{
+    const wchar_t *dirs[] = {g_paths.local_dir, g_paths.memory_dir, g_paths.legacy_local_dir, g_paths.legacy_memory_dir};
+    bool in = false;
+    for (size_t i = 0; i < sizeof dirs / sizeof *dirs && !in; i++) {
+        if (!dirs[i]) continue;
+        in = path_inside(path, dirs[i]);
+        if (!in && resolve) {
+            wchar_t *d = final_path(dirs[i]);
+            in = path_inside(path, d);
+            free(d);
+        }
+    }
+    return in;
+}
+
 bool path_is_off_limits(const wchar_t *path)
 {
     wchar_t *full = absolute_path(path);
     bool off = (full[0] == L'\\' || full[0] == L'/') && (full[1] == L'\\' || full[1] == L'/');
     if (!off) {
         wchar_t *fin = final_path(full);
-        const wchar_t *dirs[] = {g_paths.local_dir, g_paths.memory_dir};
-        for (int i = 0; i < 2 && !off; i++) {
-            if (!dirs[i]) continue;
-            wchar_t *d = final_path(dirs[i]);
-            off = path_inside(fin, d) || path_inside(full, dirs[i]);
-            free(d);
-        }
+        off = is_data_dir(fin, true) || is_data_dir(full, false);
         free(fin);
     }
     free(full);
@@ -135,7 +146,7 @@ bool path_is_off_limits(const wchar_t *path)
 }
 
 static const char OFF_LIMITS[] =
-    "Por seguridad no uso rutas de red ni las carpetas donde Jarvis guarda su configuración y su memoria.";
+    "Por seguridad no uso rutas de red ni las carpetas donde Sokari guarda su configuración y su memoria.";
 
 static int cmp_names(const void *a, const void *b)
 {
@@ -311,7 +322,7 @@ static void search_dir(const wchar_t *dir, SearchCtx *c, int depth)
             for (size_t i = 0; i < sizeof SKIP_DIRS / sizeof *SKIP_DIRS; i++)
                 if (!_wcsicmp(fd.cFileName, SKIP_DIRS[i])) skip = true;
             wchar_t *sub = path_join(dir, fd.cFileName);
-            if (skip || path_inside(sub, g_paths.local_dir) || path_inside(sub, g_paths.memory_dir)) {
+            if (skip || is_data_dir(sub, false)) {
                 free(sub);
                 continue;
             }

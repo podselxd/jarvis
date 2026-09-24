@@ -12,7 +12,7 @@ void voice_trigger(void);
 void voice_settings_changed(void);
 bool voice_wait(unsigned ms);
 bool voice_running(void);
-/* Tono + una frase por la salida de audio elegida (cuando Jarvis no está en
+/* Tono + una frase por la salida de audio elegida (cuando Sokari no está en
    medio de una conversación). */
 void voice_test_audio(void);
 

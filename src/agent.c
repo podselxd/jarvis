@@ -289,8 +289,8 @@ TurnResult agent_process(Conversation *c, const char *text)
     TurnResult r = {0};
     if (contains_stop_word(text)) {
         clear_pending(c);
-        log_msg("Palabra de apagado detectada. Cerrando Jarvis.");
-        r.reply = xstrdup("Jarvis desactivado.");
+        log_msg("Palabra de apagado detectada. Cerrando Sokari.");
+        r.reply = xstrdup("Sokari desactivado.");
         r.shutdown = true;
         return r;
     }

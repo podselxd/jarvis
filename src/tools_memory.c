@@ -304,7 +304,16 @@ char *tool_exportar_a_obsidian(const cJSON *a)
     char *display = profile_display_name(current_speaker());
     char *person = obsidian_slug(display);
     wchar_t *wperson = utf8_to_wide(person);
-    wchar_t *jdir = path_join(vault, L"Jarvis");
+    /* Si ya exportaste cuando se llamaba Jarvis, sigue en esa carpeta: así no
+       quedan notas repetidas en dos lados del vault. */
+    wchar_t *jdir = path_join(vault, L"Sokari");
+    wchar_t *old_jdir = path_join(vault, L"Jarvis");
+    if (!dir_exists(jdir) && dir_exists(old_jdir)) {
+        free(jdir);
+        jdir = old_jdir;
+    } else {
+        free(old_jdir);
+    }
     wchar_t *pdir = path_join(jdir, wperson);
     wchar_t *ddir = path_join(pdir, L"Datos");
 

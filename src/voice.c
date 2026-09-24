@@ -1,7 +1,7 @@
 /* Hilo de voz: micrófono -> "Hey Jarvis" -> grabación del comando -> Groq ->
    herramientas -> respuesta hablada. Más un hilo aparte para la síntesis
    (SAPI) que va generando oración por oración mientras se reproduce la
-   anterior, así Jarvis empieza a hablar enseguida aunque la respuesta sea
+   anterior, así Sokari empieza a hablar enseguida aunque la respuesta sea
    larga. */
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -232,7 +232,7 @@ static void input_flush(void);
 static void speak(const char *text, bool allow_interrupt)
 {
     if (str_is_blank(text)) return;
-    log_msg("Jarvis: %s", text);
+    log_msg("Sokari: %s", text);
     app_subtitle(false, text);
     app_set_state(JV_SPEAKING);
     char *clean = tts_clean_text(text);
@@ -557,11 +557,11 @@ static DWORD WINAPI voice_main(LPVOID arg)
     const void *blob = res_data(IDR_WAKEWORD, &blen);
     WakeWord *ww = ww_create(blob, blen);
     if (!ww) {
-        app_notify("Jarvis", "No pude cargar el detector de \"Hey Jarvis\". Usa Ctrl+Alt+J para hablarle.");
+        app_notify("Sokari", "No pude cargar el detector de \"Hey Jarvis\". Usa Ctrl+Alt+J para hablarle.");
     }
 
     if (!g_sim_mode && !mic_start(g_mic_name) && !mic_start("")) {
-        app_notify("Jarvis", "No encontré ningún micrófono. Conecta uno y vuelve a abrir Jarvis.");
+        app_notify("Sokari", "No encontré ningún micrófono. Conecta uno y vuelve a abrir Sokari.");
     }
     state_lock();
     memory_identify_on_start(cfg.user_name);
@@ -575,7 +575,7 @@ static DWORD WINAPI voice_main(LPVOID arg)
     calibrate();
     if (!g_sim_mode) mesh_start(mesh_handle);
 
-    speak("Jarvis en línea.", false);
+    speak("Sokari en línea.", false);
     app_set_state(JV_IDLE);
     log_msg("Listo. Di \"Hey Jarvis\" (o Ctrl+Alt+J) para hablarle.");
 
@@ -613,7 +613,7 @@ static DWORD WINAPI voice_main(LPVOID arg)
         }
         if (++frame_count % REMINDER_CHECK_FRAMES == 0) announce_due_reminders();
         if (config_mic_muted()) {
-            if (triggered) app_notify("Jarvis", "El micrófono está silenciado (actívalo desde el ícono de la bandeja).");
+            if (triggered) app_notify("Sokari", "El micrófono está silenciado (actívalo desde el ícono de la bandeja).");
             continue;
         }
         float score = (got && ww) ? ww_process(ww, f) : 0.0f;

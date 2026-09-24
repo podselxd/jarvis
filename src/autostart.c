@@ -11,7 +11,8 @@
 #include "util.h"
 
 #define RUN_KEY L"Software\\Microsoft\\Windows\\CurrentVersion\\Run"
-#define RUN_VALUE L"Jarvis"
+#define RUN_VALUE L"Sokari"
+#define LEGACY_RUN_VALUE L"Jarvis" /* de cuando se llamaba Jarvis */
 
 bool autostart_is_enabled(void)
 {
@@ -49,6 +50,17 @@ bool autostart_needs_refresh(const wchar_t *value, const wchar_t *exe)
     }
     while (*v == L' ') v++;
     return *v == 0;
+}
+
+/* ¿El comando de la clave Run abre este exe? Con comillas ("ruta" args) o
+   sin ellas (ruta.exe args). */
+bool autostart_value_points_to(const wchar_t *value, const wchar_t *exe)
+{
+    if (!value || !exe || !*exe) return false;
+    while (*value == L' ') value++;
+    size_t n = wcslen(exe);
+    if (*value == L'"') return !_wcsnicmp(value + 1, exe, n) && value[1 + n] == L'"';
+    return !_wcsnicmp(value, exe, n) && (!value[n] || value[n] == L' ');
 }
 
 LaunchKind launch_kind(bool has_key, bool from_autostart, bool updated)
@@ -98,10 +110,38 @@ void autostart_refresh(void)
     RegCloseKey(k);
 }
 
+/* La clave Run de cuando se llamaba Jarvis pasa a llamarse "Sokari". Si
+   apuntaba a este mismo exe (Jarvis.exe que se actualizó solo), siempre. Si
+   apuntaba a otra copia (bajaste Sokari.exe aparte), solo la vez que se
+   copian tus datos de Jarvis: con ellos se vino tu "iniciar con Windows", y
+   si no, al prender la PC arrancaría el Jarvis viejo. */
+void autostart_migrate_from_jarvis(bool data_migrated)
+{
+    HKEY k;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, RUN_KEY, 0, KEY_QUERY_VALUE | KEY_SET_VALUE, &k) != ERROR_SUCCESS) return;
+    wchar_t value[MAX_PATH * 2];
+    DWORD size = (DWORD)(sizeof value - sizeof(wchar_t)), type = 0;
+    if (RegQueryValueExW(k, LEGACY_RUN_VALUE, NULL, &type, (BYTE *)value, &size) == ERROR_SUCCESS && type == REG_SZ) {
+        value[size / sizeof(wchar_t)] = 0;
+        wchar_t *exe = exe_path();
+        if (data_migrated || autostart_value_points_to(value, exe)) {
+            wchar_t *cmd = autostart_command(exe);
+            if (RegSetValueExW(k, RUN_VALUE, 0, REG_SZ, (const BYTE *)cmd,
+                               (DWORD)((wcslen(cmd) + 1) * sizeof(wchar_t))) == ERROR_SUCCESS) {
+                RegDeleteValueW(k, LEGACY_RUN_VALUE);
+                log_msg("Inicio con Windows: ahora arranca Sokari (antes Jarvis).");
+            }
+            free(cmd);
+        }
+        free(exe);
+    }
+    RegCloseKey(k);
+}
+
 /* La versión en Python se ponía en el inicio con un acceso directo Jarvis.lnk
    en la carpeta Inicio (que podía apuntar a python + jarvis.py). Si existe,
    se reemplaza por la clave Run apuntando a este .exe, así no arrancan dos
-   Jarvis distintos peleándose el micrófono. */
+   asistentes distintos peleándose el micrófono. */
 void autostart_migrate_legacy(void)
 {
     PWSTR startup = NULL;

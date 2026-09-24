@@ -1,7 +1,8 @@
 # Al subir un tag vX.Y.Z: compila y prueba en Windows, revisa que el tag
-# coincida con la versión del código y deja el release como BORRADOR con el
-# Jarvis.exe adjunto. Nadie se actualiza hasta que lo publiques a mano en
-# GitHub (el actualizador solo ve releases publicados).
+# coincida con la versión del código y deja el release como BORRADOR con
+# Sokari.exe y una copia idéntica llamada Jarvis.exe (la que buscan los Jarvis
+# de antes para actualizarse solos). Nadie se actualiza hasta que lo publiques
+# a mano en GitHub (el actualizador solo ve releases publicados).
 name: Borrador de release
 
 on:
@@ -25,13 +26,14 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          name: Jarvis-exe
+          name: Sokari-exe
           path: dist
 
       - name: Crear el borrador
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          sha256sum dist/Jarvis.exe
-          gh release create "$GITHUB_REF_NAME" dist/Jarvis.exe --draft \
-            --title "Jarvis $GITHUB_REF_NAME" --generate-notes --verify-tag
+          cp dist/Sokari.exe dist/Jarvis.exe
+          sha256sum dist/Sokari.exe dist/Jarvis.exe
+          gh release create "$GITHUB_REF_NAME" dist/Sokari.exe dist/Jarvis.exe --draft \
+            --title "Sokari $GITHUB_REF_NAME" --generate-notes --verify-tag
