@@ -51,7 +51,14 @@ set -e
 cd /content
 [ -d openWakeWord ] || git clone -q --depth 1 https://github.com/dscripka/openWakeWord
 pip install -q -e ./openWakeWord --no-deps
-[ -d piper-sample-generator ] || git clone -q --depth 1 https://github.com/rhasspy/piper-sample-generator
+# Modelos de rasgos de openWakeWord (el paquete no los trae al instalarlo desde el repo).
+M=openWakeWord/openwakeword/resources/models
+mkdir -p $M
+for f in melspectrogram.onnx embedding_model.onnx; do
+    [ -s $M/$f ] || wget -q -O $M/$f https://github.com/dscripka/openWakeWord/releases/download/v0.5.1/$f
+done
+# La versión 2.0.0: la que train.py de openWakeWord sabe importar (las nuevas cambiaron de forma).
+[ -d piper-sample-generator ] || git clone -q --depth 1 --branch v2.0.0 https://github.com/rhasspy/piper-sample-generator
 mkdir -p piper-sample-generator/models
 MODELO=piper-sample-generator/models/en_US-libritts_r-medium.pt
 [ -s $MODELO ] || wget -q -O $MODELO https://github.com/rhasspy/piper-sample-generator/releases/download/v2.0.0/en_US-libritts_r-medium.pt
@@ -86,7 +93,7 @@ os.makedirs("audioset_16k", exist_ok=True)
 if len(os.listdir("audioset_16k")) < 500:
     if not Path("audioset/audio").exists():
         os.makedirs("audioset", exist_ok=True)
-        !wget -q -O audioset/bal_train09.tar https://huggingface.co/datasets/agkphysics/AudioSet/resolve/main/bal_train09.tar
+        !wget -q -O audioset/bal_train09.tar https://huggingface.co/datasets/agkphysics/AudioSet/resolve/main/data/bal_train09.tar
         !tar -xf audioset/bal_train09.tar -C audioset
     ds = datasets.Dataset.from_dict({"audio": [str(p) for p in Path("audioset/audio").glob("**/*.flac")]})
     for row in tqdm(ds.cast_column("audio", datasets.Audio(sampling_rate=16000)), desc="ruido"):
