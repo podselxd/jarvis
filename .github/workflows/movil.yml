@@ -3,7 +3,8 @@
 # con la versión y adjunta Sokari.apk al release junto a Sokari.exe.
 #
 # Firma: con tu llave (secretos ANDROID_LLAVE y ANDROID_LLAVE_CLAVE), así cada
-# versión se instala encima de la anterior. Un release sin esos secretos falla.
+# versión se instala encima de la anterior. Llamado con versión y sin esos
+# secretos, falla (release.yml ni lo llama sin ellos: saca el release sin APK).
 # Una rama sin ellos se firma con una llave temporal, solo para probar la firma.
 name: App del celular
 

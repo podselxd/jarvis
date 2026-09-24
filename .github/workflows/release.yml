@@ -1,7 +1,8 @@
 # Crea el release de una versión: compila y prueba en Windows y la app de
 # Android, revisa que la versión coincida con el código y crea el release con
 # Sokari.exe y Sokari.apk adjuntos. El actualizador solo ve releases publicados
-# y solo baja Sokari.exe.
+# y solo baja Sokari.exe. Sin los secretos de la llave de la app, el release
+# sale solo con Sokari.exe y lo dice en sus notas (nunca con un APK mal firmado).
 #
 # Dos formas de lanzarlo:
 # - Subir un tag vX.Y.Z: queda como BORRADOR para que lo publiques a mano.
@@ -23,12 +24,18 @@ on:
         required: false
         type: boolean
         default: false
+      notas:
+        description: 'Texto al principio de las notas del release (opcional)'
+        required: false
+        type: string
+        default: ''
 
 jobs:
   version:
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.v.outputs.tag }}
+      con_app: ${{ steps.v.outputs.con_app }}
     steps:
       - uses: actions/checkout@v4
 
@@ -37,6 +44,8 @@ jobs:
         env:
           ENTRADA: ${{ inputs.version }}
           GH_TOKEN: ${{ github.token }}
+          LLAVE: ${{ secrets.ANDROID_LLAVE }}
+          LLAVE_CLAVE: ${{ secrets.ANDROID_LLAVE_CLAVE }}
         run: |
           if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
             tag="$ENTRADA"
@@ -53,6 +62,12 @@ jobs:
           fi
           sh tests/check_version.sh "$tag"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          if [ -n "$LLAVE" ] && [ -n "$LLAVE_CLAVE" ]; then
+            echo "con_app=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "con_app=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Faltan los secretos ANDROID_LLAVE y ANDROID_LLAVE_CLAVE: este release sale sin Sokari.apk."
+          fi
 
   compilar:
     needs: version
@@ -60,6 +75,7 @@ jobs:
 
   movil:
     needs: version
+    if: needs.version.outputs.con_app == 'true'
     uses: ./.github/workflows/movil.yml
     with:
       version: ${{ needs.version.outputs.tag }}
@@ -67,6 +83,10 @@ jobs:
 
   borrador:
     needs: [version, compilar, movil]
+    # La app puede saltarse (sin llave), pero nunca haber fallado.
+    if: >-
+      always() && needs.version.result == 'success' && needs.compilar.result == 'success' &&
+      (needs.movil.result == 'success' || needs.movil.result == 'skipped')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -79,6 +99,7 @@ jobs:
           path: dist
 
       - uses: actions/download-artifact@v4
+        if: needs.version.outputs.con_app == 'true'
         with:
           name: Sokari-apk
           path: dist
@@ -88,13 +109,22 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.version.outputs.tag }}
           PUBLICAR: ${{ inputs.publicar }}
+          NOTAS: ${{ inputs.notas }}
+          CON_APP: ${{ needs.version.outputs.con_app }}
         run: |
-          sha256sum dist/Sokari.exe dist/Sokari.apk
+          archivos=(dist/Sokari.exe)
+          if [ "$CON_APP" = true ]; then
+            archivos+=(dist/Sokari.apk)
+          else
+            NOTAS="${NOTAS:+$NOTAS$'\n\n'}> La app del celular (Sokari.apk) no viene en esta versión: faltan los secretos de su llave de firma. Llega en la siguiente."
+          fi
+          sha256sum "${archivos[@]}"
           args=(--title "Sokari $TAG" --generate-notes)
+          if [ -n "$NOTAS" ]; then args+=(--notes "$NOTAS"); fi
           if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
             args+=(--target "$GITHUB_SHA")
           else
             args+=(--verify-tag)
           fi
           if [ "$PUBLICAR" != true ]; then args+=(--draft); fi
-          gh release create "$TAG" dist/Sokari.exe dist/Sokari.apk "${args[@]}"
+          gh release create "$TAG" "${archivos[@]}" "${args[@]}"

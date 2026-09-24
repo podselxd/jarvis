@@ -139,7 +139,7 @@ En cada push, GitHub Actions compila en un Windows real (una advertencia del com
    - revisa que la versión coincida con el código;
    - crea el release con `Sokari.exe` y `Sokari.apk` (la app del celular, con la misma versión).
    
-   El APK necesita los secretos de su llave de firma (ver [`movil/README.md`](movil/README.md)); sin ellos, el release falla y no se publica nada.
+   El APK necesita los secretos de su llave de firma (ver [`movil/README.md`](movil/README.md)). Sin ellos, el release sale solo con `Sokari.exe` y lo avisa en sus notas.
 4. Si quedó como borrador, revísalo y publícalo. Hasta que lo publiques, nadie se actualiza.
 
 No crees el release a mano desde GitHub: te saltas las pruebas, y si el tag no coincide con la versión del código, el exe se vuelve a descargar cada 6 horas.
