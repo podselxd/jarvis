@@ -123,3 +123,16 @@ if __name__ == "__main__":
             mez = Mezclador(fondos, rirs[250:], 202)
             for c in ["pos_test", "pos_test_carlfm", "pos_test_espeak", "neg_test", "neg_test_es"]:
                 procesar(mez, [c], f"{c}_{cond}", filas=24, fin=(0.1, 0.5), **kw)
+    elif etapa == "espanol":
+        fondos = lista(f"{DATOS}/fondos/*/*.wav")
+        mez = Mezclador(fondos, rirs[:250], 303)
+        procesar(mez, ["pos_train_es"], "pos_train_es", rondas=2)
+        procesar(mez, ["neg_train_es"], "neg_train_es_tts")
+        procesar(mez, ["pos_val_es"], "pos_val_es", filas=24, fin=(0.1, 0.5))
+        habla = lista("/home/user/datos/fleurs_es/es_419/audio/test/*.wav")[:150] + \
+            lista("/home/user/datos/fleurs_en/en_us/audio/test/*.wav")[:150]
+        fondos_p = lista(f"{DATOS}/prueba/*/*.wav") + habla
+        for cond, kw in [("limpio", dict(p_fondo=0.0)), ("ruido", dict(snr=(5, 15), p_fondo=1.0))]:
+            mez = Mezclador(fondos_p, rirs[250:], 404)
+            for c in ["pos_test_mx1", "pos_test_espeak2", "neg_test_es2"]:
+                procesar(mez, [c], f"{c}_{cond}", filas=24, fin=(0.1, 0.5), **kw)

@@ -97,22 +97,32 @@ def fa_por_hora(model, streams, umbral=UMBRAL):
     return total_ev / total_h, det
 
 
-def entrenar(peso_max=500, pasos=20000, d=32, semilla=0, log=print):
+def entrenar(peso_max=500, pasos=20000, d=32, semilla=0, log=print, dropout=0.0, wd=0.0, lr=1e-3, frac_es=None):
     torch.manual_seed(semilla)
     rng = np.random.default_rng(semilla)
     pos = np.load(f"{R}/pos_train.npy").astype(np.float32)
     adv = np.load(f"{R}/neg_train_tts.npy").astype(np.float32)
+    pos_es = None
+    if os.path.exists(f"{R}/pos_train_es.npy"):  # otros sintetizadores en español
+        pos_es = np.load(f"{R}/pos_train_es.npy").astype(np.float32)
+        if frac_es is None:
+            pos = np.concatenate([pos, pos_es])
+        adv = np.concatenate([adv, np.load(f"{R}/neg_train_es_tts.npy").astype(np.float32)])
     reales = flujos("train")
+    for k in [k for k in reales if k.endswith("_2")]:  # tandas extra de la misma fuente
+        reales[k[:-2]] = np.concatenate([reales[k[:-2]], reales.pop(k)])
     # Cuánto pesa cada fuente en cada lote de negativos reales.
-    mezcla = {"train_fleurs_es": 0.32, "train_fleurs_en": 0.18, "train_sc": 0.15, "train_esc50": 0.12,
-              "train_musica": 0.15, "train_ruido": 0.08}
+    mezcla = {"train_fleurs_es": 0.27, "train_fleurs_en": 0.28, "train_sc": 0.13, "train_esc50": 0.10,
+              "train_musica": 0.14, "train_ruido": 0.08}
     fuentes = [k for k in mezcla if k in reales]
     p = np.array([mezcla[k] for k in fuentes]); p /= p.sum()
-    val_pos = np.load(f"{R}/pos_val.npy").astype(np.float32)
+    # Las primeras 400 frases de prueba de LibriTTS eligen el modelo; las otras 400 quedan para la prueba final.
+    val_pos = np.load(f"{R}/pos_val.npy").astype(np.float32)[:400]
+    val_es = np.load(f"{R}/pos_val_es.npy").astype(np.float32) if os.path.exists(f"{R}/pos_val_es.npy") else None
     val_streams = flujos("val")
     model = Net(d)
-    opt = torch.optim.Adam(model.parameters(), lr=1e-3)
-    sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=1e-3, total_steps=pasos, pct_start=0.1)
+    opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=wd)
+    sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=lr, total_steps=pasos, pct_start=0.1)
     N_REAL, N_ADV, N_POS = 1024, 128, 128
     mejores = []
     for paso in range(pasos):
@@ -123,23 +133,39 @@ def entrenar(peso_max=500, pasos=20000, d=32, semilla=0, log=print):
             ini = rng.integers(0, len(e) - 16, c)
             partes.append(e[ini[:, None] + np.arange(16)[None]])
         neg = np.concatenate(partes + [adv[rng.integers(0, len(adv), N_ADV)]])
-        ps = pos[rng.integers(0, len(pos), N_POS)]
+        if frac_es is not None and pos_es is not None:
+            n_es = int(N_POS * frac_es)
+            ps = np.concatenate([pos[rng.integers(0, len(pos), N_POS - n_es)], pos_es[rng.integers(0, len(pos_es), n_es)]])
+        else:
+            ps = pos[rng.integers(0, len(pos), N_POS)]
         x = torch.from_numpy(np.concatenate([ps, neg]))
         y = torch.cat([torch.ones(N_POS), torch.zeros(len(neg))])
         w_neg = 1 + (peso_max - 1) * min(1.0, paso / (0.7 * pasos))
-        w = torch.cat([torch.ones(N_POS), torch.full((len(neg),), w_neg / 8)])
+        w = torch.cat([torch.ones(N_POS), torch.full((len(neg),), w_neg)])
+        if dropout:  # solo al entrenar: apaga rasgos al azar para que no memorice
+            x = nn.functional.dropout(x, dropout, training=True)
         z = model.logits(x).reshape(-1)
-        loss = (nn.functional.binary_cross_entropy_with_logits(z, y, reduction="none") * w).sum() / w.sum()
-        opt.zero_grad()
-        loss.backward()
-        opt.step()
+        # Como openWakeWord: solo cuentan los ejemplos que todavía no domina
+        # (negativos con p >= 0.001 y positivos con p < 0.999).
+        with torch.no_grad():
+            pr = torch.sigmoid(z)
+            dificil = ((y == 0) & (pr >= 0.001)) | ((y == 1) & (pr < 0.999))
+        if dificil.any():
+            bce = nn.functional.binary_cross_entropy_with_logits(z[dificil], y[dificil], reduction="none")
+            loss = (bce * w[dificil]).mean()
+            opt.zero_grad()
+            loss.backward()
+            opt.step()
         sched.step()
         if (paso + 1) % 1000 == 0 and paso + 1 >= pasos * 0.5:
             model.eval()
-            rec = recall(model, val_pos)
+            rec_lib = recall(model, val_pos)
+            rec_es = recall(model, val_es) if val_es is not None else rec_lib
+            rec = min(rec_lib, rec_es)  # el peor de los dos manda
             fa, det = fa_por_hora(model, val_streams)
             model.train()
-            log(f"paso {paso + 1}: recall {rec:.3f}, falsas/h {fa:.2f} {det}, pérdida {loss.item():.4f}")
+            log(f"paso {paso + 1}: recall libritts {rec_lib:.3f} español {rec_es:.3f}, falsas/h {fa:.2f} {det}, "
+                f"peso neg {w_neg:.0f}")
             mejores.append((fa, rec, paso + 1, {k: v.clone() for k, v in model.state_dict().items()}))
     return model, mejores
 

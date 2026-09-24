@@ -22,8 +22,9 @@ def max9(model, x24):
 
 
 def evaluar(pt):
-    model = Net()
-    model.load_state_dict(torch.load(pt))
+    sd = torch.load(pt)
+    model = Net(sd["layer1.weight"].shape[0])
+    model.load_state_dict(sd)
     model.eval()
     res = {"falsas_por_hora": {}, "recall": {}, "parecidas": {}}
     streams = flujos("test")
@@ -38,11 +39,15 @@ def evaluar(pt):
             tot[u] += eventos(s, u)
     res["falsas_por_hora"]["TOTAL"] = {"horas": round(total_h, 2), **{str(u): tot[u] for u in UMBRALES},
                                        **{f"por_hora@{u}": round(tot[u] / total_h, 3) for u in UMBRALES}}
-    for c in ["pos_test", "pos_test_carlfm", "pos_test_espeak"]:
+    # carlfm y espeak (primera tanda) ya son voces vistas en el entrenamiento: se reportan aparte.
+    for c in ["pos_test", "pos_test_mx1", "pos_test_espeak2", "pos_test_carlfm", "pos_test_espeak"]:
         for cond in ["limpio", "ruido"]:
-            s = max9(model, np.load(f"{R}/{c}_{cond}.npy").astype(np.float32))
+            x = np.load(f"{R}/{c}_{cond}.npy").astype(np.float32)
+            if c == "pos_test":
+                x = x[400:]  # las primeras 400 se usaron para elegir el modelo
+            s = max9(model, x)
             res["recall"][f"{c}_{cond}"] = {str(u): round(float((s > u).mean()), 3) for u in UMBRALES}
-    for c in ["neg_test", "neg_test_es"]:
+    for c in ["neg_test", "neg_test_es", "neg_test_es2"]:
         for cond in ["limpio", "ruido"]:
             s = max9(model, np.load(f"{R}/{c}_{cond}.npy").astype(np.float32))
             res["parecidas"][f"{c}_{cond}"] = {str(u): round(float((s > u).mean()), 3) for u in UMBRALES}

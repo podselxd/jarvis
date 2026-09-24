@@ -83,6 +83,33 @@ def speech_commands(cual):
     sel = {"train": [p for p in todos if p not in val and p not in test], "val": sorted(val), "test": sorted(test)}[cual]
     return [f"{base}/{p}" for p in sel]
 
+def usados_en_entrenamiento():
+    """Repite el azar de la etapa de entrenamiento para saber qué archivos de
+    FLEURS ya entraron (sin volver a calcular nada)."""
+    import soundfile as sf
+    r = random.Random(77)
+    usados = set()
+    for archivos, horas in [(fleurs("es", "train"), 6.0), (fleurs("en", "train"), 3.0)]:
+        archivos = list(archivos)
+        r.shuffle(archivos)
+        total, meta = 0, int(horas * 3600 * SR)
+        for p in archivos:
+            if total >= meta:
+                break
+            n = sf.info(p).frames
+            r.uniform(-12, 3)
+            r.randint(0, 1 << 30)
+            total += n + int(r.uniform(0.0, 0.4) * SR)
+            usados.add(p)
+    return usados
+
+
+def mas_negativos():
+    usados = usados_en_entrenamiento()
+    print("archivos ya usados:", len(usados), flush=True)
+    flujo([p for p in fleurs("en", "train") if p not in usados], 11.0, "train_fleurs_en_2")
+    flujo([p for p in fleurs("es", "train") if p not in usados], 5.0, "train_fleurs_es_2")
+
 
 if __name__ == "__main__":
     etapa = sys.argv[1]
@@ -95,6 +122,8 @@ if __name__ == "__main__":
         flujo(speech_commands("test"), 0.8, "test_sc", gap=(0.1, 0.8))
         flujo(lista(f"{DATOS}/prueba/esc50/*.wav"), 1.0, "test_esc50")
         flujo(lista(f"{DATOS}/prueba/musica/*.wav"), 1.0, "test_musica")
+    elif etapa == "mas":
+        mas_negativos()
     elif etapa == "entrenamiento":
         flujo(fleurs("es", "train"), 6.0, "train_fleurs_es")
         flujo(fleurs("en", "train"), 3.0, "train_fleurs_en")

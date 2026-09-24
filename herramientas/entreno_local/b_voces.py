@@ -179,6 +179,40 @@ def espeak_es(textos, n, out_dir, seed):
     meta.close()
 
 
+def espeak_voz(voces, textos, n, out_dir, seed, prefijo):
+    """espeak-ng con voces MBROLA ("mb-mx2") o variantes ("es-419+Alex"),
+    con velocidad y tono al azar."""
+    import io
+    import subprocess
+    from comun import leer
+    os.makedirs(out_dir, exist_ok=True)
+    rng = random.Random(seed)
+    meta = open(f"{out_dir}/textos.tsv", "a", encoding="utf-8")
+    tmp = f"{out_dir}/_tmp_{prefijo}.wav"
+    hechos = 0
+    while hechos < n:
+        t, v = rng.choice(textos), rng.choice(voces)
+        wav = subprocess.run(["espeak-ng", "-v", v, "-s", str(rng.randint(120, 185)), "-p", str(rng.randint(25, 75)),
+                              "--stdout", t], capture_output=True).stdout
+        if len(wav) < 2000:
+            continue
+        open(tmp, "wb").write(wav)
+        a = gs.remove_silence(gs.audio_float_to_int16(leer(tmp)).flatten())
+        if len(a) < 4000:
+            continue
+        sf.write(f"{out_dir}/{prefijo}_{hechos:05d}.wav", a, 16000, subtype="PCM_16")
+        meta.write(f"{prefijo}_{hechos:05d}\t{t}\t{v}\n")
+        hechos += 1
+    os.remove(tmp)
+    meta.close()
+
+
+def variantes_espeak():
+    import glob
+    vs = sorted(os.path.basename(p) for p in glob.glob("/usr/lib/x86_64-linux-gnu/espeak-ng-data/voices/!v/*"))
+    return [f"es-419+{v}" for v in vs[0::2]], [f"es-419+{v}" for v in vs[1::2]]  # entrenar, prueba
+
+
 if __name__ == "__main__":
     etapa = sys.argv[1]
     TRAIN, TEST = list(range(0, 800)), list(range(800, 904))
@@ -194,3 +228,24 @@ if __name__ == "__main__":
         libritts(adversarias(600, 24) + NEG_EN * 6 + NEG_ES_FON * 5, 800, f"{CLIPS}/neg_test", TEST, 25)
         piper_es("es-carlfm-x-low", NEG_ES, 200, f"{CLIPS}/neg_test_es", 26)
         espeak_es(NEG_ES, 100, f"{CLIPS}/neg_test_es", 27)
+    elif etapa == "espanol":
+        # Otros sintetizadores en español. Solo para la prueba: MBROLA mx1 (mexicana)
+        # y la mitad de las variantes de espeak.
+        ESP_TRAIN, ESP_TEST = variantes_espeak()
+        MB_TRAIN = ["mb-mx2", "mb-es1", "mb-es2", "mb-es3", "mb-es4"]
+        FRASES_ES = [t for t in frases_fleurs("es", "train", 2000, 41) if len(t) < 90][:300]
+        NEG = NEG_ES * 5 + FRASES_ES
+        espeak_voz(MB_TRAIN, POS_ES, 1350, f"{CLIPS}/pos_train_es", 42, "mbrola")
+        espeak_voz(ESP_TRAIN, POS_ES, 600, f"{CLIPS}/pos_train_es", 43, "espeak")
+        piper_es("es-carlfm-x-low", POS_ES, 600, f"{CLIPS}/pos_train_es", 44)
+        espeak_voz(MB_TRAIN, NEG, 850, f"{CLIPS}/neg_train_es", 45, "mbrola")
+        espeak_voz(ESP_TRAIN, NEG, 400, f"{CLIPS}/neg_train_es", 46, "espeak")
+        piper_es("es-carlfm-x-low", NEG, 400, f"{CLIPS}/neg_train_es", 47)
+        # Para elegir el modelo: clips aparte de las mismas voces de entrenamiento.
+        espeak_voz(MB_TRAIN, POS_ES, 150, f"{CLIPS}/pos_val_es", 48, "mbrola")
+        piper_es("es-carlfm-x-low", POS_ES, 50, f"{CLIPS}/pos_val_es", 49)
+        # Prueba final: voces que el entrenamiento nunca oye.
+        espeak_voz(["mb-mx1"], POS_ES, 300, f"{CLIPS}/pos_test_mx1", 50, "mbrola")
+        espeak_voz(ESP_TEST, POS_ES, 200, f"{CLIPS}/pos_test_espeak2", 51, "espeak")
+        espeak_voz(["mb-mx1"], NEG, 200, f"{CLIPS}/neg_test_es2", 52, "mbrola")
+        espeak_voz(ESP_TEST, NEG, 100, f"{CLIPS}/neg_test_es2", 53, "espeak")
