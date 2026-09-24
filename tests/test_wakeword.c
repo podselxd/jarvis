@@ -59,6 +59,28 @@ static int16_t *load_wav16k(const wchar_t *path, size_t *samples)
     return NULL;
 }
 
+/* Puntaje más alto de un wav de tests/datos (se busca junto al exe:
+   build/tests/ -> ../../tests/datos), empezando con el detector limpio.
+   Devuelve -1 si no está el archivo. */
+static float best_score(WakeWord *w, const wchar_t *name)
+{
+    wchar_t *dir = exe_dir(), *rel = path_join(L"..\\..\\tests\\datos", name), *path = path_join(dir, rel);
+    size_t n = 0;
+    int16_t *pcm = load_wav16k(path, &n);
+    free(dir);
+    free(rel);
+    free(path);
+    if (!pcm) return -1;
+    ww_reset(w);
+    float best = 0;
+    for (size_t off = 0; off + WW_CHUNK <= n; off += WW_CHUNK) {
+        float sc = ww_process(w, pcm + off);
+        if (sc > best) best = sc;
+    }
+    free(pcm);
+    return best;
+}
+
 static int g_fail, g_total;
 
 static void check(bool ok, const char *what)
@@ -255,6 +277,32 @@ int wmain(int argc, wchar_t **argv)
     } else {
         WakeWord *hs = ww_create(blob, blen, word, wlen);
         check(hs != NULL, "el modelo de \"Hey Sokari\" que trae el exe carga");
+        if (hs) {
+            /* Clips con margen, para notar si algo se rompe (el modelo, su
+               conversión o el detector). La precisión real está medida en
+               herramientas/LEEME.md. Umbral: el de fábrica (sensibilidad 67). */
+            const float umbral = 0.4f;
+            float si = best_score(hs, L"hey_sokari.wav");
+            float saf = best_score(hs, L"hey_safari.wav"), soc = best_score(hs, L"oye_socorro.wav");
+            printf("      \"hey sokari\" a la española: %.3f | \"hey safari\": %.3f | \"oye socorro\": %.3f\n", si, saf,
+                   soc);
+            check(si > umbral, "detecta \"hey sokari\" (voz sintética nunca vista)");
+            check(saf >= 0 && saf < umbral, "no se activa con \"hey safari\"");
+            check(soc >= 0 && soc < umbral, "no se activa con \"oye socorro\"");
+            ww_reset(hs);
+            float ruido = 0;
+            uint32_t r = 99;
+            for (int i = 0; i < 250; i++) { /* 20 s de ruido */
+                for (int k = 0; k < WW_CHUNK; k++) {
+                    r = r * 1664525u + 1013904223u;
+                    chunk[k] = (int16_t)((int)(r >> 16) % 4000 - 2000);
+                }
+                float sc = ww_process(hs, chunk);
+                if (sc > ruido) ruido = sc;
+            }
+            printf("      20 s de ruido: %.3f\n", ruido);
+            check(ruido < umbral, "no se activa con ruido");
+        }
         if (hs && argc > 2) {
             size_t n;
             int16_t *pcm = load_wav16k(argv[2], &n);
