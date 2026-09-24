@@ -53,17 +53,27 @@ static const struct {
     {"egrave", 0xE8},   {"ouml", 0xF6},     {"auml", 0xE4},     {"szlig", 0xDF},    {"trade", 0x2122},
 };
 
-/* Decodifica &algo; en p (que apunta a '&'). Devuelve cuántos bytes consumió. */
+/* Decodifica &algo; en p (que apunta a '&'). Devuelve cuántos bytes consumió.
+   El ';' se busca solo en los 12 bytes siguientes: buscarlo en todo el resto
+   de la página hacía que una página con miles de '&' congelara a Jarvis. */
 static size_t decode_entity(const char *p, StrBuf *sb)
 {
-    const char *semi = strchr(p, ';');
-    if (!semi || semi - p > 12) {
+    const char *semi = NULL;
+    for (size_t i = 1; i <= 12 && p[i]; i++) {
+        if (p[i] == ';') {
+            semi = p + i;
+            break;
+        }
+    }
+    if (!semi) {
         sb_append_char(sb, '&');
         return 1;
     }
     size_t len = (size_t)(semi - p - 1);
     if (p[1] == '#') {
         unsigned long cp = (p[2] == 'x' || p[2] == 'X') ? strtoul(p + 3, NULL, 16) : strtoul(p + 2, NULL, 10);
+        /* &#0; o un surrogate suelto meterían un NUL o UTF-8 inválido al texto. */
+        if (cp == 0 || (cp >= 0xD800 && cp <= 0xDFFF)) cp = 0xFFFD;
         append_codepoint(sb, cp == 0xA0 ? ' ' : cp);
         return (size_t)(semi - p + 1);
     }
