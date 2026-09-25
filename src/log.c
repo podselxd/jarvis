@@ -65,3 +65,26 @@ void log_msg(const char *fmt, ...)
     }
     sb_free(&sb);
 }
+
+static volatile LONG g_calls, g_in, g_out;
+
+void turn_stats_reset(void)
+{
+    InterlockedExchange(&g_calls, 0);
+    InterlockedExchange(&g_in, 0);
+    InterlockedExchange(&g_out, 0);
+}
+
+void turn_stats_llm(int tokens_in, int tokens_out)
+{
+    InterlockedIncrement(&g_calls);
+    InterlockedExchangeAdd(&g_in, tokens_in);
+    InterlockedExchangeAdd(&g_out, tokens_out);
+}
+
+TurnStats turn_stats_get(void)
+{
+    TurnStats s = {(int)InterlockedCompareExchange(&g_calls, 0, 0), (int)InterlockedCompareExchange(&g_in, 0, 0),
+                   (int)InterlockedCompareExchange(&g_out, 0, 0)};
+    return s;
+}

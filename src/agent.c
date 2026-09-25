@@ -449,9 +449,17 @@ bool agent_asks_permission(const char *reply)
         "te lo mando",   "te lo envío",    "sigo",            "continúo",       "continuo",       "puedo",
         "me permites",   "me das permiso", "autorizas",       "está bien si",   "esta bien si",   "le doy",
     };
-    static const char *const NOT[] = {"qué",     "cuál",    "cuáles",   "quién",     "quiénes",   "dónde",
-                                      "cuándo",  "cómo",    "cuánto",   "cuánta",    "cuántos",   "cuántas",
-                                      " o ",     "algo más", "otra cosa", "en qué más", "más ayuda", "ayudarte con"};
+    /* Preguntas de verdad y ofrecimientos ("¿quieres que te guíe…?"): a esos
+       no se les contesta "sí" solo. Uno así prendió permisos y soltó una guía
+       inventada. */
+    static const char *const NOT[] = {"qué",         "cuál",        "cuáles",       "quién",       "quiénes",
+                                      "dónde",       "cuándo",      "cómo",         "cuánto",      "cuánta",
+                                      "cuántos",     "cuántas",     " o ",          "algo más",    "otra cosa",
+                                      "en qué más",  "más ayuda",   "ayudarte con", "te guíe",     "te guie",
+                                      "te explique", "te ayude",    "te cuente",    "te diga",     "te enseñe",
+                                      "te muestre",  "te recomiende", "te dé ",     "te de ",      "te pase",
+                                      "te busque",   "busque más",  "investigue",   "más información",
+                                      "mas informacion", "más detalles", "mas detalles", "te lo explique"};
     bool ask = false;
     for (size_t i = 0; i < sizeof ASK / sizeof *ASK && !ask; i++) ask = strstr(low, ASK[i]) != NULL;
     for (size_t i = 0; i < sizeof NOT / sizeof *NOT && ask; i++) ask = strstr(low, NOT[i]) == NULL;
@@ -584,6 +592,38 @@ static cJSON *select_tools(const Conversation *c, const char *text, bool all, bo
     }
     free(norm);
     return out;
+}
+
+/* Herramientas que hacen algo y dicen qué hicieron ("Abrí tu navegador."):
+   si salieron bien, eso es la respuesta, sin otra llamada al modelo. Las que
+   solo traen datos (buscar, leer, recordar) sí necesitan que el modelo los
+   cuente. */
+static bool is_action_tool(const char *name)
+{
+    static const char *const ACT[] = {"open_app",       "control_media",   "control_desktop",  "poner_en_youtube",
+                                      "crear_recordatorio", "run_macro",   "focus_window",     "type_text",
+                                      "gestionar_dispositivo", "cambiar_permisos", "mover_archivo", "copiar_portapapeles",
+                                      "guardar_dato",   "registrar_dispositivo", "create_macro", "exportar_a_obsidian",
+                                      "borrar_memoria_reciente"};
+    for (size_t i = 0; i < sizeof ACT / sizeof *ACT; i++)
+        if (!strcmp(name, ACT[i])) return true;
+    return false;
+}
+
+/* ¿La herramienta dice que lo hizo? ("No encontré…", "No pude…": no). */
+static bool tool_succeeded(const char *result)
+{
+    static const char *const BAD_START[] = {"No ", "No,", "Error", "Pendiente", "Necesito", "Solo ", "Primero",
+                                            "Falta", "Hubo", "Lo siento", "Perdón", "No se "};
+    static const char *const BAD_IN[] = {"no pude", "no encontré", "no encontre", "no existe", "falló", "fallo",
+                                         "error", "no se pudo", "no le llegó", "no contesta", "no tengo"};
+    for (size_t i = 0; i < sizeof BAD_START / sizeof *BAD_START; i++)
+        if (!strncmp(result, BAD_START[i], strlen(BAD_START[i]))) return false;
+    char *low = str_lower(result);
+    bool bad = false;
+    for (size_t i = 0; i < sizeof BAD_IN / sizeof *BAD_IN && !bad; i++) bad = strstr(low, BAD_IN[i]) != NULL;
+    free(low);
+    return !bad && *result;
 }
 
 /* ¿Además de la otra PC, habla de esta? ("ábrelo aquí y en cloe") */
@@ -1089,6 +1129,10 @@ static TurnResult process_turn(Conversation *c, const char *text)
         const char *said = cJSON_GetStringValue(cJSON_GetObjectItem(msg, "content"));
         cJSON *call;
         bool blocked = false;
+        /* Lo que dijeron las herramientas de acción, por si basta como respuesta. */
+        StrBuf direct;
+        sb_init(&direct);
+        bool direct_ok = true;
         cJSON_ArrayForEach(call, calls)
         {
             cJSON *fn = cJSON_GetObjectItem(call, "function");
@@ -1134,6 +1178,8 @@ static TurnResult process_turn(Conversation *c, const char *text)
                 if (!strcmp(name, "borrar_memoria_reciente")) forget_after = true;
             }
             cJSON_Delete(parsed);
+            if (blocked || !is_action_tool(name) || !tool_succeeded(result)) direct_ok = false;
+            else sb_appendf(&direct, "%s%s", direct.len ? " " : "", result);
             char *shown = xstrndup(result, utf8_truncate_len(result, 300));
             log_msg("[herramienta] %s(%s) -> %s", name ? name : "?", args ? args : "", shown);
             free(shown);
@@ -1147,6 +1193,15 @@ static TurnResult process_turn(Conversation *c, const char *text)
         /* Despedirse no necesita otra vuelta al modelo: se usa lo que dijo junto
            con la herramienta, o un "hasta luego". */
         if (ending && !reply) reply = str_trim(said && *said ? said : "Hasta luego.");
+        /* Todo lo de esta vuelta fueron acciones que salieron bien: se dice lo
+           que hicieron y ya. Media llamada menos de cupo por orden, un segundo
+           menos, y el modelo no puede adornarlo con algo falso (como aquel
+           «te abrí el navegador en tu laptop»). */
+        if (!reply && direct_ok && direct.len) {
+            reply = xstrdup(direct.data);
+            log_msg("Contesto con lo que dijeron las herramientas: no hace falta otra llamada al modelo.");
+        }
+        sb_free(&direct);
     }
     app_status("");
 
