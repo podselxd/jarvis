@@ -8,13 +8,17 @@
 #include <windows.h>
 #include <shellapi.h>
 #include <winhttp.h>
+#include <oleauto.h>
+#include <netfw.h>
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "config.h"
 #include "http.h"
+#include "intents.h"
 #include "log.h"
 #include "memory.h"
 #include "mesh.h"
@@ -34,6 +38,14 @@ static volatile LONG g_running;
 static HANDLE g_watch, g_watch_quit;
 static SRWLOCK g_ip_lock = SRWLOCK_INIT;
 static char *g_listen_ip; /* donde escucha ahora, NULL si no escucha */
+/* Cada pedido se atiende en su propio hilo: una orden larga ya no deja
+   esperando a «Probar» ni a otra orden. */
+#define MAX_CLIENTS 8
+static volatile LONG g_clients;
+/* Si una orden tarda más que esto, se contesta «recibido» y se sigue. */
+static volatile LONG g_ack_ms = 5000;
+/* -1 sin revisar, 0 el firewall no deja entrar las órdenes, 1 sí. */
+static volatile LONG g_fw_ok = -1;
 
 /* Dónde está tailscale.exe: donde lo deja su instalador o, si no, en el PATH
    (nunca en la carpeta actual). NULL si no está. */
@@ -186,6 +198,114 @@ static const char *find_header(const char *headers, const char *name, size_t *le
 
 static bool peer_is_mine(const char *ip);
 
+/* ------------------------------------------ quién te ha mandado algo --- */
+
+/* Las PCs que te mandaron algo (ya autorizadas) y cuándo: si luego tú no
+   puedes mandarles, se sabe que su salida funciona y falla su entrada. */
+typedef struct {
+    char ip[16];
+    time_t at;
+} Inbound;
+static Inbound g_inbound[16];
+static SRWLOCK g_inbound_lock = SRWLOCK_INIT;
+
+static void remember_inbound(const char *ip)
+{
+    AcquireSRWLockExclusive(&g_inbound_lock);
+    int slot = 0;
+    for (int i = 0; i < 16; i++) {
+        if (!strcmp(g_inbound[i].ip, ip)) {
+            slot = i;
+            break;
+        }
+        if (g_inbound[i].at < g_inbound[slot].at) slot = i;
+    }
+    snprintf(g_inbound[slot].ip, sizeof g_inbound[slot].ip, "%s", ip);
+    g_inbound[slot].at = time(NULL);
+    ReleaseSRWLockExclusive(&g_inbound_lock);
+}
+
+static time_t last_inbound(const char *ip)
+{
+    time_t t = 0;
+    AcquireSRWLockShared(&g_inbound_lock);
+    for (int i = 0; i < 16; i++)
+        if (!strcmp(g_inbound[i].ip, ip)) t = g_inbound[i].at;
+    ReleaseSRWLockShared(&g_inbound_lock);
+    return t;
+}
+
+/* ------------------------------------------------ órdenes que tardan --- */
+
+/* La orden corre en su propio hilo. Si termina antes de g_ack_ms, se
+   contesta con lo que dijo Sokari; si no, con «recibido» (202) y la orden
+   sigue aquí. state: 0 corriendo, 1 terminó a tiempo, 2 ya se contestó
+   «recibido». */
+typedef struct {
+    char *comando, *origin, *reply;
+    HANDLE done;
+    volatile LONG state, refs;
+} MeshJob;
+
+static void job_release(MeshJob *j)
+{
+    if (InterlockedDecrement(&j->refs)) return;
+    free(j->comando);
+    free(j->origin);
+    free(j->reply);
+    CloseHandle(j->done);
+    free(j);
+}
+
+static DWORD WINAPI job_thread(LPVOID arg)
+{
+    MeshJob *j = arg;
+    CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+    j->reply = g_handler ? g_handler(j->comando, j->origin) : NULL;
+    if (InterlockedCompareExchange(&j->state, 1, 0) == 2) {
+        char *shown = j->reply ? xstrndup(j->reply, utf8_truncate_len(j->reply, 300)) : xstrdup("(estaba ocupado)");
+        log_msg("Malla: terminé la orden de %s («%s»): %s", j->origin, j->comando, shown);
+        free(shown);
+    }
+    SetEvent(j->done);
+    CoUninitialize();
+    job_release(j);
+    return 0;
+}
+
+/* Toma comando (heap). */
+static void run_command(SOCKET c, char *comando, const char *origin)
+{
+    MeshJob *j = xcalloc(1, sizeof *j);
+    j->comando = comando;
+    j->origin = xstrdup(origin);
+    j->done = CreateEventW(NULL, TRUE, FALSE, NULL);
+    j->refs = 2;
+    HANDLE t = j->done ? CreateThread(NULL, 1 << 20, job_thread, j, 0, NULL) : NULL;
+    if (!t) {
+        job_release(j); /* el hilo nunca existió: su referencia tampoco */
+        j->reply = g_handler ? g_handler(j->comando, j->origin) : NULL;
+        j->state = 1;
+    } else {
+        CloseHandle(t);
+        WaitForSingleObject(j->done, (DWORD)InterlockedCompareExchange(&g_ack_ms, 0, 0));
+    }
+    if (InterlockedCompareExchange(&j->state, 2, 0) == 0) {
+        log_msg("Malla: la orden de %s va para largo; le contesto «recibido» y sigo.", origin);
+        respond(c, 202, "Accepted", "Recibido: lo estoy haciendo.");
+    } else if (j->reply) {
+        respond(c, 200, "OK", *j->reply ? j->reply : "Listo.");
+    } else {
+        respond(c, 503, "Service Unavailable", "Sokari está ocupado ahora, prueba en un momento.");
+    }
+    job_release(j);
+}
+
+void mesh_set_ack_ms(int ms)
+{
+    InterlockedExchange(&g_ack_ms, ms);
+}
+
 static void handle_client(SOCKET c, const char *origin, const char *ip)
 {
     DWORD timeout = 10000;
@@ -227,6 +347,7 @@ static void handle_client(SOCKET c, const char *origin, const char *ip)
         free(buf);
         return;
     }
+    remember_inbound(ip);
     const char *cl = find_header(buf, "Content-Length", &vlen);
     size_t body_len = cl ? (size_t)strtoul(cl, NULL, 10) : 0;
     if (body_len > MAX_BODY) {
@@ -246,14 +367,31 @@ static void handle_client(SOCKET c, const char *origin, const char *ip)
     cJSON_Delete(j);
     if (!*comando) {
         respond(c, 400, "Bad Request", "falta el comando");
+        free(comando);
     } else {
-        char *reply = g_handler ? g_handler(comando, origin) : NULL;
-        if (reply) respond(c, 200, "OK", *reply ? reply : "Listo.");
-        else respond(c, 503, "Service Unavailable", "Sokari está ocupado ahora, prueba en un momento.");
-        free(reply);
+        run_command(c, comando, origin);
     }
-    free(comando);
     free(buf);
+}
+
+typedef struct {
+    SOCKET c;
+    char ip[16];
+} Client;
+
+static DWORD WINAPI client_thread(LPVOID arg)
+{
+    Client *cl = arg;
+    CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+    char *name = mesh_device_name_for_ip(cl->ip);
+    handle_client(cl->c, name ? name : cl->ip, cl->ip);
+    free(name);
+    shutdown(cl->c, SD_BOTH);
+    closesocket(cl->c);
+    free(cl);
+    CoUninitialize();
+    InterlockedDecrement(&g_clients);
+    return 0;
 }
 
 static DWORD WINAPI server_thread(LPVOID arg)
@@ -269,14 +407,22 @@ static DWORD WINAPI server_thread(LPVOID arg)
             Sleep(200);
             continue;
         }
+        Client *cl = xcalloc(1, sizeof *cl);
+        cl->c = c;
         unsigned char *b = (unsigned char *)&peer.sin_addr;
-        char ip[16];
-        snprintf(ip, sizeof ip, "%u.%u.%u.%u", b[0], b[1], b[2], b[3]);
-        char *name = mesh_device_name_for_ip(ip);
-        handle_client(c, name ? name : ip, ip);
-        free(name);
-        shutdown(c, SD_BOTH);
-        closesocket(c);
+        snprintf(cl->ip, sizeof cl->ip, "%u.%u.%u.%u", b[0], b[1], b[2], b[3]);
+        HANDLE t = NULL;
+        if (InterlockedIncrement(&g_clients) <= MAX_CLIENTS)
+            t = CreateThread(NULL, 1 << 20, client_thread, cl, 0, NULL);
+        if (t) {
+            CloseHandle(t);
+        } else {
+            InterlockedDecrement(&g_clients);
+            respond(c, 503, "Service Unavailable", "Sokari está ocupado ahora, prueba en un momento.");
+            shutdown(c, SD_BOTH);
+            closesocket(c);
+            free(cl);
+        }
     }
     CoUninitialize();
     return 0;
@@ -323,9 +469,12 @@ static void stop_listening(void)
     ReleaseSRWLockExclusive(&g_ip_lock);
 }
 
+static void check_firewall_on_listen(void);
+
 static DWORD WINAPI watch_thread(LPVOID arg)
 {
-    bool warned = false;
+    CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+    bool warned = false, fw_checked = false;
     do {
         char *ip = mesh_tailscale_ip();
         AcquireSRWLockShared(&g_ip_lock);
@@ -340,6 +489,10 @@ static DWORD WINAPI watch_thread(LPVOID arg)
         if (!listening && ip) {
             if (listen_on(ip)) {
                 warned = false;
+                if (!fw_checked) {
+                    fw_checked = true;
+                    check_firewall_on_listen();
+                }
             } else if (!warned) {
                 log_msg("No pude levantar el servidor de malla en %s:%d; lo vuelvo a intentar.", ip, MESH_PORT);
                 warned = true;
@@ -351,6 +504,7 @@ static DWORD WINAPI watch_thread(LPVOID arg)
         free(ip);
     } while (WaitForSingleObject(g_watch_quit, 15000) == WAIT_TIMEOUT);
     stop_listening();
+    CoUninitialize();
     return 0;
 }
 
@@ -462,6 +616,89 @@ bool mesh_device_remove(const char *name)
     return had;
 }
 
+/* "la laptop", "la otra compu": otra PC, sin decir cuál (nunca "mi pc" a
+   secas, que casi siempre es esta). */
+static bool says_other_pc(const char *norm)
+{
+    static const char *const W[] = {" laptop ",       " laptops ",     " lap ",        " portatil ",
+                                    " notebook ",     " otra pc ",     " otra compu ", " otra computadora ",
+                                    " otra maquina ", " otro equipo ", " la de alla "};
+    for (size_t i = 0; i < sizeof W / sizeof *W; i++)
+        if (strstr(norm, W[i])) return true;
+    return false;
+}
+
+/* ¿norm (normalizado, con espacios a los lados) nombra a ese dispositivo?
+   Por su nombre completo ("laptop ismael") o por cómo suena, si es de una
+   palabra ("chloe" es "cloe"). */
+static bool names_device(const char *norm, const char *device)
+{
+    char *dn = intents_normalize(device); /* " laptop ismael " */
+    bool hit = strlen(dn) > 2 && strstr(norm, dn) != NULL;
+    char *d = str_trim(dn);
+    free(dn);
+    if (!hit && !strchr(d, ' ') && strlen(d) >= 3) {
+        const char *p = norm;
+        while (*p && !hit) {
+            while (*p == ' ') p++;
+            const char *e = strchr(p, ' ');
+            if (!e) break;
+            char w[40];
+            size_t len = (size_t)(e - p);
+            if (len >= 3 && len < sizeof w) {
+                memcpy(w, p, len);
+                w[len] = 0;
+                hit = intents_sounds_like(w, d);
+            }
+            p = e;
+        }
+    }
+    free(d);
+    return hit;
+}
+
+/* NULL si el texto no habla de otra PC; "" si sí, pero no se sabe cuál (no
+   hay ninguna registrada, o hay varias y no dijo el nombre); si no, el
+   nombre registrado. */
+static char *device_in(const char *norm)
+{
+    MeshDevice *devs;
+    int nd = mesh_devices(&devs);
+    char *found = NULL;
+    int hits = 0;
+    for (int i = 0; i < nd; i++) {
+        if (!names_device(norm, devs[i].name)) continue;
+        hits++;
+        free(found);
+        found = xstrdup(devs[i].name);
+    }
+    if (hits > 1) {
+        free(found);
+        found = xstrdup("");
+    }
+    if (!found && says_other_pc(norm)) found = xstrdup(nd == 1 ? devs[0].name : "");
+    mesh_devices_free(devs, nd);
+    return found;
+}
+
+char *mesh_device_mentioned(const char *text)
+{
+    char *norm = intents_normalize(text);
+    char *r = device_in(norm);
+    free(norm);
+    return r;
+}
+
+char *mesh_resolve_device(const char *spoken)
+{
+    char *r = mesh_device_mentioned(spoken);
+    if (r && !*r) {
+        free(r);
+        r = NULL;
+    }
+    return r;
+}
+
 char *mesh_device_name_for_ip(const char *ip)
 {
     cJSON *devs = devices_load();
@@ -502,7 +739,7 @@ static HttpResponse post_command(const char *ip, const char *comando, int timeou
 
 static MeshProbe classify_response(const HttpResponse *r)
 {
-    if (r->status == 200 || r->status == 400) return MESH_OK; /* 400: la orden vacía de la prueba */
+    if (r->status == 200 || r->status == 202 || r->status == 400) return MESH_OK; /* 400: la orden vacía de la prueba */
     if (r->status == 503) return MESH_BUSY;
     if (r->status == 401) return MESH_BAD_SECRET;
     if (r->status != 0) return MESH_ERROR;
@@ -545,7 +782,7 @@ MeshProbe mesh_send_ip(const char *ip, const char *comando, int timeout_ms, char
 {
     HttpResponse r = post_command(ip, comando, timeout_ms);
     MeshProbe p = classify_response(&r);
-    if (reply) *reply = r.status == 200 && r.body ? xstrdup(r.body) : NULL;
+    if (reply) *reply = (r.status == 200 || r.status == 202) && r.body ? xstrdup(r.body) : NULL;
     http_response_free(&r);
     return p;
 }
@@ -714,6 +951,26 @@ static char *my_account(void)
    con etiqueta (sin dueño) nunca cuentan. */
 static bool peer_is_mine(const char *ip)
 {
+    /* Se recuerda un rato: así no se corre tailscale.exe en cada pedido. */
+    static struct {
+        char ip[16];
+        bool mine;
+        uint64_t at;
+    } cache[16];
+    static SRWLOCK lock = SRWLOCK_INIT;
+    uint64_t now = GetTickCount64();
+    AcquireSRWLockShared(&lock);
+    for (int i = 0; i < 16; i++) {
+        if (strcmp(cache[i].ip, ip)) continue;
+        uint64_t ttl = cache[i].mine ? 10 * 60 * 1000 : 60 * 1000;
+        if (now - cache[i].at < ttl) {
+            bool mine = cache[i].mine;
+            ReleaseSRWLockShared(&lock);
+            return mine;
+        }
+    }
+    ReleaseSRWLockShared(&lock);
+
     char *me = my_account();
     bool mine = false;
     if (me && strchr(me, '@')) {
@@ -726,7 +983,97 @@ static bool peer_is_mine(const char *ip)
         free(out);
     }
     free(me);
+
+    AcquireSRWLockExclusive(&lock);
+    int slot = 0;
+    for (int i = 0; i < 16; i++) {
+        if (!strcmp(cache[i].ip, ip)) {
+            slot = i;
+            break;
+        }
+        if (cache[i].at < cache[slot].at) slot = i;
+    }
+    snprintf(cache[slot].ip, sizeof cache[slot].ip, "%s", ip);
+    cache[slot].mine = mine;
+    cache[slot].at = now;
+    ReleaseSRWLockExclusive(&lock);
     return mine;
+}
+
+/* De "tailscale ping": 1 si contestó (por la red local o por un relevo), 0
+   si no llegó, -1 si no se sabe (Tailscale viejo, otro error). */
+int tailscale_parse_ping(const char *out)
+{
+    if (!out) return -1;
+    if (strstr(out, "pong from")) return 1;
+    char *low = str_lower(out);
+    int r = strstr(low, "timeout") || strstr(low, "timed out") || strstr(low, "offline") || strstr(low, "no reply") ? 0 : -1;
+    free(low);
+    return r;
+}
+
+/* De "tailscale debug prefs" (esta PC) o "tailscale whois --json" (otra):
+   ¿tiene «Allow incoming connections» apagado (ShieldsUp)? */
+bool tailscale_parse_shields_up(const char *out)
+{
+    cJSON *j = cJSON_Parse(json_start(out));
+    const cJSON *v = cJSON_GetObjectItem(j, "ShieldsUp");
+    if (!v) v = cJSON_GetObjectItem(cJSON_GetObjectItem(cJSON_GetObjectItem(j, "Node"), "Hostinfo"), "ShieldsUp");
+    bool up = cJSON_IsTrue(v);
+    cJSON_Delete(j);
+    return up;
+}
+
+static int tailscale_ping(const char *ip)
+{
+    wchar_t args[96];
+    swprintf(args, 96, L"ping --c=1 --timeout=4s --until-direct=false %hs", ip);
+    char *out = run_tailscale(args, NULL, NULL);
+    int r = tailscale_parse_ping(out);
+    free(out);
+    return r;
+}
+
+/* Por qué no contesta esa PC, con todo lo que se puede averiguar desde aquí. */
+static char *explain_no_answer(const char *ip, const char *name)
+{
+    int reach = tailscale_ping(ip);
+    if (reach == 0)
+        return str_printf("%s no está conectada a Tailscale ahorita (apagada, dormida o con Tailscale cerrado): "
+                          "préndela y abre Tailscale ahí.",
+                          name);
+    StrBuf sb;
+    sb_init(&sb);
+    if (reach == 1) sb_appendf(&sb, "Tailscale sí llega a %s, pero Sokari de allá no contesta: el bloqueo está EN %s. ", name, name);
+    else sb_appendf(&sb, "%s no contesta. ", name);
+    time_t seen = last_inbound(ip);
+    if (seen) {
+        struct tm tm;
+        localtime_s(&tm, &seen);
+        sb_appendf(&sb, "(%s sí te mandó algo a las %02d:%02d, así que su salida funciona: lo que falla es su entrada.) ",
+                   name, tm.tm_hour, tm.tm_min);
+    }
+    wchar_t args[64];
+    swprintf(args, 64, L"whois --json %hs", ip);
+    char *who = run_tailscale(args, NULL, NULL);
+    if (tailscale_parse_shields_up(who))
+        sb_appendf(&sb, "En %s, Tailscale tiene apagado «Allow incoming connections»: actívalo en su ícono de Tailscale. ",
+                   name);
+    free(who);
+    sb_appendf(&sb, "En %s: abre Sokari (en Dispositivos debe decir «Esta PC recibe órdenes ✓»), dale «Permitir en el "
+                    "firewall» y, si tiene otro antivirus con firewall (McAfee, Norton…), permite ahí a Sokari.",
+               name);
+    return sb.data;
+}
+
+char *mesh_probe_report(const char *name, const char *host)
+{
+    MeshProbe p = mesh_probe(host);
+    if (p != MESH_NO_ANSWER) return str_printf("%s: %s.", name, mesh_probe_text(p));
+    char *ip = resolve_tailscale(host);
+    char *why = ip ? explain_no_answer(ip, name) : str_printf("%s: %s.", name, mesh_probe_text(p));
+    free(ip);
+    return why;
 }
 
 /* "LAPTOP-Ismael" -> "laptop-ismael": el nombre con el que se le habla. */
@@ -818,6 +1165,153 @@ int tailscale_windows_peers(MeshDevice **out, char **why)
     return n;
 }
 
+/* ------------------------------------------------------------ firewall --- */
+
+/* Lo que dice el firewall de Windows de Sokari.exe (por COM, sin permisos de
+   administrador y sin depender del idioma de Windows). */
+typedef struct {
+    bool known;     /* se pudo leer */
+    bool off;       /* el firewall de Windows está apagado */
+    bool allow;     /* hay una regla que deja entrar a Sokari.exe */
+    bool block;     /* hay una que lo bloquea (le gana a cualquier permiso) */
+    bool block_all; /* «Bloquear todas las conexiones entrantes» */
+} FwState;
+
+#define FW_PROTOCOL_ANY 256 /* NET_FW_IP_PROTOCOL_ANY, que el netfw.h de MinGW no trae */
+static const CLSID CLSID_FwPolicy2 = {0xE2B3C97F, 0x6AE1, 0x41AC, {0x81, 0x7A, 0xF6, 0xF9, 0x21, 0x66, 0xD7, 0xDD}};
+static const IID IID_FwPolicy2 = {0x98325047, 0xC671, 0x4174, {0x8D, 0x81, 0xDE, 0xFC, 0xD3, 0xF0, 0x31, 0x86}};
+static const IID IID_FwRule = {0xAF230D27, 0xBABA, 0x4E42, {0xAC, 0xED, 0xF5, 0x24, 0xF2, 0x2C, 0xFC, 0xE2}};
+
+static void long_path(const wchar_t *in, wchar_t out[MAX_PATH])
+{
+    wchar_t tmp[MAX_PATH];
+    if (!ExpandEnvironmentStringsW(in, tmp, MAX_PATH)) wcsncpy(tmp, in, MAX_PATH - 1), tmp[MAX_PATH - 1] = 0;
+    if (!GetLongPathNameW(tmp, out, MAX_PATH)) wcscpy(out, tmp);
+}
+
+static void check_rule(INetFwRule *r, const wchar_t *exe, FwState *st)
+{
+    VARIANT_BOOL enabled = VARIANT_FALSE;
+    NET_FW_RULE_DIRECTION dir = NET_FW_RULE_DIR_OUT;
+    BSTR app = NULL;
+    if (FAILED(INetFwRule_get_Enabled(r, &enabled)) || !enabled) return;
+    if (FAILED(INetFwRule_get_Direction(r, &dir)) || dir != NET_FW_RULE_DIR_IN) return;
+    if (FAILED(INetFwRule_get_ApplicationName(r, &app)) || !app) return;
+    wchar_t rule_exe[MAX_PATH];
+    long_path(app, rule_exe);
+    SysFreeString(app);
+    if (_wcsicmp(rule_exe, exe)) return;
+    NET_FW_ACTION action = NET_FW_ACTION_ALLOW;
+    long proto = FW_PROTOCOL_ANY;
+    BSTR ports = NULL;
+    INetFwRule_get_Action(r, &action);
+    INetFwRule_get_Protocol(r, &proto);
+    INetFwRule_get_LocalPorts(r, &ports);
+    bool tcp = proto == NET_FW_IP_PROTOCOL_TCP || proto == FW_PROTOCOL_ANY;
+    bool port = !ports || !*ports || !wcscmp(ports, L"*") || wcsstr(ports, L"8765");
+    SysFreeString(ports);
+    if (!tcp || !port) return;
+    if (action == NET_FW_ACTION_BLOCK) st->block = true;
+    else st->allow = true;
+}
+
+/* Recorre las reglas (unos cientos de milisegundos): no llamar en cada pedido. */
+static FwState firewall_state(void)
+{
+    FwState st = {0};
+    wchar_t raw[MAX_PATH], exe[MAX_PATH];
+    if (!GetModuleFileNameW(NULL, raw, MAX_PATH)) return st;
+    long_path(raw, exe);
+    INetFwPolicy2 *pol = NULL;
+    if (FAILED(CoCreateInstance(&CLSID_FwPolicy2, NULL, CLSCTX_INPROC_SERVER, &IID_FwPolicy2, (void **)&pol)))
+        return st;
+    long profiles = 0;
+    INetFwPolicy2_get_CurrentProfileTypes(pol, &profiles);
+    static const NET_FW_PROFILE_TYPE2 KINDS[] = {NET_FW_PROFILE2_DOMAIN, NET_FW_PROFILE2_PRIVATE, NET_FW_PROFILE2_PUBLIC};
+    bool any_on = false;
+    for (int i = 0; i < 3; i++) {
+        if (!(profiles & KINDS[i])) continue;
+        VARIANT_BOOL on = VARIANT_FALSE, block_all = VARIANT_FALSE;
+        INetFwPolicy2_get_FirewallEnabled(pol, KINDS[i], &on);
+        INetFwPolicy2_get_BlockAllInboundTraffic(pol, KINDS[i], &block_all);
+        if (on) any_on = true;
+        if (on && block_all) st.block_all = true;
+    }
+    st.off = !any_on;
+    INetFwRules *rules = NULL;
+    if (SUCCEEDED(INetFwPolicy2_get_Rules(pol, &rules))) {
+        IUnknown *unk = NULL;
+        IEnumVARIANT *en = NULL;
+        if (SUCCEEDED(INetFwRules_get__NewEnum(rules, &unk)) &&
+            SUCCEEDED(IUnknown_QueryInterface(unk, &IID_IEnumVARIANT, (void **)&en))) {
+            VARIANT v;
+            VariantInit(&v);
+            ULONG got = 0;
+            while (IEnumVARIANT_Next(en, 1, &v, &got) == S_OK && got) {
+                INetFwRule *r = NULL;
+                if (v.vt == VT_DISPATCH && v.pdispVal &&
+                    SUCCEEDED(IDispatch_QueryInterface(v.pdispVal, &IID_FwRule, (void **)&r))) {
+                    check_rule(r, exe, &st);
+                    INetFwRule_Release(r);
+                }
+                VariantClear(&v);
+            }
+            st.known = true;
+        }
+        if (en) IEnumVARIANT_Release(en);
+        if (unk) IUnknown_Release(unk);
+        INetFwRules_Release(rules);
+    }
+    INetFwPolicy2_Release(pol);
+    return st;
+}
+
+/* 1 si el firewall de Windows deja entrar las órdenes, 0 si no, -1 si no se sabe. */
+static int firewall_ok(const FwState *st)
+{
+    if (!st->known) return -1;
+    if (st->off) return 1;
+    return st->allow && !st->block && !st->block_all ? 1 : 0;
+}
+
+int mesh_firewall_ok(void)
+{
+    return (int)InterlockedCompareExchange(&g_fw_ok, 0, 0);
+}
+
+int mesh_firewall_check(void)
+{
+    FwState st = firewall_state();
+    int ok = firewall_ok(&st);
+    InterlockedExchange(&g_fw_ok, ok);
+    return ok;
+}
+
+/* Al empezar a escuchar: si el firewall no deja entrar las órdenes, pide
+   permiso de administrador UNA sola vez por exe (si dices que no, no vuelve
+   a insistir; el botón «Permitir en el firewall» sigue ahí). */
+static void check_firewall_on_listen(void)
+{
+    FwState st = firewall_state();
+    int ok = firewall_ok(&st);
+    InterlockedExchange(&g_fw_ok, ok);
+    if (ok != 0 || st.block_all) return; /* bloquear todo lo quita el usuario en Windows, no un permiso */
+    wchar_t exe[MAX_PATH];
+    if (!GetModuleFileNameW(NULL, exe, MAX_PATH)) return;
+    char *exe8 = wide_to_utf8(exe), *asked = config_fw_asked();
+    if (_stricmp(exe8, asked)) {
+        config_set_fw_asked(exe8);
+        log_msg(st.block ? "Firewall: Windows tiene una regla que bloquea a Sokari; pido permiso (una sola vez) para quitarla."
+                         : "Firewall: todavía no deja entrar las órdenes de tus otras PCs; pido permiso (una sola vez).");
+        if (mesh_allow_firewall()) InterlockedExchange(&g_fw_ok, 1);
+    } else {
+        log_msg("Firewall: sigue sin dejar entrar las órdenes (ya pedí permiso una vez; está el botón «Permitir en el "
+                "firewall»).");
+    }
+    free(exe8);
+    free(asked);
+}
+
 /* Abre el puerto de la malla en el firewall de Windows, solo para tu red de
    Tailscale. Antes borra las reglas de Sokari.exe que Windows haya creado
    (si alguna vez le diste "Cancelar" a su aviso, creó una que bloquea, y
@@ -845,10 +1339,40 @@ bool mesh_allow_firewall(void)
     CloseHandle(sei.hProcess);
     log_msg(code == 0 ? "Firewall: la malla quedó permitida para tu red de Tailscale." : "Firewall: netsh falló (%lu).",
             (unsigned long)code);
+    if (code == 0) InterlockedExchange(&g_fw_ok, 1);
     return code == 0;
 }
 
 /* ------------------------------------------------------ revisar malla --- */
+
+/* Los firewalls de antivirus (McAfee, Norton…) que Windows conoce, separados
+   por comas; "" si no hay ninguno, NULL si no se pudo preguntar. */
+static char *other_firewalls(void)
+{
+    wchar_t *ps = expand_env(L"%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe");
+    DWORD code = (DWORD)-1;
+    char *out = run_capture(ps,
+                            L"-NoProfile -NonInteractive -Command \"Get-CimInstance -Namespace root/SecurityCenter2 "
+                            L"-ClassName FirewallProduct | ForEach-Object { $_.displayName }\"",
+                            10000, &code, NULL);
+    free(ps);
+    if (!out || code != 0) {
+        free(out);
+        return NULL;
+    }
+    StrBuf sb;
+    sb_init(&sb);
+    for (char *line = strtok(out, "\r\n"); line; line = strtok(NULL, "\r\n")) {
+        char *t = str_trim(line);
+        char *low = str_lower(t);
+        /* El de Windows no cuenta: ese ya se revisó arriba. */
+        if (*t && !strstr(low, "windows") && !strstr(low, "microsoft")) sb_appendf(&sb, "%s%s", sb.len ? ", " : "", t);
+        free(low);
+        free(t);
+    }
+    free(out);
+    return sb.data ? sb.data : xstrdup("");
+}
 
 /* Lo que ve tu red de Tailscale: "laptop (windows, en línea), pixel (android,
    desconectado)". Devuelve cuántos son. */
@@ -918,12 +1442,47 @@ char *mesh_diagnose(void)
     free(ip);
     free(listening);
 
-    wchar_t *netsh = expand_env(L"%SystemRoot%\\System32\\netsh.exe");
-    DWORD fw = (DWORD)-1;
-    free(run_capture(netsh, L"advfirewall firewall show rule name=\"Sokari (malla)\"", 8000, &fw, NULL));
-    free(netsh);
-    if (fw == 0) sb_append(&r, "✓ El firewall tiene la regla «Sokari (malla)»\n");
-    else sb_append(&r, "✗ Falta la regla del firewall: dale «Permitir en el firewall» en esta PC\n");
+    FwState fw = firewall_state();
+    InterlockedExchange(&g_fw_ok, firewall_ok(&fw));
+    if (!fw.known) {
+        wchar_t *netsh = expand_env(L"%SystemRoot%\\System32\\netsh.exe");
+        DWORD fw_code = (DWORD)-1;
+        free(run_capture(netsh, L"advfirewall firewall show rule name=\"Sokari (malla)\"", 8000, &fw_code, NULL));
+        free(netsh);
+        if (fw_code == 0) sb_append(&r, "✓ El firewall tiene la regla «Sokari (malla)»\n");
+        else sb_append(&r, "✗ Falta la regla del firewall: dale «Permitir en el firewall» en esta PC\n");
+    } else if (fw.off) {
+        sb_append(&r, "✓ El firewall de Windows está apagado: no bloquea la malla\n");
+    } else if (fw.block_all) {
+        sb_append(&r, "✗ Windows está bloqueando TODAS las conexiones entrantes: en Seguridad de Windows → Firewall, "
+                      "quita «Bloquear todas las conexiones entrantes» (si no, nadie te puede mandar órdenes)\n");
+    } else if (fw.block) {
+        sb_append(&r, "✗ El firewall de Windows tiene una regla que BLOQUEA a Sokari (pasa si alguna vez le diste "
+                      "«Cancelar» a su aviso): dale «Permitir en el firewall» y la quito\n");
+    } else if (fw.allow) {
+        sb_append(&r, "✓ El firewall de Windows deja pasar las órdenes (regla «Sokari (malla)»)\n");
+    } else {
+        sb_append(&r, "✗ Falta permitir a Sokari en el firewall: dale «Permitir en el firewall» en esta PC\n");
+    }
+    char *others = other_firewalls();
+    if (others && *others)
+        sb_appendf(&r, "✗ Tienes otro firewall: %s. Ese no usa la regla de Windows: en su configuración permite a "
+                       "Sokari.exe (TCP 8765) o apágalo\n",
+                   others);
+    else if (others)
+        sb_append(&r, "✓ No hay otro firewall (de antivirus) aparte del de Windows\n");
+    free(others);
+    if (parsed && !strcmp(st.state, "Running")) {
+        char *prefs = run_tailscale(L"debug prefs", NULL, NULL);
+        if (prefs && json_start(prefs)) {
+            if (tailscale_parse_shields_up(prefs))
+                sb_append(&r, "✗ Tailscale tiene apagado «Allow incoming connections»: actívalo en su ícono (si no, "
+                              "nadie te puede mandar órdenes)\n");
+            else
+                sb_append(&r, "✓ Tailscale acepta conexiones entrantes\n");
+        }
+        free(prefs);
+    }
 
     if (parsed) {
         StrBuf seen;
@@ -943,8 +1502,11 @@ char *mesh_diagnose(void)
     if (!nd) sb_append(&r, "· Todavía no tienes PCs registradas: dale a «Detectar mis PCs».\n");
     for (int i = 0; i < nd; i++) {
         MeshProbe p = mesh_probe(devs[i].host);
-        sb_appendf(&r, "%s %s (%s): %s\n", p == MESH_OK || p == MESH_BUSY ? "✓" : "✗", devs[i].name, devs[i].host,
-                   mesh_probe_text(p));
+        char *ip = p == MESH_NO_ANSWER ? resolve_tailscale(devs[i].host) : NULL;
+        char *why = ip ? explain_no_answer(ip, devs[i].name) : xstrdup(mesh_probe_text(p));
+        sb_appendf(&r, "%s %s (%s): %s\n", p == MESH_OK || p == MESH_BUSY ? "✓" : "✗", devs[i].name, devs[i].host, why);
+        free(why);
+        free(ip);
     }
     mesh_devices_free(devs, nd);
     return r.data;
@@ -977,6 +1539,18 @@ char *tool_gestionar_dispositivo(const cJSON *a)
     const char *comando = arg_str(a, "comando");
     cJSON *devs = devices_load();
     cJSON *host = cJSON_GetObjectItem(devs, n);
+    if (!cJSON_IsString(host)) {
+        /* "Chloe", "mi laptop", "la otra compu": el que es, si no hay duda. */
+        char *real = mesh_resolve_device(n);
+        if (real && *real) {
+            log_msg("Malla: «%s» es «%s».", n, real);
+            free(n);
+            n = real;
+            host = cJSON_GetObjectItem(devs, n);
+        } else {
+            free(real);
+        }
+    }
     char *r;
     if (!cJSON_IsString(host)) {
         StrBuf known;
@@ -1000,13 +1574,18 @@ char *tool_gestionar_dispositivo(const cJSON *a)
             r = str_printf("No pude encontrar a '%s' en tu red de Tailscale (¿está prendido y conectado?).", n);
         } else {
             HttpResponse resp = post_command(ip, comando, 90000);
-            free(ip);
             MeshProbe p = classify_response(&resp);
             if (resp.status == 200) r = *resp.body ? xstrdup(resp.body) : xstrdup("Listo.");
+            else if (resp.status == 202) r = str_printf("'%s' recibió la orden y la está haciendo.", n);
             else if (p == MESH_BUSY) r = str_printf("'%s' está ocupado ahorita; prueba en un momento.", n);
             else if (p == MESH_ERROR) r = str_printf("'%s' respondió con un error (%d).", n, resp.status);
-            else r = str_printf("No le llegó la orden a '%s': %s.", n, mesh_probe_text(p));
+            else if (p == MESH_NO_ANSWER) {
+                char *why = explain_no_answer(ip, n);
+                r = str_printf("No le llegó la orden a '%s'. %s", n, why);
+                free(why);
+            } else r = str_printf("No le llegó la orden a '%s': %s.", n, mesh_probe_text(p));
             http_response_free(&resp);
+            free(ip);
         }
     }
     cJSON_Delete(devs);

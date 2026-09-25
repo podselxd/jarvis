@@ -18,6 +18,7 @@
 #include "groq.h"
 #include "log.h"
 #include "memory.h"
+#include "mesh.h"
 #include "third_party/cJSON.h"
 #include "tools.h"
 #include "util.h"
@@ -700,6 +701,53 @@ static void test_frases_del_log(void)
     check(ok == (int)(sizeof LOG_PHRASES / sizeof *LOG_PHRASES), "cada frase del log va a donde debe, con su herramienta");
 }
 
+/* "Abre el navegador de mi laptop / de Chloe": va a esa PC, nunca aquí. En
+   tu log, a las 23:40, abrió el navegador en esta PC y dijo «en tu laptop». */
+static void test_otra_pc(void)
+{
+    printf("-- lo que pides para otra PC se hace allá --\n");
+    bool had = false;
+    MeshDevice *devs;
+    int nd = mesh_devices(&devs);
+    for (int i = 0; i < nd; i++) had |= !strcmp(devs[i].name, "cloe");
+    mesh_devices_free(devs, nd);
+    mesh_device_set("cloe", "100.121.139.36");
+    Conversation *c = conv_create(true);
+
+    script("tool:gestionar_dispositivo {\"nombre\":\"Chloe\",\"comando\":\"abre el navegador\"}",
+           "Listo, se lo mandé a cloe.", NULL);
+    char *r = say(c, "puedes abrir el navegador que tiene la laptop mía se llama Chloe");
+    check(strstr(g_last_sent, "para su PC «cloe»") != NULL, "el modelo sabe que es para cloe");
+    check(strstr(g_last_tools, " gestionar_dispositivo ") && !strstr(g_last_tools, " open_app ") &&
+              !strstr(g_last_tools, " control_media "),
+          "y no tiene a la mano herramientas que lo harían en esta PC");
+    check(strstr(g_ran, "gestionar_dispositivo") && !strstr(g_ran, "open_app"), "se mandó a cloe, no se hizo aquí");
+    free(r);
+
+    script("tool:gestionar_dispositivo {\"nombre\":\"cloe\",\"comando\":\"abre el navegador\"}", "Listo.", NULL);
+    r = say(c, "abre el navegador de mi laptop");
+    check(strstr(g_ran, "gestionar_dispositivo") != NULL,
+          "«abre el navegador de mi laptop» no es un comando directo de esta PC");
+    free(r);
+
+    script("tool:open_app {\"name\":\"navegador\"}; tool:gestionar_dispositivo {\"nombre\":\"cloe\",\"comando\":"
+           "\"abre el navegador\"}",
+           "Listo, en las dos.", NULL);
+    r = say(c, "abre el navegador aquí y en cloe");
+    check(strstr(g_last_tools, " open_app ") && strstr(g_last_tools, " gestionar_dispositivo ") &&
+              strstr(g_last_sent, "esta PC sí hazlo aquí"),
+          "«aquí y en cloe»: puede hacer las dos cosas");
+    free(r);
+
+    script("Claro, ¿qué quieres saber?", NULL, NULL);
+    r = say(c, "¿qué hora es?");
+    check(!strstr(g_last_sent, "para su PC «cloe»"), "si no habla de otra PC, no se manda nada allá");
+    free(r);
+
+    conv_destroy(c);
+    if (!had) mesh_device_remove("cloe");
+}
+
 static void test_mexicano(void)
 {
     printf("-- español de México --\n");
@@ -802,6 +850,7 @@ int wmain(void)
     test_youtube();
     test_frases_del_log();
     test_mexicano();
+    test_otra_pc();
     printf("%d/%d pruebas %s\n", g_total - g_fail, g_total, g_fail ? "— HAY FALLAS" : "ok");
     return g_fail ? 1 : 0;
 }

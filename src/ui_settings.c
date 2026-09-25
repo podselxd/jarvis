@@ -67,6 +67,7 @@ enum {
     A_NONE, A_GROQ_LINK, A_RESET_PW, A_SHOW_API, A_SHOW_STOP, A_TAILSCALE, A_COPY_SECRET, A_OBSIDIAN, A_PICK_SOUND,
     A_CLEAR_SOUND, A_OPEN_FOLDER, A_CHECK_UPDATE, A_SAVE, A_CANCEL, A_START, A_GO_SETTINGS, A_MUTE, A_TEST_AUDIO,
     A_QUIT, A_MODE_CHANGED, A_OUTPUT_CHANGED, A_TEST_VOICE, A_FIREWALL, A_DETECT, A_DIAGNOSE, A_FULL_ACCESS,
+    A_SHOW_MESH,
     /* Por dispositivo de la lista: + su número. */
     A_DEV_PROBE = 200, A_DEV_REMOVE = 300,
 };
@@ -119,7 +120,7 @@ static struct {
     int display_mode, resolution_index, style;
     int volume, sensitivity;
     wchar_t *status_line;
-    bool api_visible, stop_visible;
+    bool api_visible, stop_visible, mesh_visible;
     MeshDevice *devs; /* tus dispositivos, releídos cada vez que se arma la sección */
     int ndevs;
     wchar_t dev_text[MAX_DEVICE_ROWS][200];
@@ -261,12 +262,12 @@ static int layout_edit(int x, int y, int w, const wchar_t *label, int field, con
     y += dp(22);
     Widget *e = add(W_EDIT, (RECT){x, y, x + w, y + dp(40)});
     e->edit = field;
-    bool has_eye = field == F_API || field == F_STOP;
+    bool has_eye = field == F_API || field == F_STOP || field == F_MESH;
     if (has_eye) {
-        bool visible = field == F_API ? S.api_visible : S.stop_visible;
+        bool visible = field == F_API ? S.api_visible : field == F_STOP ? S.stop_visible : S.mesh_visible;
         Widget *eye = add(W_LINK, (RECT){x + w - dp(64), y, x + w - dp(8), y + dp(40)});
         eye->text = visible ? L"Ocultar" : L"Ver";
-        eye->action = field == F_API ? A_SHOW_API : A_SHOW_STOP;
+        eye->action = field == F_API ? A_SHOW_API : field == F_STOP ? A_SHOW_STOP : A_SHOW_MESH;
     }
     HWND ed = S.edits[field];
     int right_pad = has_eye ? dp(70) : dp(12);
@@ -794,12 +795,17 @@ static void refresh_tailscale_text(void)
                  L"entra con la misma cuenta.");
     else if (!ip)
         swprintf(g_tailscale_text, 320, L"Tailscale está instalado, pero no está conectado. Ábrelo y entra con tu cuenta.");
+    else if (listening && mesh_firewall_ok() == 0)
+        swprintf(g_tailscale_text, 320,
+                 L"Tailscale conectado ✓ (IP %hs). Esta PC escucha, pero el firewall todavía no deja entrar las "
+                 L"órdenes: dale «Permitir en el firewall».",
+                 ip);
     else if (listening)
         swprintf(g_tailscale_text, 320, L"Tailscale conectado ✓ (IP %hs). Esta PC recibe órdenes de tus otras PCs ✓", ip);
     else
         swprintf(g_tailscale_text, 320,
                  L"Tailscale conectado ✓ (IP %hs). Esta PC todavía no recibe órdenes: se activa sola unos segundos "
-                 L"después de iniciar Sokari.",
+                 L"después de abrir Sokari.",
                  ip);
     free(ip);
     free(listening);
@@ -888,9 +894,24 @@ static void save(void)
     free(c.stop_word);
     c.stop_word = edit_text(F_STOP);
     char *mesh = edit_text(F_MESH);
+    bool mesh_changed = *mesh && strcmp(mesh, c.mesh_secret);
+    const char *bad = mesh_changed ? config_secret_problem(mesh) : NULL;
+    if (bad) {
+        /* Una IP pegada donde va el secreto: no se guarda nada y se dice por qué. */
+        free(mesh);
+        config_free(&c);
+        S.section = SEC_DEVICES;
+        layout();
+        SetFocus(S.edits[F_MESH]);
+        wchar_t *w = utf8_to_wide(bad);
+        set_status(w);
+        free(w);
+        return;
+    }
     if (*mesh) {
         free(c.mesh_secret);
         c.mesh_secret = mesh;
+        if (mesh_changed) log_msg("Secreto de malla cambiado desde Configuración.");
     } else {
         free(mesh);
     }
@@ -928,7 +949,9 @@ static void save(void)
         load_values();
         S.section = SEC_HOME;
         layout();
-        set_status(L"Cambios guardados.");
+        set_status(mesh_changed ? L"Cambios guardados. El secreto nuevo tiene que ser el mismo en tus otras PCs (si "
+                                  L"usan la misma cuenta de Tailscale, ni hace falta)."
+                                : L"Cambios guardados.");
         return;
     }
     S.quit_on_close = false;
@@ -1005,7 +1028,7 @@ static DWORD WINAPI async_worker(LPVOID arg)
         job->result = utf8_to_wide(rep);
         free(rep);
     } else if (job->action == A_DEV_PROBE) {
-        char *msg = str_printf("%s: %s.", job->name, mesh_probe_text(mesh_probe(job->host)));
+        char *msg = mesh_probe_report(job->name, job->host);
         job->result = utf8_to_wide(msg);
         free(msg);
     } else {
@@ -1170,6 +1193,12 @@ static void do_action(int action)
         S.stop_visible = !S.stop_visible;
         SendMessageW(S.edits[F_STOP], EM_SETPASSWORDCHAR, S.stop_visible ? 0 : 0x25CF, 0);
         InvalidateRect(S.edits[F_STOP], NULL, TRUE);
+        layout();
+        break;
+    case A_SHOW_MESH:
+        S.mesh_visible = !S.mesh_visible;
+        SendMessageW(S.edits[F_MESH], EM_SETPASSWORDCHAR, S.mesh_visible ? 0 : 0x25CF, 0);
+        InvalidateRect(S.edits[F_MESH], NULL, TRUE);
         layout();
         break;
     case A_RESET_PW:
@@ -1491,6 +1520,10 @@ static LRESULT CALLBACK proc(HWND h, UINT m, WPARAM w, LPARAM l)
             MessageBoxW(h, job->result, L"Revisión de la malla", MB_OK | (wcsstr(job->result, L"✗") ? MB_ICONWARNING : MB_ICONINFORMATION));
             set_status(copied ? L"Copié el reporte: si algo salió con ✗ y no sabes qué hacer, pégamelo."
                               : L"Revisé la malla (el reporte también quedó en sokari.log).");
+        } else if (job->action == A_DEV_PROBE && wcslen(job->result) > 90) {
+            /* Lo que hay que hacer no cabe abajo: completo, en su ventana. */
+            MessageBoxW(h, job->result, L"Probar", MB_OK | MB_ICONWARNING);
+            set_status(L"No contestó: te dejé en la ventana qué revisar y en qué PC.");
         } else {
             set_status(job->result);
         }
@@ -1576,7 +1609,7 @@ static void open_window(HINSTANCE inst, bool first_run, bool home, bool starting
     S.quit_on_close = first_run || starting;
     S.on_saved = on_saved;
     S.section = home ? SEC_HOME : SEC_ACCOUNT;
-    S.api_visible = S.stop_visible = false;
+    S.api_visible = S.stop_visible = S.mesh_visible = false;
     UINT dpi = GetDpiForSystem();
     int cw = MulDiv(900, (int)dpi, 96), ch = MulDiv(740, (int)dpi, 96);
     RECT wa;

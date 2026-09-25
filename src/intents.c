@@ -79,6 +79,17 @@ static int edit_distance(const char *a, const char *b)
     return d[la][lb];
 }
 
+bool intents_sounds_like(const char *w, const char *target)
+{
+    if (!strcmp(w, target)) return true;
+    char a[32], b[32];
+    sound_key(w, a, sizeof a);
+    sound_key(target, b, sizeof b);
+    size_t n = strlen(b);
+    if (n < 3 || strlen(a) < 3) return false;
+    return edit_distance(a, b) <= (n <= 4 ? 0 : n <= 7 ? 1 : 2);
+}
+
 bool intents_is_name_word(const char *w)
 {
     /* Como lo ha escrito la transcripción en tus logs. */

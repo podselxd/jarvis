@@ -530,6 +530,10 @@ static void announce_due_reminders(void)
 static char *mesh_handle(const char *cmd, const char *origen)
 {
     if (!state_try_lock(8000)) return NULL;
+    if (!g_mesh_conv) {
+        g_mesh_conv = conv_create(false);
+        conv_set_remote(g_mesh_conv, true);
+    }
     log_msg("Malla (%s): %s", origen, cmd);
     /* Aviso en esta PC: así sabes que la orden sí llegó. */
     char *title = str_printf("Orden desde %s", origen);
@@ -603,14 +607,11 @@ static DWORD WINAPI voice_main(LPVOID arg)
     state_lock();
     memory_identify_on_start(cfg.user_name);
     g_conv = conv_create(true);
-    g_mesh_conv = conv_create(false);
-    conv_set_remote(g_mesh_conv, true);
     state_unlock();
     config_free(&cfg);
 
     log_msg("Calibrando nivel de silencio, no hace falta que digas nada...");
     calibrate();
-    if (!g_sim_mode) mesh_start(mesh_handle);
 
     speak("Sokari en línea.", false);
     app_set_state(JV_IDLE);
@@ -677,7 +678,6 @@ static DWORD WINAPI voice_main(LPVOID arg)
         }
     }
 
-    mesh_stop();
     g_ww = NULL;
     EnterCriticalSection(&S.lock);
     S.quit = true;
@@ -689,6 +689,19 @@ static DWORD WINAPI voice_main(LPVOID arg)
     ww_destroy(ww);
     CoUninitialize();
     return 0;
+}
+
+/* La malla escucha desde que abres Sokari, aunque todavía no le hayas dado
+   «Iniciar» (antes, una PC que se quedaba en Inicio nunca recibía órdenes). */
+void voice_mesh_start(void)
+{
+    agent_init();
+    mesh_start(mesh_handle);
+}
+
+void voice_mesh_stop(void)
+{
+    mesh_stop();
 }
 
 bool voice_start(void)

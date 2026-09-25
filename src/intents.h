@@ -59,6 +59,10 @@ bool intents_is_name_word(const char *w);
    al principio y al final para buscar palabras completas. */
 char *intents_normalize(const char *text);
 
+/* ¿Dos palabras (minúsculas, sin acentos) suenan igual? "chloe" y "cloe",
+   "zokari" y "sokari". Para nombres de dispositivos y parecidos. */
+bool intents_sounds_like(const char *w, const char *target);
+
 /* El mismo texto con tu nombre bien escrito: "Hey, Zachary" -> "Hey, Sokari".
    Lo demás (acentos, signos) queda igual. */
 char *intents_fix_name(const char *text);

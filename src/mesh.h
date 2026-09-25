@@ -30,6 +30,14 @@ void mesh_devices_free(MeshDevice *list, int n);
 bool mesh_device_set(const char *name, const char *host); /* false si no es de Tailscale */
 bool mesh_device_remove(const char *name);
 char *mesh_device_name_for_ip(const char *ip);
+/* ¿La frase habla de otra de tus PCs? NULL si no; "" si sí pero no se sabe
+   cuál (ninguna registrada, o varias y no dijo el nombre); si no, su nombre
+   registrado (heap). Entiende "Chloe" por "cloe" y "mi laptop" o "la otra
+   compu" cuando solo tienes una. */
+char *mesh_device_mentioned(const char *text);
+/* El nombre registrado del dispositivo que se dijo así ("Chloe", "mi
+   laptop"), o NULL si no hay uno claro. */
+char *mesh_resolve_device(const char *spoken);
 
 /* Prueba un dispositivo con una orden vacía: dice si contesta y si el secreto
    coincide, sin que allá se haga nada. */
@@ -45,6 +53,15 @@ typedef enum {
 } MeshProbe;
 MeshProbe mesh_probe(const char *host);
 const char *mesh_probe_text(MeshProbe p);
+/* Prueba y, si no contesta, averigua por qué (¿Tailscale llega?, ¿esa PC te
+   ha mandado algo?, ¿tiene «Allow incoming connections» apagado?) y dice qué
+   hacer y en qué PC. Heap. */
+char *mesh_probe_report(const char *name, const char *host);
+/* ¿El firewall de Windows deja entrar las órdenes? 1 sí, 0 no, -1 sin revisar.
+   mesh_firewall_ok dice lo último que se revisó; mesh_firewall_check lo
+   revisa ahora (unos cientos de milisegundos). */
+int mesh_firewall_ok(void);
+int mesh_firewall_check(void);
 
 /* Las otras PCs con Windows de tu red de Tailscale (nombre y IP), leídas de
    "tailscale status --json". Si no encuentra ninguna, *why (heap, si no es
@@ -63,6 +80,11 @@ bool tailscale_parse_status(const char *out, TailscaleStatus *st);
 void tailscale_status_free(TailscaleStatus *st);
 /* De "tailscale whois --json <ip>": la cuenta dueña de esa IP (heap) o NULL. */
 char *tailscale_parse_whois_account(const char *out);
+/* De "tailscale ping": 1 contestó, 0 no llegó, -1 no se sabe. */
+int tailscale_parse_ping(const char *out);
+/* De "tailscale debug prefs" o "whois --json": ¿«Allow incoming connections»
+   está apagado (ShieldsUp)? */
+bool tailscale_parse_shields_up(const char *out);
 
 /* Revisa la malla paso a paso (Tailscale, tu cuenta, el servidor, el
    firewall, lo que ve tu red y cada PC registrada) y devuelve el reporte
@@ -74,6 +96,8 @@ char *mesh_diagnose(void);
 bool mesh_listen_at(const char *ip, MeshHandler handler);
 void mesh_listen_stop(void);
 MeshProbe mesh_send_ip(const char *ip, const char *comando, int timeout_ms, char **reply);
+/* Cuánto espera una orden antes de contestar «recibido» (de fábrica, 5 s). */
+void mesh_set_ack_ms(int ms);
 /* Permite el puerto de la malla en el firewall de Windows solo para tu red de
    Tailscale (pide permiso de administrador). */
 bool mesh_allow_firewall(void);

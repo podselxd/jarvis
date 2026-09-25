@@ -553,7 +553,7 @@
     "type": "function",
     "function": {
       "name": "gestionar_dispositivo",
-      "description": "Manda una orden en lenguaje natural a un dispositivo registrado y devuelve su respuesta.",
+      "description": "Manda una orden en lenguaje natural a otra PC registrada (se hace allá, no aquí) y devuelve su respuesta. nombre: el registrado o como la llamó el usuario.",
       "parameters": {
         "type": "object",
         "properties": {
