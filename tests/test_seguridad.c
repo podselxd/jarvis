@@ -199,6 +199,53 @@ static void test_malla(void)
     free(df);
 }
 
+/* Lo que devuelve "tailscale status --json" (recortado): solo las PCs con
+   Windows se registran (Sokari solo escucha ahí), con su IP 100.x y un nombre
+   fácil de decir. */
+static void test_dispositivos(void)
+{
+    printf("-- tus PCs (Detectar y la lista) --\n");
+    const char *json =
+        "{\"Self\":{\"HostName\":\"ESCRITORIO\",\"OS\":\"windows\",\"TailscaleIPs\":[\"100.124.55.72\"]},"
+        "\"Peer\":{"
+        "\"k1\":{\"HostName\":\"LAPTOP-Ismael\",\"OS\":\"windows\",\"TailscaleIPs\":[\"100.121.139.36\",\"fd7a::1\"]},"
+        "\"k2\":{\"HostName\":\"Pixel 8\",\"OS\":\"android\",\"TailscaleIPs\":[\"100.90.1.2\"]},"
+        "\"k3\":{\"HostName\":\"servidor\",\"OS\":\"linux\",\"TailscaleIPs\":[\"100.80.1.2\"]},"
+        "\"k4\":{\"HostName\":\"Mini PC  (sala)\",\"OS\":\"windows\",\"TailscaleIPs\":[\"fd7a::2\",\"100.70.1.2\"]},"
+        "\"k5\":{\"HostName\":\"rara\",\"OS\":\"windows\",\"TailscaleIPs\":[\"8.8.8.8\"]}}}";
+    MeshDevice *peers;
+    int n = tailscale_parse_peers(json, &peers);
+    bool laptop = false, mini = false, others = false;
+    for (int i = 0; i < n; i++) {
+        printf("      %s -> %s\n", peers[i].name, peers[i].host);
+        if (!strcmp(peers[i].name, "laptop-ismael") && !strcmp(peers[i].host, "100.121.139.36")) laptop = true;
+        else if (!strcmp(peers[i].name, "mini-pc-sala") && !strcmp(peers[i].host, "100.70.1.2")) mini = true;
+        else others = true;
+    }
+    check(n == 2 && laptop && mini && !others,
+          "solo las PCs con Windows y con IP de Tailscale, con nombres fáciles de decir");
+    mesh_devices_free(peers, n);
+    check(tailscale_parse_peers("esto no es json", &peers) == 0, "si tailscale no contesta bien, no inventa nada");
+    mesh_devices_free(peers, 0);
+
+    wchar_t *df = path_join(g_paths.local_dir, L"dispositivos.json");
+    write_file_atomic(df, "{}", 2);
+    check(!mesh_device_set("casa", "192.168.1.5") && mesh_device_set("laptop-ismael", "100.121.139.36"),
+          "la lista solo acepta direcciones de Tailscale");
+    char *name = mesh_device_name_for_ip("100.121.139.36"), *none = mesh_device_name_for_ip("100.1.2.3");
+    check(name && !strcmp(name, "laptop-ismael") && !none, "una orden que llega se reconoce por la IP de quien la manda");
+    free(name);
+    MeshDevice *list;
+    int k = mesh_devices(&list);
+    check(k == 1 && !strcmp(list[0].host, "100.121.139.36"), "la lista se lee de vuelta");
+    mesh_devices_free(list, k);
+    check(mesh_device_remove("laptop-ismael") && mesh_devices(&list) == 0, "y Quitar la borra");
+    mesh_devices_free(list, 0);
+    check(mesh_probe("evil.com") == MESH_BAD_HOST, "Probar nunca le manda el secreto a algo fuera de Tailscale");
+    DeleteFileW(df);
+    free(df);
+}
+
 static void test_web(void)
 {
     printf("-- leer_pagina: red local --\n");
@@ -249,6 +296,7 @@ int wmain(void)
     test_archivos();
     test_open_app();
     test_malla();
+    test_dispositivos();
     test_web();
     test_terminales();
     printf("%d/%d pruebas %s\n", g_total - g_fail, g_total, g_fail ? "— HAY FALLAS" : "ok");

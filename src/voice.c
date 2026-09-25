@@ -527,10 +527,14 @@ static void announce_due_reminders(void)
     if (n) app_set_state(JV_IDLE);
 }
 
-static char *mesh_handle(const char *cmd)
+static char *mesh_handle(const char *cmd, const char *origen)
 {
     if (!state_try_lock(8000)) return NULL;
-    log_msg("Malla: %s", cmd);
+    log_msg("Malla (%s): %s", origen, cmd);
+    /* Aviso en esta PC: así sabes que la orden sí llegó. */
+    char *title = str_printf("Orden desde %s", origen);
+    app_notify(title, cmd);
+    free(title);
     /* Cada orden por la malla es una conversación aparte: lo que otra orden
        leyó de afuera ya no cuenta (ni sirve para esconder instrucciones). */
     conv_new_session(g_mesh_conv);

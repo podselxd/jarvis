@@ -14,6 +14,7 @@ typedef struct {
     int rl_remaining_tokens; /* x-ratelimit-remaining-tokens de Groq, -1 si no vino */
     double rl_reset_tokens;  /* segundos hasta que se repone ese cupo, -1 si no vino */
     char *error;       /* descripción del error de red, NULL si hubo respuesta */
+    unsigned long error_code; /* el código de WinHTTP de ese error (0 si no hubo) */
     char *location;    /* header Location de una redirección (solo con no_redirects), o NULL */
 } HttpResponse;
 
@@ -24,6 +25,7 @@ typedef struct {
     const void *body;
     size_t body_len;
     int timeout_ms;
+    int connect_timeout_ms; /* 0 = el mismo que timeout_ms */
     size_t max_bytes;
     bool browser_ua;
     bool no_redirects; /* no seguir redirecciones: devuelve el 3xx con location */

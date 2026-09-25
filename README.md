@@ -55,7 +55,8 @@ Sale al abrir `Sokari.exe` a mano, o desde **Ventana de inicio…** en la bandej
 | Cuenta | API key de Groq, tu nombre, contraseña de tu perfil y palabra de apagado |
 | Pantalla | Modo de pantalla, resolución de la esfera, estilo (halo de puntos o líneas), subtítulos y "Aparecer solo cuando le hablas" |
 | Voz y audio | Volumen, voz de Windows (Raúl de México por defecto, con botón **Probar**), micrófono, salida de audio y sensibilidad de "Hey Sokari" |
-| General | Iniciar con Windows, conectar tus PCs con Tailscale, sonido de activación, Obsidian y pedir un "sí" antes de acciones delicadas |
+| General | Iniciar con Windows, sonido de activación, Obsidian y pedir un "sí" antes de acciones delicadas |
+| Dispositivos | Tailscale, secreto de malla, tus otras PCs (Detectar, Probar, Quitar) y permiso en el firewall. Ver [Tus otras PCs](#tus-otras-pcs) |
 
 Modos de pantalla:
 
@@ -68,6 +69,20 @@ Modos de pantalla:
 F11 solo funciona en Ventana y Minimizado, cuando la ventana tiene el foco. En los otros modos la esfera nunca toma el teclado, para que las teclas que manda Sokari lleguen a tu app. En esos modos cambias de modo desde la bandeja o la ventana de Inicio.
 
 La salida de audio elegida vale para la voz de Sokari y su tono. Si pusiste un sonido de activación propio (MP3 o WAV), ese sale por la salida predeterminada de Windows.
+
+### Tus otras PCs
+
+Para decirle desde una PC "dile a mi laptop que abra Spotify":
+
+1. Instala Tailscale en cada PC (Configuración → Dispositivos → **Instalar Tailscale**) y entra **con la misma cuenta** en todas.
+2. En una PC dale **Copiar secreto** y pégalo en ese mismo campo en las demás. Dale **Guardar**.
+3. Dale **Detectar mis PCs**: agrega tus otras PCs con Windows que estén en tu Tailscale. También puedes decirle a Sokari "registra mi laptop en 100.x.y.z".
+4. Dale **Probar** a cada una. Te dice qué falta:
+   - "el secreto no coincide": repite el paso 2.
+   - "Sokari no le contesta": ábrelo en esa PC.
+   - "no contesta": que esté prendida, con Tailscale conectado y sin otra VPN. Si todo eso está bien, en **esa** PC dale **Permitir en el firewall** (pide permiso de administrador y abre el puerto solo para tu red de Tailscale).
+
+Sokari empieza a recibir órdenes solo en cuanto Tailscale se conecta, sin reiniciarlo. La PC que recibe una orden avisa con una notificación, y la respuesta se oye en la PC donde hablaste.
 
 ## Qué puede hacer
 
@@ -85,7 +100,7 @@ La salida de audio elegida vale para la voz de Sokari y su tono. Si pusiste un s
 - Poner recordatorios con hora (te avisa solo cuando llega el momento) o para la próxima vez que le hables.
 - Recordar datos para siempre, con perfiles por persona que puedes proteger con contraseña, y exportarlos a Obsidian.
 - Crear comandos propios que junten varias acciones ("crea un comando que abra X y ponga música").
-- Mandarle órdenes a tus otras PCs por Tailscale ("dile a mi laptop que…"). Solo registra direcciones de Tailscale.
+- Mandarle órdenes a tus otras PCs por Tailscale ("dile a mi laptop que…"). Solo registra direcciones de Tailscale. Ver [Tus otras PCs](#tus-otras-pcs).
 
 ## Privacidad y seguridad
 
