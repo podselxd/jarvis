@@ -288,7 +288,12 @@ bool speaker_play(const int16_t *pcm, size_t samples, int rate, float gain, Play
     size_t chunk = (size_t)rate * PLAY_CHUNK_MS / 1000;
     WAVEHDR hdr[PLAY_BUFFERS];
     int16_t *bufs[PLAY_BUFFERS];
-    float levels[PLAY_BUFFERS];
+    /* Niveles en el orden en que se mandaron: el primero es el pedazo que está
+       sonando ahora. Se reporta ese (no el que acaba de terminar), así la
+       esfera se mueve al compás de lo que se oye. */
+    float queue[PLAY_BUFFERS];
+    int qhead = 0, qcount = 0;
+    bool started = false;
     memset(hdr, 0, sizeof hdr);
     for (int i = 0; i < PLAY_BUFFERS; i++) bufs[i] = xmalloc(sizeof(int16_t) * chunk);
 
@@ -311,7 +316,7 @@ bool speaker_play(const int16_t *pcm, size_t samples, int rate, float gain, Play
                 sum += fabs(v);
             }
             float lvl = (float)(sum / (double)n / 4000.0);
-            levels[i] = lvl > 1 ? 1 : lvl;
+            queue[(qhead + qcount++) % PLAY_BUFFERS] = lvl > 1 ? 1 : lvl;
             hdr[i].lpData = (LPSTR)bufs[i];
             hdr[i].dwBufferLength = (DWORD)(n * 2);
             hdr[i].dwFlags = 0;
@@ -321,13 +326,22 @@ bool speaker_play(const int16_t *pcm, size_t samples, int rate, float gain, Play
             in_flight++;
             pos += n;
         }
+        if (!started && qcount) {
+            started = true;
+            if (cb && !cb(queue[qhead], ctx)) {
+                stopped = true;
+                break;
+            }
+        }
         WaitForSingleObject(ev, 100);
         for (int i = 0; i < PLAY_BUFFERS; i++) {
             if (free_slot[i] || !(hdr[i].dwFlags & WHDR_DONE)) continue;
             waveOutUnprepareHeader(hwo, &hdr[i], sizeof hdr[i]);
             free_slot[i] = true;
             in_flight--;
-            if (cb && !cb(levels[i], ctx)) {
+            qhead = (qhead + 1) % PLAY_BUFFERS;
+            qcount--;
+            if (cb && !cb(qcount ? queue[qhead] : 0.0f, ctx)) {
                 stopped = true;
                 break;
             }

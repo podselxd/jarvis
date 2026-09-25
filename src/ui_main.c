@@ -40,7 +40,10 @@ static struct {
     volatile LONG visible;
     volatile LONG yielded;
     RECT mon; /* monitor; en los modos con ventana, el rectángulo de la ventana */
-    int orb_size;
+    /* Esfera flotante: orb_base es el cuadro de la esfera; la ventana (orb_size)
+       le suma orb_pad transparente de cada lado para que las ondas de las líneas
+       no se corten. La posición guardada es la del cuadro de la esfera. */
+    int orb_base, orb_pad, orb_size;
     bool win_full, in_sizemove, size_changed, close_hint_shown;
     WINDOWPLACEMENT win_place;
 
@@ -177,15 +180,19 @@ static void load_display_config(void)
     U.subtitles = c.subtitles;
     primary_monitor(&U.mon);
     int mh = U.mon.bottom - U.mon.top;
-    U.orb_size = (int)(mh * ORB_FRACTION) & ~3;
+    U.orb_base = (int)(mh * ORB_FRACTION) & ~3;
+    U.orb_pad = (int)(U.orb_base * (sphere_room((SphereStyle)U.style) - 1.0f) * 0.5f) & ~1;
+    U.orb_size = U.orb_base + 2 * U.orb_pad;
     if (U.mode == DISPLAY_WINDOWED_BORDERLESS) {
         RECT wa;
         SystemParametersInfoW(SPI_GETWORKAREA, 0, &wa, 0);
         int x = c.orb_x, y = c.orb_y;
         if (x < 0 || y < 0) {
-            x = wa.right - U.orb_size - mh / 40;
-            y = wa.bottom - U.orb_size - mh / 40;
+            x = wa.right - U.orb_base - mh / 40;
+            y = wa.bottom - U.orb_base - mh / 40;
         }
+        x -= U.orb_pad;
+        y -= U.orb_pad;
         U.mon = (RECT){x, y, x + U.orb_size, y + U.orb_size};
     } else if (windowed(U.mode)) {
         RECT r = {c.win_x, c.win_y, c.win_x + c.win_w, c.win_y + c.win_h};
@@ -379,7 +386,7 @@ static LRESULT CALLBACK hud_proc(HWND h, UINT m, WPARAM w, LPARAM l)
         if (U.mode == DISPLAY_WINDOWED_BORDERLESS) {
             RECT r;
             GetWindowRect(h, &r);
-            config_set_orb_pos(r.left, r.top);
+            config_set_orb_pos(r.left + U.orb_pad, r.top + U.orb_pad);
         } else if (windowed(U.mode)) {
             save_window_rect(h);
             if (U.size_changed) {
@@ -545,7 +552,8 @@ static DWORD WINAPI render_main(LPVOID arg)
     Surface sphere = {0}, back = {0};
     HFONT big = NULL, small = NULL, status_font = NULL;
     SphereParams cur = SPHERE_IDLE;
-    double angle = 0, voice_t = 0, env = 0;
+    double angle = 0, voice_t = 0, env = 0, pulse_env = 0, pulse_peak = 0;
+    int sphere_base = 0; /* lado para el que está pensada la esfera; el lienzo puede ser más grande */
     LARGE_INTEGER freq, last, start;
     QueryPerformanceFrequency(&freq);
     QueryPerformanceCounter(&start);
@@ -577,12 +585,18 @@ static DWORD WINAPI render_main(LPVOID arg)
                 /* Lo que mide el lado del cuadro donde va la esfera (el alto,
                    salvo en una ventana o un monitor más altos que anchos). */
                 int side = W < H ? W : H;
-                int canvas = U.mode == DISPLAY_WINDOWED_BORDERLESS ? U.orb_size : U.res > 0 ? U.res : side;
-                if (canvas > 2160) canvas = 2160;
+                bool orb_mode = U.mode == DISPLAY_WINDOWED_BORDERLESS;
+                int base = orb_mode ? U.orb_base : U.res > 0 ? U.res : side;
+                if (base > 2160) base = 2160;
+                /* Las líneas necesitan más lienzo que la esfera misma (ver
+                   sphere_room): la esfera se ve del mismo tamaño y lo que
+                   sobra queda para las ondas al hablar. */
+                int canvas = orb_mode ? U.orb_size : (int)(base * sphere_room((SphereStyle)U.style));
                 sphere_destroy(sr);
-                sr = sphere_create(canvas);
+                sr = sphere_create_fit(canvas, (float)base / (float)canvas);
                 canvas = sphere_size(sr);
                 surface_alloc(&sphere, canvas, canvas);
+                sphere_base = base;
             }
             if (U.mode == DISPLAY_WINDOWED_BORDERLESS) {
                 surface_free(&back);
@@ -610,11 +624,19 @@ static DWORD WINAPI render_main(LPVOID arg)
         double k = level > env ? 1.0 - exp(-dt / 0.03) : 1.0 - exp(-dt / 0.18);
         env += (level - env) * k;
         float voice = st == JV_SPEAKING ? (float)fmin(1.0, env * 1.6) : st == JV_LISTENING ? (float)fmin(1.0, env * 0.8) : 0.0f;
+        /* El pulso sigue cada sílaba: sube tan rápido como la voz y baja en
+           menos de una décima de segundo, así la esfera late al hablar. */
+        double kp = level > pulse_env ? 1.0 - exp(-dt / 0.025) : 1.0 - exp(-dt / 0.09);
+        pulse_env += (level - pulse_env) * kp;
+        /* Relativo a lo fuerte que viene hablando: late igual con el volumen
+           bajo o con una voz más suave. */
+        pulse_peak = fmax(pulse_env, pulse_peak * exp(-dt / 1.5));
+        float pulse = st == JV_SPEAKING ? (float)fmin(1.0, pulse_env / fmax(0.3, pulse_peak)) : 0.0f;
         angle += cur.rotation_speed * dt * (1.0 + voice * 0.8);
         voice_t += dt * (1.0 + 2.5 * voice);
 
         bool orb = U.mode == DISPLAY_WINDOWED_BORDERLESS;
-        sphere_render(sr, t, angle, voice_t, &cur, voice, (SphereStyle)U.style, sphere.px, sphere.w, orb);
+        sphere_render(sr, t, angle, voice_t, &cur, voice, pulse, (SphereStyle)U.style, sphere.px, sphere.w, orb);
 
         if (hud && orb) {
             SIZE sz = {sphere.w, sphere.h};
@@ -626,13 +648,17 @@ static DWORD WINAPI render_main(LPVOID arg)
             int band = (int)(H * 0.68);
             memset(back.px + (size_t)band * W, 0, sizeof(uint32_t) * (size_t)(H - band) * W);
             int side = H < W ? H : W;
-            int x0 = (W - side) / 2, y0 = (H - side) / 2;
-            if (sphere.w == side) {
-                BitBlt(back.dc, x0, y0, side, side, sphere.dc, 0, 0, SRCCOPY);
+            /* Si el lienzo es más grande que la esfera (líneas), se dibuja más
+               grande en la misma proporción: la esfera queda del tamaño de
+               siempre y sus ondas pueden llegar al borde de la pantalla. */
+            int dst = sphere_base > 0 ? MulDiv(side, sphere.w, sphere_base) : side;
+            int x0 = (W - dst) / 2, y0 = (H - dst) / 2;
+            if (sphere.w == dst) {
+                BitBlt(back.dc, x0, y0, dst, dst, sphere.dc, 0, 0, SRCCOPY);
             } else {
                 SetStretchBltMode(back.dc, HALFTONE);
                 SetBrushOrgEx(back.dc, 0, 0, NULL);
-                StretchBlt(back.dc, x0, y0, side, side, sphere.dc, 0, 0, sphere.w, sphere.h, SRCCOPY);
+                StretchBlt(back.dc, x0, y0, dst, dst, sphere.dc, 0, 0, sphere.w, sphere.h, SRCCOPY);
             }
             draw_overlay(&back, big, small, status_font);
             HDC dc = GetDC(hud);
