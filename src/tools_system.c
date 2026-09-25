@@ -34,8 +34,10 @@ typedef struct {
 } Alias;
 
 static const Alias APP_ALIASES[] = {
-    {"chrome", "chrome"},        {"navegador", "chrome"},     {"google", "chrome"},     {"bloc de notas", "notepad"},
+    {"chrome", "chrome"},        {"google", "google.com"},    {"youtube", "youtube.com"}, {"bloc de notas", "notepad"},
     {"notas", "notepad"},        {"calculadora", "calc"},     {"explorador", "explorer"}, {"archivos", "explorer"},
+    {"explorer", "explorer"},    {"file explorer", "explorer"}, {"explorador de archivos", "explorer"},
+    {"este equipo", "explorer"}, {"mi pc", "explorer"},       {"mis archivos", "explorer"},
     {"word", "winword"},         {"excel", "excel"},          {"spotify", "spotify"},
 };
 
@@ -228,6 +230,66 @@ bool open_app_targets_file(const cJSON *a)
     return file;
 }
 
+static bool is_listable(HWND h);
+static bool force_foreground(HWND h);
+
+static const char *find_ci(const char *hay, const char *needle)
+{
+    size_t n = strlen(needle);
+    for (; *hay; hay++)
+        if (!_strnicmp(hay, needle, n)) return hay;
+    return NULL;
+}
+
+/* ¿El título trae ese nombre como palabra completa? ("Word" sí en
+   "Documento1 - Word", no en "Password"). */
+static bool title_has_word(const char *title, const char *name)
+{
+    size_t n = strlen(name);
+    for (const char *p = title; (p = find_ci(p, name)); p++) {
+        bool before = p == title || !isalnum((unsigned char)p[-1]);
+        bool after = !isalnum((unsigned char)p[n]);
+        if (before && after) return true;
+    }
+    return false;
+}
+
+typedef struct {
+    const char *name;
+    HWND found;
+} OpenFind;
+
+static BOOL CALLBACK find_open_window(HWND h, LPARAM lp)
+{
+    OpenFind *f = (OpenFind *)lp;
+    int len = GetWindowTextLengthW(h);
+    if (len <= 0 || !is_listable(h)) return TRUE;
+    wchar_t *w = xmalloc(sizeof(wchar_t) * (size_t)(len + 1));
+    GetWindowTextW(h, w, len + 1);
+    char *t = wide_to_utf8(w);
+    free(w);
+    if (title_has_word(t, f->name)) f->found = h;
+    free(t);
+    return f->found ? FALSE : TRUE;
+}
+
+/* "Abre Opera" con Opera ya abierto: se trae al frente en vez de abrir otra
+   ventana. */
+static char *bring_open_app(const char *name)
+{
+    if (strlen(name) < 3) return NULL;
+    OpenFind f = {.name = name};
+    EnumWindows(find_open_window, (LPARAM)&f);
+    if (!f.found) return NULL;
+    app_yield_focus();
+    wchar_t title[256];
+    GetWindowTextW(f.found, title, 256);
+    char *t = wide_to_utf8(title);
+    char *r = force_foreground(f.found) ? str_printf("Ya estaba abierto: traje al frente «%s».", t) : NULL;
+    free(t);
+    return r;
+}
+
 char *tool_open_app(const cJSON *a)
 {
     char *name = str_trim(arg_str(a, "name"));
@@ -252,6 +314,13 @@ char *tool_open_app(const cJSON *a)
     if (folder) {
         if (shell_open(folder, NULL)) result = str_printf("Abrí %s.", name);
         free(folder);
+    } else if (!strcmp(low, "navegador") || !strcmp(low, "el navegador") || !strcmp(low, "browser")) {
+        /* El navegador que tengas de predeterminado, no uno fijo. */
+        wchar_t exe[MAX_PATH];
+        DWORD n = MAX_PATH;
+        if (SUCCEEDED(AssocQueryStringW(ASSOCF_NONE, ASSOCSTR_EXECUTABLE, L"http", L"open", exe, &n)) &&
+            shell_open(exe, NULL))
+            result = xstrdup("Abrí tu navegador.");
     } else if (looks_like_url(target)) {
         char *url = str_starts_with(target, "http") ? xstrdup(target) : str_printf("https://%s", target);
         wchar_t *w = utf8_to_wide(url);
@@ -259,6 +328,8 @@ char *tool_open_app(const cJSON *a)
         free(w);
         free(url);
     }
+    if (!result && !strchr(target, '\\') && !strchr(target, '/') && strcmp(target, "explorer"))
+        result = bring_open_app(low);
     if (!result) {
         wchar_t *w = utf8_to_wide(target);
         wchar_t *expanded = expand_env(w);
@@ -384,12 +455,51 @@ char *tool_control_media(const cJSON *a)
     return xstrdup("Acción de media no reconocida.");
 }
 
+static bool is_listable(HWND h);
+
+/* Tu ventana de enfrente: la que tiene el foco o, si es la de Sokari, la
+   primera tuya debajo de ella. */
+static HWND front_user_window(void)
+{
+    app_yield_focus();
+    HWND h = GetForegroundWindow();
+    if (h && is_listable(h) && GetWindowTextLengthW(h) > 0 && !IsIconic(h)) return h;
+    for (HWND w = GetTopWindow(NULL); w; w = GetWindow(w, GW_HWNDNEXT))
+        if (is_listable(w) && GetWindowTextLengthW(w) > 0 && !IsIconic(w)) return w;
+    return NULL;
+}
+
+static char *window_action(const char *action)
+{
+    HWND h = front_user_window();
+    if (!h) return xstrdup("No encontré ninguna ventana tuya enfrente.");
+    wchar_t title[160];
+    GetWindowTextW(h, title, 160);
+    char *t = wide_to_utf8(title);
+    char *r;
+    if (!strcmp(action, "minimize")) {
+        ShowWindowAsync(h, SW_MINIMIZE);
+        r = str_printf("Minimicé «%s».", t);
+    } else if (!strcmp(action, "maximize")) {
+        ShowWindowAsync(h, SW_MAXIMIZE);
+        r = str_printf("Maximicé «%s».", t);
+    } else {
+        /* Como darle a la X: si tiene algo sin guardar, la app misma pregunta. */
+        PostMessageW(h, WM_CLOSE, 0, 0);
+        r = str_printf("Cerré «%s».", t);
+    }
+    free(t);
+    return r;
+}
+
 char *tool_control_desktop(const cJSON *a)
 {
     const char *action = arg_str(a, "action");
     if (!strcmp(action, "lock")) {
         return LockWorkStation() ? xstrdup("Listo.") : xstrdup("No pude bloquear la PC.");
     }
+    if (!strcmp(action, "minimize") || !strcmp(action, "maximize") || !strcmp(action, "close_window"))
+        return window_action(action);
     WORD combo[3];
     int n = 0;
     if (!strcmp(action, "show_desktop")) {

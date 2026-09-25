@@ -3,7 +3,7 @@
     "type": "function",
     "function": {
       "name": "open_app",
-      "description": "Abre una app (también las del menú Inicio: Discord, Steam, Spotify, etc.), carpeta, archivo o página web. No abre programas ni scripts sueltos (.exe, .bat, accesos directos): para una app, pasa su nombre.",
+      "description": "Abre una app (también las del menú Inicio: Discord, Steam, Spotify, Opera, etc.; si ya está abierta, la trae al frente), el Explorador ('explorador'), tu navegador predeterminado ('navegador'), una carpeta, un archivo o una página web. No abre programas ni scripts sueltos (.exe, .bat, accesos directos): para una app, pasa su nombre.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -70,16 +70,19 @@
     "type": "function",
     "function": {
       "name": "control_desktop",
-      "description": "Mostrar escritorio, cambiar de ventana, minimizar todo, bloquear la PC, tecla F (pantalla completa del video) o close_tab (Ctrl+W). F y close_tab actúan sobre la ventana enfocada.",
+      "description": "Ventanas y escritorio. minimize, maximize y close_window actúan sobre la ventana de enfrente (la del usuario, no la tuya); minimize_all y show_desktop, sobre todas. También cambiar de ventana, bloquear la PC, tecla F (pantalla completa del video) y close_tab (Ctrl+W).",
       "parameters": {
         "type": "object",
         "properties": {
           "action": {
             "type": "string",
             "enum": [
+              "minimize",
+              "maximize",
+              "close_window",
               "show_desktop",
-              "switch_window",
               "minimize_all",
+              "switch_window",
               "lock",
               "fullscreen",
               "close_tab"

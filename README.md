@@ -81,11 +81,12 @@ Sokari empieza a recibir órdenes solo en cuanto Tailscale se conecta, sin reini
 
 ## Qué puede hacer
 
+- **Comandos al instante, sin IA:** "ponle play", "pausa", "la siguiente", "sube el volumen", "volumen al 30", "minimiza la pestaña", "maximízala", "cierra la pestaña", "abre archivos", "abre mis descargas", "abre Opera" y "gracias" se hacen en tu PC, aunque vengan con saludo ("¿cómo andas? oye, ponle play"). Son inmediatos, no gastan cupo de Groq y no dependen de que el modelo entienda. Lo que trae algo más ("pon la canción de AC/DC") va al modelo.
 - Platicar y responder preguntas. Usa los modelos gratis de Groq y rota entre GPT-OSS 120B, Qwen 3 y GPT-OSS 20B para no quedarse sin cupo.
-- Abrir apps (incluidas las del menú Inicio, como Discord, Steam o Spotify), carpetas, archivos y páginas. No abre programas ni scripts sueltos (.exe, .bat, accesos directos).
+- Abrir apps (incluidas las del menú Inicio, como Discord, Steam, Spotify u Opera; si ya está abierta, la trae al frente), el Explorador, tu navegador predeterminado, carpetas, archivos y páginas. No abre programas ni scripts sueltos (.exe, .bat, accesos directos).
 - Buscar en internet y leer páginas completas.
 - Controlar el volumen (también a un nivel exacto) y la música: pausa, siguiente y anterior.
-- Mostrar el escritorio, cambiar de ventana, minimizar todo, bloquear la PC, poner un video en pantalla completa y cerrar la pestaña.
+- Minimizar, maximizar o cerrar la ventana de enfrente (la tuya, nunca la de Sokari), mostrar el escritorio, cambiar de ventana, minimizar todo, bloquear la PC, poner un video en pantalla completa y cerrar la pestaña.
 - Ver qué ventanas tienes abiertas y traer una al frente.
 - Escribir texto donde está el cursor y darle Enter. No ve la pantalla: te dice en qué ventana escribió, pero no puede saber si se envió. Nunca escribe en terminales.
 - Leer y copiar al portapapeles.
