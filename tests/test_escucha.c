@@ -28,7 +28,7 @@ static void check(bool ok, const char *what)
 
 static int16_t *load_wav16k(const wchar_t *name, size_t *samples)
 {
-    wchar_t *dir = exe_dir(), *rel = path_join(L"..\\..\\tests\\datos", name), *path = path_join(dir, rel);
+    wchar_t *dir = exe_dir(), *rel = path_join(L"../../tests/datos", name), *path = path_join(dir, rel);
     size_t len;
     char *data = read_file_all(path, &len);
     free(dir);

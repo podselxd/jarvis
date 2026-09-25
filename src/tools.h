@@ -40,6 +40,10 @@ char *tool_info_sistema(const cJSON *a);
 char *focus_window_by_title(const char *needle, bool *ok);
 bool open_target_is_dangerous(const wchar_t *path);
 bool open_app_targets_file(const cJSON *a);
+/* "youtube.com", "www.x", "https://…": ¿parece una página y no una app? */
+bool looks_like_url(const char *s);
+/* "ms-settings:", "file:"…: un esquema que no es http(s) ni una unidad (C:). */
+bool has_other_scheme(const char *s);
 bool is_terminal_window_info(const wchar_t *cls, const wchar_t *exe);
 bool foreground_is_terminal(void);
 /* El nombre de la app de una ventana (un HWND) por su programa: "Chrome",

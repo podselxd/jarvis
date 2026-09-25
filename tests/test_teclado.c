@@ -5,8 +5,10 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <objbase.h>
+#ifdef _WIN32
 #include <shellapi.h>
 #include <shlobj.h>
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -173,6 +175,9 @@ static void test_atajos(void)
     free(r);
 }
 
+/* Lo que toca el portapapeles y las ventanas de verdad: en Linux llega con
+   las acciones (parte 4). */
+#ifdef _WIN32
 static void test_portapapeles(void)
 {
     printf("-- el archivo en el portapapeles, como «Copiar» en el Explorador --\n");
@@ -235,6 +240,7 @@ static void test_donde_no_da_enter(void)
     free(app);
     check(!window_runs_commands(NULL) && !window_app_name(NULL), "sin ventana: ni ejecuta ni tiene nombre");
 }
+#endif
 
 static void test_confirmaciones(void)
 {
@@ -305,9 +311,11 @@ int wmain(void)
     test_borrar_y_mandar();
     test_pestanas();
     test_atajos();
+#ifdef _WIN32
     test_portapapeles();
     test_sin_efectos();
     test_donde_no_da_enter();
+#endif
     test_confirmaciones();
     test_registradas();
     printf("%d/%d pruebas %s\n", g_total - g_fail, g_total, g_fail ? "— HAY FALLAS" : "ok");

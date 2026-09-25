@@ -44,6 +44,7 @@ char *str_trim(const char *s);
 bool str_is_blank(const char *s);
 void str_collapse_spaces(char *s);
 size_t utf8_truncate_len(const char *s, size_t max_bytes);
+char *cp1252_to_utf8(const char *s, size_t n);
 
 /* Avisa (en Windows, con una ventana) y cierra Sokari con ese código. */
 void fatal_error(const char *msg, int code) __attribute__((noreturn));

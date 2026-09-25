@@ -88,8 +88,6 @@ static wchar_t *browser_exe(const char *name)
     return found;
 }
 
-static bool looks_like_url(const char *s);
-
 bool open_url(const char *url, const char *browser)
 {
     /* Nada de comillas ni espacios: va entre comillas como argumento. */
@@ -112,36 +110,7 @@ bool open_url(const char *url, const char *browser)
     return ok;
 }
 
-static bool looks_like_url(const char *s)
-{
-    if (str_starts_with(s, "http://") || str_starts_with(s, "https://") || str_starts_with(s, "www.")) return true;
-    if (strchr(s, ' ') || strchr(s, '\\')) return false;
-    const char *dot = strrchr(s, '.');
-    if (!dot || dot == s || strlen(dot + 1) < 2) return false;
-    static const char *tlds[] = {"com", "org", "net", "io", "mx", "es", "ar", "co", "tv", "gg", "dev", "app", "ai", "edu", "gov"};
-    for (size_t i = 0; i < sizeof tlds / sizeof *tlds; i++) {
-        char *end = str_lower(dot + 1);
-        char *slash = strchr(end, '/');
-        if (slash) *slash = 0;
-        bool m = !strcmp(end, tlds[i]);
-        free(end);
-        if (m) return true;
-    }
-    return false;
-}
 
-/* "esquema:" que no sea una letra de unidad (C:) ni http/https: ms-settings:,
-   search-ms:, file:, shell:... abren cosas que no son apps ni páginas. */
-static bool has_other_scheme(const char *s)
-{
-    const char *p = s;
-    if (!isalpha((unsigned char)*p)) return false;
-    while (isalnum((unsigned char)*p) || *p == '+' || *p == '-' || *p == '.') p++;
-    if (*p != ':') return false;
-    size_t n = (size_t)(p - s);
-    if (n == 1) return false;
-    return !(n == 4 && !_strnicmp(s, "http", 4)) && !(n == 5 && !_strnicmp(s, "https", 5));
-}
 
 /* Lo que Windows ejecuta en vez de abrir en un visor. AssocIsDangerous trae la
    lista del sistema; la propia es por si en alguna versión falta alguno. */
@@ -274,21 +243,6 @@ done:
     return n_similar;
 }
 
-/* ¿open_app apunta a una ruta (archivo o carpeta) y no a una app o página? */
-bool open_app_targets_file(const cJSON *a)
-{
-    char *name = str_trim(arg_str(a, "name"));
-    bool file = false;
-    if (!looks_like_url(name)) {
-        wchar_t *w = utf8_to_wide(name);
-        wchar_t *e = expand_env(w);
-        file = wcschr(e, L'\\') || wcschr(e, L'/');
-        free(e);
-        free(w);
-    }
-    free(name);
-    return file;
-}
 
 static bool is_listable(HWND h);
 static bool force_foreground(HWND h);
@@ -977,13 +931,3 @@ char *tool_info_sistema(const cJSON *a)
     return sb_steal(&sb);
 }
 
-/* "Tienes permiso para todo" / "pregúntame antes". Prenderlo con texto de
-   afuera en la conversación pide un sí de voz (ver tool_needs_confirmation). */
-char *tool_cambiar_permisos(const cJSON *a)
-{
-    bool on = arg_bool(a, "acceso_completo");
-    config_set_full_access(on);
-    log_msg(on ? "Acceso completo prendido por voz." : "Acceso completo apagado por voz: vuelvo a pedir permiso.");
-    return xstrdup(on ? "Listo: acceso completo prendido. Ya no te pregunto nada, salvo antes de borrar."
-                      : "Listo: acceso completo apagado. Vuelvo a pedirte permiso antes de acciones delicadas.");
-}

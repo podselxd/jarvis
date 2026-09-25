@@ -18,6 +18,8 @@ char *mesh_tailscale_ip(void);
 char *mesh_listening_ip(void);
 bool tailscale_installed(void);
 bool mesh_host_allowed(const char *host);
+/* ¿Es una IPv4 de Tailscale (100.64.0.0/10)? */
+bool mesh_is_tailscale_v4(const unsigned char b[4]);
 
 /* Tus dispositivos registrados (dispositivos.json): nombre -> dirección de
    Tailscale. */
@@ -26,6 +28,9 @@ typedef struct {
     char *host;
 } MeshDevice;
 int mesh_devices(MeshDevice **out);
+/* dispositivos.json tal cual ({"nombre": "host"}), para quien necesite más
+   que la lista. */
+struct cJSON *mesh_devices_load(void);
 void mesh_devices_free(MeshDevice *list, int n);
 bool mesh_device_set(const char *name, const char *host); /* false si no es de Tailscale */
 bool mesh_device_remove(const char *name);

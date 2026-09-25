@@ -1,0 +1,68 @@
+# Sokari para Linux (Ubuntu 24.04+ y Fedora 44):  make -f Makefile.linux
+# Necesita gcc, make, pkg-config y las cabeceras de libcurl:
+#   Ubuntu: sudo apt install build-essential pkg-config libcurl4-openssl-dev
+#   Fedora: sudo dnf install gcc make pkgconf-pkg-config libcurl-devel
+
+CC ?= gcc
+PKGS := libcurl
+CFLAGS := -std=gnu11 -O2 -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -D_GNU_SOURCE \
+          -Isrc -Isrc/linux/include -MMD -MP $(shell pkg-config --cflags $(PKGS))
+LIBS := $(shell pkg-config --libs $(PKGS)) -lm -lpthread
+
+# Del código compartido con Windows, lo que no depende del sistema. Lo propio
+# de Linux está en src/linux/ (y src/linux/include/windows.h da los hilos y
+# candados con la misma forma que en Windows).
+SHARED := agent calc config groq http_common intents keys log memory mesh_devices tool_policy tools tools_common \
+          tools_memory tools_web util wakeword nn_generic nn_avx2
+SRC := $(addprefix src/,$(addsuffix .c,$(SHARED))) src/third_party/cJSON.c $(wildcard src/linux/*.c)
+OBJ := $(patsubst src/%.c,build-linux/obj/%.o,$(SRC)) build-linux/obj/linux/recursos.o
+MAIN_OBJ := build-linux/obj/linux/main_linux.o
+LIB_OBJ := $(filter-out $(MAIN_OBJ),$(OBJ))
+OUT ?= build-linux/sokari
+
+# El modelo de "Hey Sokari" entra solo si res/hey_sokari.jww existe.
+HEY_SOKARI := $(wildcard res/hey_sokari.jww)
+RES_FILES := res/tools.json res/system_prompt.txt res/wakeword.bin $(HEY_SOKARI)
+
+# Las pruebas que ya corren en Linux (las demás llegan con cada parte).
+LINUX_TESTS := test_comandos test_confirmacion test_resources test_respaldos test_teclado test_util test_wakeword test_groq
+TESTS := $(addprefix build-linux/tests/,$(LINUX_TESTS))
+
+.PHONY: all clean tests
+
+all: $(OUT)
+
+$(OUT): $(OBJ)
+	@mkdir -p $(dir $@)
+	$(CC) -o $@ $^ $(LIBS)
+
+build-linux/obj/%.o: src/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+build-linux/obj/nn_avx2.o: CFLAGS += -O3 -mavx2 -mfma
+build-linux/obj/nn_generic.o: CFLAGS += -O3
+
+build-linux/obj/linux/recursos.o: src/linux/recursos.S $(RES_FILES)
+	@mkdir -p $(dir $@)
+	$(CC) -c -Ires $(if $(HEY_SOKARI),-DHAVE_HEY_SOKARI) $< -o $@
+
+tests: $(TESTS)
+
+# Las pruebas arrancan en wmain, como en Windows.
+TEST_CFLAGS = $(CFLAGS) -Dwmain=main
+
+build-linux/tests/%: tests/%.c $(LIB_OBJ)
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_CFLAGS) -o $@ $^ $(LIBS)
+
+# Trae su propio Groq y su propio run_tool de mentira (como en Windows).
+build-linux/tests/test_confirmacion: tests/test_confirmacion.c \
+		$(filter-out build-linux/obj/groq.o build-linux/obj/tools.o,$(LIB_OBJ))
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_CFLAGS) -o $@ $^ $(LIBS)
+
+clean:
+	rm -rf build-linux
+
+-include $(OBJ:.o=.d)
