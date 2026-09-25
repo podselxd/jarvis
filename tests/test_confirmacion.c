@@ -258,8 +258,12 @@ static void test_despedidas(void)
     check(!t.keep_going, "'ya vete' termina la conversación");
     free(t.reply);
     script("Entendido, aquí estaré si me necesitas. ¡Que tengas buen día!", NULL, NULL);
-    t = say_turn(c, "ok gracias");
+    t = say_turn(c, "ok perfecto");
     check(!t.keep_going, "si Sokari se despide, la conversación también termina");
+    free(t.reply);
+    t = say_turn(c, "ok gracias");
+    check(!t.keep_going && t.reply && !strcmp(t.reply, "De nada."),
+          "un «gracias» solo: «De nada.» sin el modelo, y termina");
     free(t.reply);
     script("Listo, abrí Spotify. ¿Algo más?", NULL, NULL);
     t = say_turn(c, "abre spotify");
@@ -427,6 +431,25 @@ static void test_acceso_completo(void)
     set_full_access(true);
 }
 
+static void test_comandos_directos(void)
+{
+    printf("-- comandos simples: sin preguntarle al modelo --\n");
+    Conversation *c = conv_create(false);
+    script("(esto no se debe oír: el modelo no se usa)", NULL, NULL);
+    char *r = say(c, "¿Cómo andas? Oye, ¿puedes ponerle play al video?");
+    check(strstr(g_ran, "control_media {\"action\":\"play_pause\"}") && g_script_pos == 0 && r &&
+              !strcmp(r, "¡Todo bien! Le di play."),
+          "«¿cómo andas? oye, ponle play»: lo hace y contesta, sin gastar cupo");
+    free(r);
+    free(say(c, "minimiza la pestaña y abre archivos"));
+    const char *mini = strstr(g_ran, "control_desktop {\"action\":\"minimize\"}");
+    const char *expl = strstr(g_ran, "open_app {\"name\":\"explorador\"}");
+    check(mini && expl && mini < expl && g_script_pos == 0, "dos comandos en una frase, en el orden en que los dijiste");
+    free(say(c, "pon la canción de ACDC de Black in Black"));
+    check(g_script_pos == 1, "lo que trae algo más sí va al modelo");
+    conv_destroy(c);
+}
+
 static void test_detecta_permiso(void)
 {
     printf("-- qué cuenta como pedir permiso --\n");
@@ -455,6 +478,7 @@ int wmain(void)
     test_respuesta_basura();
     test_acceso_completo();
     test_detecta_permiso();
+    test_comandos_directos();
     printf("%d/%d pruebas %s\n", g_total - g_fail, g_total, g_fail ? "— HAY FALLAS" : "ok");
     return g_fail ? 1 : 0;
 }

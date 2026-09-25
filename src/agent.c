@@ -6,6 +6,7 @@
 #include "app.h"
 #include "config.h"
 #include "groq.h"
+#include "intents.h"
 #include "log.h"
 #include "memory.h"
 #include "mesh.h"
@@ -519,6 +520,27 @@ TurnResult agent_process(Conversation *c, const char *text)
         memory_persist("user", text);
         r.reply = xstrdup("Hasta luego.");
         return r;
+    }
+    /* Play, pausa, volumen, la ventana de enfrente, abrir una app o una
+       carpeta, "gracias": se hacen aquí, sin gastar cupo ni arriesgarse a
+       que el modelo diga "listo" sin hacerlo. */
+    IntentList il;
+    if (intents_parse(text, &il)) {
+        bool handled = false;
+        char *done = intents_run(&il, &handled);
+        if (handled) {
+            log_msg("Comando directo, sin IA: «%s» -> %s", text, done);
+            add_message(c->history, "user", text);
+            memory_persist("user", text);
+            add_message(c->history, "assistant", done);
+            memory_persist("assistant", done);
+            trim_history(c);
+            r.reply = done;
+            /* Un "gracias" solo es despedirse: igual que cuando Sokari se despide. */
+            r.keep_going = !(il.n == 1 && il.items[0].kind == IN_THANKS);
+            return r;
+        }
+        free(done);
     }
 
     int turn_start = cJSON_GetArraySize(c->history);
