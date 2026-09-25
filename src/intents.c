@@ -98,6 +98,41 @@ bool intents_is_name_word(const char *w)
     return edit_distance(key, "sokari") <= (n <= 5 ? 1 : 2);
 }
 
+static bool is_letter_start(const unsigned char *p)
+{
+    return isalnum(*p) || (*p == 0xC3 && p[1]);
+}
+
+char *intents_fix_name(const char *text)
+{
+    StrBuf sb;
+    sb_init(&sb);
+    const unsigned char *p = (const unsigned char *)(text ? text : "");
+    while (*p) {
+        if (!is_letter_start(p)) {
+            sb_append_n(&sb, (const char *)p, 1);
+            p++;
+            continue;
+        }
+        const unsigned char *s = p;
+        while (*p && is_letter_start(p)) p += *p == 0xC3 ? 2 : 1;
+        char word[64];
+        size_t len = (size_t)(p - s);
+        if (len >= sizeof word) {
+            sb_append_n(&sb, (const char *)s, len);
+            continue;
+        }
+        memcpy(word, s, len);
+        word[len] = 0;
+        char *norm = intents_normalize(word);
+        char *t = str_trim(norm);
+        sb_append(&sb, intents_is_name_word(t) ? "Sokari" : word);
+        free(t);
+        free(norm);
+    }
+    return sb.data ? sb.data : xstrdup("");
+}
+
 /* ------------------------------------------------------- vocabulario --- */
 
 /* Lo que puede acompañar a cualquier comando sin cambiarlo. */

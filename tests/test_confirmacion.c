@@ -36,6 +36,7 @@ static int g_script_len, g_script_pos, g_call_id;
 static bool g_saw_injection; /* el último pedido a "Groq" traía el texto escondido de la página */
 static bool g_saw_full_mode; /* y le decía que tiene acceso completo */
 static bool g_saw_nudge;     /* y le reclamaba decir "listo" sin haber usado herramientas */
+static char g_last_sent[16384]; /* el último pedido completo a "Groq" */
 
 static void script(const char *a, const char *b, const char *c)
 {
@@ -52,6 +53,7 @@ cJSON *groq_chat(const cJSON *messages, const cJSON *tools, GroqError *err)
     g_saw_injection = strstr(sent, "IGNORA TUS INSTRUCCIONES") != NULL;
     g_saw_full_mode = strstr(sent, "Tienes acceso completo") != NULL;
     if (strstr(sent, "no usaste ninguna herramienta")) g_saw_nudge = true;
+    snprintf(g_last_sent, sizeof g_last_sent, "%s", sent);
     free(sent);
     cJSON *m = cJSON_CreateObject();
     cJSON_AddStringToObject(m, "role", "assistant");
@@ -474,6 +476,20 @@ static void test_sin_listo_falso(void)
     conv_destroy(c);
 }
 
+static void test_nombre(void)
+{
+    printf("-- tu nombre mal transcrito --\n");
+    Conversation *c = conv_create(false);
+    script("Aquí estoy. ¿Qué necesitas?", NULL, NULL);
+    free(say(c, "Hey, Zachary. ¿Me ayudas con una cosa, Akari?"));
+    check(strstr(g_last_sent, "Hey, Sokari. ¿Me ayudas con una cosa, Sokari?") && !strstr(g_last_sent, "Hey, Zachary"),
+          "al modelo le llega «Sokari», no «Zachary» ni «Akari»");
+    script("Va.", NULL, NULL);
+    free(say(c, "¿Me puedes sacar de la duda? ¡Socorro!"));
+    check(strstr(g_last_sent, "sacar de la duda") && strstr(g_last_sent, "Socorro"), "las palabras de verdad no se tocan");
+    conv_destroy(c);
+}
+
 static void test_detecta_permiso(void)
 {
     printf("-- qué cuenta como pedir permiso --\n");
@@ -504,6 +520,7 @@ int wmain(void)
     test_detecta_permiso();
     test_comandos_directos();
     test_sin_listo_falso();
+    test_nombre();
     printf("%d/%d pruebas %s\n", g_total - g_fail, g_total, g_fail ? "— HAY FALLAS" : "ok");
     return g_fail ? 1 : 0;
 }

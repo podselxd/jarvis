@@ -59,4 +59,8 @@ bool intents_is_name_word(const char *w);
    al principio y al final para buscar palabras completas. */
 char *intents_normalize(const char *text);
 
+/* El mismo texto con tu nombre bien escrito: "Hey, Zachary" -> "Hey, Sokari".
+   Lo demás (acentos, signos) queda igual. */
+char *intents_fix_name(const char *text);
+
 #endif

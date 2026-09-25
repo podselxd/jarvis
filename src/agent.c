@@ -522,16 +522,29 @@ static char *error_reply(const GroqError *e)
     }
 }
 
-TurnResult agent_process(Conversation *c, const char *text)
+static TurnResult process_turn(Conversation *c, const char *text);
+
+TurnResult agent_process(Conversation *c, const char *heard)
 {
-    TurnResult r = {0};
-    if (contains_stop_word(text)) {
+    if (contains_stop_word(heard)) {
+        TurnResult r = {0};
         clear_pending(c);
         log_msg("Palabra de apagado detectada. Cerrando Sokari.");
         r.reply = xstrdup("Sokari desactivado.");
         r.shutdown = true;
         return r;
     }
+    /* "Hey, Zachary" es "Hey, Sokari": así el modelo no cree que es otra persona. */
+    char *text = intents_fix_name(heard);
+    if (strcmp(text, heard)) log_msg("Tu nombre venía mal escrito: «%s» -> «%s».", heard, text);
+    TurnResult r = process_turn(c, text);
+    free(text);
+    return r;
+}
+
+static TurnResult process_turn(Conversation *c, const char *text)
+{
+    TurnResult r = {0};
     if (c->pending_tool) {
         AgentAnswer ans = agent_classify_answer(text);
         if (ans == ANSWER_REPEAT) return repeat_pending(c, text);
