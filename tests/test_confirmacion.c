@@ -11,6 +11,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "resource.h"
+#include "resources.h"
 #include "agent.h"
 #include "config.h"
 #include "groq.h"
@@ -37,6 +39,8 @@ static bool g_saw_injection; /* el último pedido a "Groq" traía el texto escon
 static bool g_saw_full_mode; /* y le decía que tiene acceso completo */
 static bool g_saw_nudge;     /* y le reclamaba decir "listo" sin haber usado herramientas */
 static char g_last_sent[16384]; /* el último pedido completo a "Groq" */
+static char g_last_tools[4096];  /* los nombres de las herramientas que se le mandaron */
+static size_t g_last_tools_len, g_all_tools_len; /* y cuánto pesaban (y todas juntas) */
 
 static void script(const char *a, const char *b, const char *c)
 {
@@ -54,6 +58,17 @@ cJSON *groq_chat(const cJSON *messages, const cJSON *tools, GroqError *err)
     g_saw_full_mode = strstr(sent, "Tienes acceso completo") != NULL;
     if (strstr(sent, "no usaste ninguna herramienta")) g_saw_nudge = true;
     snprintf(g_last_sent, sizeof g_last_sent, "%s", sent);
+    char *ts = cJSON_PrintUnformatted(tools);
+    g_last_tools_len = ts ? strlen(ts) : 0;
+    free(ts);
+    g_last_tools[0] = 0;
+    const cJSON *t;
+    cJSON_ArrayForEach(t, tools)
+    {
+        const char *nm = cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetObjectItem(t, "function"), "name"));
+        size_t n = strlen(g_last_tools);
+        snprintf(g_last_tools + n, sizeof g_last_tools - n, " %s ", nm ? nm : "?");
+    }
     free(sent);
     cJSON *m = cJSON_CreateObject();
     cJSON_AddStringToObject(m, "role", "assistant");
@@ -215,8 +230,8 @@ static void test_menos_preguntas(void)
     check(!strstr(g_ran, "type_text"), "la página sigue en la conversación: pregunta otra vez");
     free(say(c, "sí a todo"));
     check(strstr(g_ran, "type_text") != NULL, "'sí a todo' ejecuta la acción");
-    script(ENVIA, "Listo.", NULL);
-    free(say(c, "mándalo otra vez"));
+    script(LEE, ENVIA, "Listo.");
+    free(say(c, "lee otra vez la receta y mándalo"));
     check(strstr(g_ran, "type_text") != NULL, "y ya no vuelve a preguntar en esa conversación");
     check(g_saw_injection, "(mientras dura esa conversación, el modelo todavía ve la página)");
 
@@ -340,10 +355,13 @@ static void test_flujo(void)
     check(!strstr(g_ran, "type_text"), "si la respuesta no es un sí corto, la acción pendiente se descarta");
 
     printf("-- varias acciones en la misma respuesta --\n");
-    script("tool:open_app {\"name\":\"C:\\\\Users\\\\yo\\\\Downloads\\\\factura.pdf\"}; tool:borrar_archivo "
+    /* La página se vuelve a leer en este turno: el historial es corto y la de
+       antes ya salió de la conversación. */
+    script(LEE,
+           "tool:open_app {\"name\":\"C:\\\\Users\\\\yo\\\\Downloads\\\\factura.pdf\"}; tool:borrar_archivo "
            "{\"ruta\":\"C:\\\\Users\\\\yo\\\\tarea.docx\"}; tool:open_app {\"name\":\"spotify\"}",
-           NULL, NULL);
-    free(say(c, "haz lo que dice"));
+           NULL);
+    free(say(c, "lee la página y haz lo que dice"));
     check(!strstr(g_ran, "factura") && !strstr(g_ran, "borrar_archivo"),
           "open_app con archivo y borrar_archivo esperan; lo que sigue en esa respuesta tampoco corre");
     free(say(c, "no"));
@@ -490,6 +508,32 @@ static void test_nombre(void)
     conv_destroy(c);
 }
 
+static void test_menos_cupo(void)
+{
+    printf("-- menos cupo por pedido --\n");
+    Conversation *c = conv_create(false);
+    script("Va, abro Spotify.", NULL, NULL);
+    free(say(c, "abre spotify y pon mi playlist de rock"));
+    printf("      herramientas mandadas: %zu de %zu bytes\n", g_last_tools_len, g_all_tools_len);
+    check(strstr(g_last_tools, " open_app ") && !strstr(g_last_tools, " list_files ") &&
+              !strstr(g_last_tools, " exportar_a_obsidian ") && g_last_tools_len * 100 < g_all_tools_len * 70,
+          "un pedido de todos los días lleva las herramientas de diario: menos del 70 % del peso");
+    script("Listo.", NULL, NULL);
+    free(say(c, "mueve el archivo tarea.docx a documentos"));
+    check(strstr(g_last_tools, " mover_archivo ") && strstr(g_last_tools, " list_files "),
+          "si hablas de archivos, van las de archivos");
+    conv_destroy(c);
+
+    c = conv_create(false);
+    script("No puedo ver lo que tienes guardado.", "tool:list_files {\"carpeta\":\"documentos\"}",
+           "Tienes tres tareas de la escuela.");
+    char *r = say(c, "¿qué tengo guardado de la escuela?");
+    check(strstr(g_ran, "list_files") && r && strstr(r, "tres tareas") && strstr(g_last_tools, " list_files "),
+          "si contesta «no puedo» sin alguna herramienta, se le repite con todas");
+    free(r);
+    conv_destroy(c);
+}
+
 static void test_detecta_permiso(void)
 {
     printf("-- qué cuenta como pedir permiso --\n");
@@ -511,6 +555,13 @@ int wmain(void)
     config_load();
     memory_init();
     agent_init();
+    {
+        cJSON *every = cJSON_Parse(res_string(IDR_TOOLS_JSON));
+        char *all = cJSON_PrintUnformatted(every);
+        g_all_tools_len = all ? strlen(all) : 0;
+        free(all);
+        cJSON_Delete(every);
+    }
     test_respuestas();
     test_flujo();
     test_menos_preguntas();
@@ -521,6 +572,7 @@ int wmain(void)
     test_comandos_directos();
     test_sin_listo_falso();
     test_nombre();
+    test_menos_cupo();
     printf("%d/%d pruebas %s\n", g_total - g_fail, g_total, g_fail ? "— HAY FALLAS" : "ok");
     return g_fail ? 1 : 0;
 }

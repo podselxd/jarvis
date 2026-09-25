@@ -329,6 +329,11 @@ static cJSON *chat_once(ChatModel *model, const cJSON *messages, const cJSON *to
         cJSON *choices = j ? cJSON_GetObjectItem(j, "choices") : NULL;
         cJSON *first = cJSON_IsArray(choices) ? cJSON_GetArrayItem(choices, 0) : NULL;
         cJSON *msg = first ? cJSON_GetObjectItem(first, "message") : NULL;
+        /* Cuánto gastó de verdad: así se ve en el log cuánto dura el cupo diario. */
+        cJSON *usage = j ? cJSON_GetObjectItem(j, "usage") : NULL;
+        cJSON *pt = cJSON_GetObjectItem(usage, "prompt_tokens"), *ct = cJSON_GetObjectItem(usage, "completion_tokens");
+        if (cJSON_IsNumber(pt) && cJSON_IsNumber(ct))
+            log_msg("Groq (%s): %d tokens de entrada, %d de respuesta.", model->id, pt->valueint, ct->valueint);
         if (cJSON_IsObject(msg)) result = clean_message(msg);
         else set_error(err, GROQ_BAD_RESPONSE, &r, "Groq no mandó respuesta");
         cJSON_Delete(j);

@@ -3,13 +3,13 @@
     "type": "function",
     "function": {
       "name": "open_app",
-      "description": "Abre una app (también las del menú Inicio: Discord, Steam, Spotify, Opera, etc.; si ya está abierta, la trae al frente), el Explorador ('explorador'), tu navegador predeterminado ('navegador'), una carpeta, un archivo o una página web. No abre programas ni scripts sueltos (.exe, .bat, accesos directos): para una app, pasa su nombre.",
+      "description": "Abre una app por nombre (si ya está abierta, la trae al frente), 'explorador', 'navegador' (el predeterminado), una carpeta, un archivo o una página web. No abre .exe, .bat ni accesos directos sueltos.",
       "parameters": {
         "type": "object",
         "properties": {
           "name": {
             "type": "string",
-            "description": "Ej: 'chrome', 'discord', 'descargas', 'youtube.com'"
+            "description": "Ej: 'discord', 'descargas', 'youtube.com'"
           }
         },
         "required": [
@@ -22,7 +22,7 @@
     "type": "function",
     "function": {
       "name": "web_search",
-      "description": "Busca en internet información actual: noticias, clima, precios, datos recientes.",
+      "description": "Busca en internet información actual (noticias, clima, precios).",
       "parameters": {
         "type": "object",
         "properties": {
@@ -40,7 +40,7 @@
     "type": "function",
     "function": {
       "name": "control_media",
-      "description": "Volumen del sistema y reproducción multimedia. set_volume pone el volumen exacto en 'nivel' (0-100).",
+      "description": "Volumen y reproducción. set_volume usa 'nivel' (0-100).",
       "parameters": {
         "type": "object",
         "properties": {
@@ -70,7 +70,7 @@
     "type": "function",
     "function": {
       "name": "control_desktop",
-      "description": "Ventanas y escritorio. minimize, maximize y close_window actúan sobre la ventana de enfrente (la del usuario, no la tuya); minimize_all y show_desktop, sobre todas. También cambiar de ventana, bloquear la PC, tecla F (pantalla completa del video) y close_tab (Ctrl+W).",
+      "description": "minimize, maximize y close_window: la ventana de enfrente del usuario. También minimize_all, show_desktop, switch_window, lock, fullscreen (tecla F) y close_tab (Ctrl+W).",
       "parameters": {
         "type": "object",
         "properties": {
@@ -99,7 +99,7 @@
     "type": "function",
     "function": {
       "name": "create_macro",
-      "description": "Crea un comando personalizado con varios pasos para repetirlo después con run_macro.",
+      "description": "Crea un comando propio con varios pasos, para repetirlo con run_macro.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -144,7 +144,7 @@
     "type": "function",
     "function": {
       "name": "run_macro",
-      "description": "Ejecuta un comando creado con create_macro.",
+      "description": "Ejecuta un comando propio.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -162,7 +162,7 @@
     "type": "function",
     "function": {
       "name": "guardar_dato",
-      "description": "Guarda o corrige un dato del usuario bajo una clave corta (ej. 'cumpleaños'); sobrescribe si ya existía.",
+      "description": "Guarda o corrige un dato del usuario con una clave corta (ej. 'cumpleaños').",
       "parameters": {
         "type": "object",
         "properties": {
@@ -184,7 +184,7 @@
     "type": "function",
     "function": {
       "name": "recordar",
-      "description": "Busca en los datos guardados y en conversaciones pasadas (más allá de las últimas 12 horas).",
+      "description": "Busca en datos guardados y conversaciones de hace más de 12 horas.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -202,7 +202,7 @@
     "type": "function",
     "function": {
       "name": "identificarse",
-      "description": "Cambia a la persona que habla por nombre o apodo (crea su perfil si es nuevo). Si el perfil tiene contraseña, pásala en password.",
+      "description": "Cambia a quien habla por nombre o apodo (crea su perfil si es nuevo; password si tiene).",
       "parameters": {
         "type": "object",
         "properties": {
@@ -241,7 +241,7 @@
     "type": "function",
     "function": {
       "name": "exportar_a_obsidian",
-      "description": "Exporta los datos de quien habla a notas enlazadas de Obsidian. 'nota': contexto extra opcional.",
+      "description": "Exporta los datos de quien habla a notas de Obsidian ('nota': contexto opcional).",
       "parameters": {
         "type": "object",
         "properties": {
@@ -256,7 +256,7 @@
     "type": "function",
     "function": {
       "name": "crear_recordatorio",
-      "description": "Recordatorio para quien habla. Si dio un momento, calcula cuando_iso (ISO 8601 hora local, ej. '2026-09-23T15:00:00') a partir de la fecha actual: Sokari avisa solo a esa hora. Si no, deja cuando_iso vacío.",
+      "description": "Recordatorio. Si dio un momento, calcula cuando_iso (hora local, ej. '2026-09-23T15:00:00') desde la fecha actual; si no, déjalo vacío.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -265,7 +265,7 @@
           },
           "cuando": {
             "type": "string",
-            "description": "Tal como lo dijo, ej. 'mañana'"
+            "description": "Como lo dijo, ej. 'mañana'"
           },
           "cuando_iso": {
             "type": "string"
@@ -281,7 +281,7 @@
     "type": "function",
     "function": {
       "name": "focus_window",
-      "description": "Trae al frente una ventana o pestaña abierta cuyo título contenga el texto.",
+      "description": "Trae al frente la ventana o pestaña cuyo título contenga el texto.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -299,7 +299,7 @@
     "type": "function",
     "function": {
       "name": "list_windows",
-      "description": "Títulos de las ventanas y pestañas abiertas.",
+      "description": "Títulos de las ventanas abiertas.",
       "parameters": {
         "type": "object",
         "properties": {}
@@ -310,7 +310,7 @@
     "type": "function",
     "function": {
       "name": "type_text",
-      "description": "Escribe texto donde está el foco (o en 'ventana', enfocándola antes). enviar=true presiona Enter al final. Nunca escribe en terminales (cmd, PowerShell).",
+      "description": "Escribe texto donde está el foco (o en 'ventana', enfocándola antes). enviar=true da Enter. No escribe en terminales.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -334,7 +334,7 @@
     "type": "function",
     "function": {
       "name": "list_files",
-      "description": "Lista una carpeta: 'descargas', 'escritorio', 'documentos' o una ruta.",
+      "description": "Lista una carpeta ('descargas', 'escritorio', 'documentos' o una ruta).",
       "parameters": {
         "type": "object",
         "properties": {
@@ -391,7 +391,7 @@
     "type": "function",
     "function": {
       "name": "leer_portapapeles",
-      "description": "Devuelve el texto copiado en el portapapeles.",
+      "description": "Texto del portapapeles.",
       "parameters": {
         "type": "object",
         "properties": {}
@@ -420,7 +420,7 @@
     "type": "function",
     "function": {
       "name": "info_sistema",
-      "description": "Estado de la PC: CPU, RAM, disco y batería.",
+      "description": "CPU, RAM, disco y batería.",
       "parameters": {
         "type": "object",
         "properties": {}
@@ -431,7 +431,7 @@
     "type": "function",
     "function": {
       "name": "leer_pagina",
-      "description": "Lee el texto completo de una página web.",
+      "description": "Lee el texto de una página web.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -449,7 +449,7 @@
     "type": "function",
     "function": {
       "name": "mover_archivo",
-      "description": "Mueve un archivo a otra carpeta (nunca sobrescribe).",
+      "description": "Mueve un archivo a otra carpeta (no sobrescribe).",
       "parameters": {
         "type": "object",
         "properties": {
@@ -471,7 +471,7 @@
     "type": "function",
     "function": {
       "name": "borrar_archivo",
-      "description": "Manda un archivo o carpeta a la Papelera de Reciclaje (siempre recuperable).",
+      "description": "Manda un archivo o carpeta a la Papelera.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -489,7 +489,7 @@
     "type": "function",
     "function": {
       "name": "calcular",
-      "description": "Calcula matemática exacta (úsalo siempre en vez de estimar): + - * / // % ** y sqrt, sin, cos, tan, log, log10, exp, abs, round, min, max, sum, len, pi, e.",
+      "description": "Matemática exacta, úsala en vez de estimar: + - * / // % ** sqrt sin cos tan log log10 exp abs round min max sum len pi e.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -507,7 +507,7 @@
     "type": "function",
     "function": {
       "name": "registrar_dispositivo",
-      "description": "Registra otro dispositivo tuyo con Sokari bajo un nombre. host: su dirección de Tailscale (IP 100.x.y.z o nombre que termina en .ts.net); no acepta otras.",
+      "description": "Registra un dispositivo tuyo por nombre. host: IP de Tailscale (100.x.y.z) o nombre .ts.net.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -529,7 +529,7 @@
     "type": "function",
     "function": {
       "name": "gestionar_dispositivo",
-      "description": "Le manda un comando en lenguaje natural a un dispositivo registrado y devuelve su respuesta.",
+      "description": "Manda una orden en lenguaje natural a un dispositivo registrado y devuelve su respuesta.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -551,7 +551,7 @@
     "type": "function",
     "function": {
       "name": "terminar_conversacion",
-      "description": "Termina la conversación cuando la persona se despide o dice que ya no necesita nada (ej. 'ya vete', 'ya nada, gracias'). Luego Sokari espera al próximo 'Hey Sokari'.",
+      "description": "Termina la conversación cuando se despiden o ya no necesitan nada.",
       "parameters": {
         "type": "object",
         "properties": {}
@@ -562,7 +562,7 @@
     "type": "function",
     "function": {
       "name": "cambiar_permisos",
-      "description": "Prende o apaga el acceso completo. Prendido, haces todo sin pedir permiso (solo se pregunta antes de borrar). Úsalo cuando quien habla diga algo como 'tienes permiso para todo', 'ya no me preguntes' (true) o 'pregúntame antes', 'pídeme permiso' (false).",
+      "description": "Prende (true) o apaga (false) el acceso completo: 'tienes permiso para todo' / 'pregúntame antes'.",
       "parameters": {
         "type": "object",
         "properties": {

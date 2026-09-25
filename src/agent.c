@@ -1,4 +1,5 @@
 #include <ctype.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -15,7 +16,7 @@
 #include "tools.h"
 #include "util.h"
 
-#define MAX_HISTORY_MESSAGES 24
+#define MAX_HISTORY_MESSAGES 12
 #define MEMORY_WINDOW_SECONDS (12 * 3600)
 #define MAX_TOOL_ROUNDS 6
 #define TOOL_RESULT_KEEP 280
@@ -447,6 +448,108 @@ static bool claims_done(const char *reply)
     return hit;
 }
 
+/* Las herramientas son lo que más pesa en cada pedido. Las de todos los días
+   van siempre; las demás, solo si la frase las menciona o si ya se usaron en
+   esta conversación. Si el modelo contesta "no puedo" sin alguna de ellas, se
+   repite con todas (ver process_turn). */
+static const char *const CORE_TOOLS[] = {
+    "open_app",   "web_search", "control_media", "control_desktop",       "focus_window",     "list_windows",
+    "type_text",  "leer_pagina", "guardar_dato", "recordar",              "crear_recordatorio", "terminar_conversacion",
+    "cambiar_permisos", "run_macro",
+};
+
+typedef struct {
+    const char *tools; /* separadas por espacios */
+    const char *words; /* palabras (normalizadas) que las traen */
+} ToolGroup;
+
+static const ToolGroup TOOL_GROUPS[] = {
+    {"list_files read_file buscar_archivo mover_archivo borrar_archivo",
+     " archivo archivos carpeta carpetas descargas documento documentos escritorio pdf foto fotos imagen imagenes "
+     "mueve muevelo muevela mover borra borralo borrala borrar elimina eliminalo papelera lee leeme txt docx "},
+    {"leer_portapapeles copiar_portapapeles", " portapapeles copia copiado copiaste copie pega pegar pegalo "},
+    {"identificarse proteger_perfil", " soy llamo llego perfil contrasena quien habla "},
+    {"exportar_a_obsidian", " obsidian notas "},
+    {"create_macro", " comando comandos macro rutina cuando diga crea "},
+    {"info_sistema", " cpu ram memoria bateria disco sistema computadora compu estas andas "},
+    {"calcular", " cuanto calcula calculadora mas menos por entre raiz porciento dividido multiplica suma resta "},
+    {"registrar_dispositivo gestionar_dispositivo",
+     " laptop pc compu computadora dispositivo dispositivos tele celular dile registra otra malla tailscale "},
+};
+
+static bool history_used_tool(const Conversation *c, const char *name)
+{
+    char *h = cJSON_PrintUnformatted(c->history);
+    char pat[64];
+    snprintf(pat, sizeof pat, "\"name\":\"%s\"", name);
+    bool used = h && strstr(h, pat);
+    free(h);
+    return used;
+}
+
+static cJSON *select_tools(const Conversation *c, const char *text, bool all, bool *filtered)
+{
+    *filtered = false;
+    if (all || !g_tools) return cJSON_Duplicate(g_tools, 1);
+    char *norm = intents_normalize(text);
+    /* También los dispositivos registrados por su nombre ("dile a cloe que…"). */
+    MeshDevice *devs;
+    int nd = mesh_devices(&devs);
+    bool device = false;
+    for (int i = 0; i < nd && !device; i++) {
+        char pat[80];
+        snprintf(pat, sizeof pat, " %s ", devs[i].name);
+        device = strstr(norm, pat) != NULL;
+    }
+    mesh_devices_free(devs, nd);
+    cJSON *out = cJSON_CreateArray();
+    const cJSON *t;
+    cJSON_ArrayForEach(t, g_tools)
+    {
+        const char *name = cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetObjectItem(t, "function"), "name"));
+        bool keep = !name;
+        for (size_t i = 0; i < sizeof CORE_TOOLS / sizeof *CORE_TOOLS && !keep; i++) keep = !strcmp(name, CORE_TOOLS[i]);
+        for (size_t g = 0; g < sizeof TOOL_GROUPS / sizeof *TOOL_GROUPS && !keep; g++) {
+            char pat[64];
+            snprintf(pat, sizeof pat, " %s ", name);
+            char tools[160];
+            snprintf(tools, sizeof tools, " %s ", TOOL_GROUPS[g].tools);
+            if (!strstr(tools, pat)) continue;
+            bool mentioned = device && strstr(tools, " gestionar_dispositivo ");
+            for (const char *w = TOOL_GROUPS[g].words; *w && !mentioned;) {
+                const char *e = strchr(w + 1, ' ');
+                if (!e) break;
+                char word[40];
+                size_t len = (size_t)(e - w) + 1;
+                if (len < sizeof word) {
+                    memcpy(word, w, len);
+                    word[len] = 0;
+                    mentioned = strstr(norm, word) != NULL;
+                }
+                w = e;
+            }
+            keep = mentioned || history_used_tool(c, name);
+        }
+        if (keep) cJSON_AddItemToArray(out, cJSON_Duplicate(t, 1));
+        else *filtered = true;
+    }
+    free(norm);
+    return out;
+}
+
+/* ¿Contestó que no puede? (A lo mejor le faltaba una herramienta.) */
+static bool says_cannot(const char *reply)
+{
+    static const char *const NO[] = {" no puedo ", " no tengo acceso ", " no tengo la capacidad ", " no me es posible ",
+                                     " no tengo forma ", " no cuento con ", " no tengo una herramienta ",
+                                     " no tengo herramienta ", " no tengo la opcion ", " no tengo manera "};
+    char *n = intents_normalize(reply);
+    bool hit = false;
+    for (size_t i = 0; i < sizeof NO / sizeof *NO && !hit; i++) hit = strstr(n, NO[i]) != NULL;
+    free(n);
+    return hit;
+}
+
 /* La fecha se inyecta fresca en cada pedido (no queda en el historial) para
    que los recordatorios relativos ("en 10 minutos") se calculen bien. */
 static cJSON *context_message(Conversation *c)
@@ -470,17 +573,14 @@ static cJSON *context_message(Conversation *c)
     mesh_devices_free(devs, nd);
     /* Va en cada pedido: si cambia el modo, cuenta desde el siguiente. */
     if (config_full_access())
-        sb_append(&sb, "\nTienes acceso completo: quien habla te dio permiso para todo. Nunca pidas permiso ni "
-                       "confirmación ('¿lo hago?', '¿quieres que...?'): hazlo directo y di en pocas palabras qué "
-                       "hiciste. Guarda sin preguntar los datos personales que te cuente, exporta a Obsidian sin "
-                       "preguntar y manda mensajes con type_text (enviar=true) sin preguntar. Solo borrar necesita un "
-                       "sí, y ese lo pide el sistema.");
+        sb_append(&sb, "\nTienes acceso completo: nunca pidas permiso ni confirmación ('¿lo hago?'); hazlo y di qué "
+                       "hiciste. Guarda datos, exporta a Obsidian y manda mensajes sin preguntar. Solo borrar necesita "
+                       "un sí, y lo pide el sistema.");
     else
-        sb_append(&sb, "\nPide permiso solo en estos casos: si te cuenta o corrige un dato personal, pregunta si "
-                       "quiere que lo recuerdes (si ya te lo pidió, guárdalo directo); antes de exportar_a_obsidian, "
-                       "pregunta y espera un sí; si type_text le llega a otra persona (mensaje, email, publicación), "
-                       "deja enviar=false y pregunta antes, salvo que ya te lo haya pedido. Fuera de esos casos no "
-                       "pidas permiso: hazlo; si una acción necesita confirmación, el sistema la pide solo.");
+        sb_append(&sb, "\nPide permiso solo aquí: antes de guardar un dato personal que te cuente (salvo que te "
+                       "pida guardarlo), antes de exportar_a_obsidian y antes de mandar con type_text algo que le "
+                       "llegue a otra persona (deja enviar=false y pregunta). Lo demás hazlo; si algo necesita "
+                       "confirmación, el sistema la pide.");
     if (c->announce_pending) {
         char *pend = reminders_take_pending_for(current_speaker());
         if (*pend)
@@ -603,6 +703,7 @@ static TurnResult process_turn(Conversation *c, const char *text)
     GroqError err = {0};
     bool failed = false, ending = false, auto_yes = false;
     bool acted = false, nudged = false, nudge_now = false; /* ¿usó alguna herramienta? ¿ya se le reclamó? */
+    bool all_tools = false, filtered = false;              /* ¿se mandaron todas las herramientas? */
     for (int round = 0; round < MAX_TOOL_ROUNDS && !reply && !failed; round++) {
         app_status(round ? "Trabajando…" : "Pensando…");
         cJSON *msgs = build_request(c);
@@ -616,7 +717,9 @@ static TurnResult process_turn(Conversation *c, const char *text)
                                     "corresponde. Si ninguna sirve, di con sinceridad que no puedes.");
             cJSON_AddItemToArray(msgs, note);
         }
-        cJSON *msg = groq_chat(msgs, g_tools, &err);
+        cJSON *tools = select_tools(c, text, all_tools, &filtered);
+        cJSON *msg = groq_chat(msgs, tools, &err);
+        cJSON_Delete(tools);
         cJSON_Delete(msgs);
         if (!msg) {
             failed = true;
@@ -627,6 +730,14 @@ static TurnResult process_turn(Conversation *c, const char *text)
             cJSON *content = cJSON_GetObjectItem(msg, "content");
             reply = str_trim(cJSON_IsString(content) ? content->valuestring : "");
             cJSON_Delete(msg);
+            /* "No puedo" cuando faltaba alguna herramienta: otra vez, con todas. */
+            if (filtered && !all_tools && round + 1 < MAX_TOOL_ROUNDS && says_cannot(reply)) {
+                log_msg("El modelo dijo «%s» sin tener todas las herramientas; le mando todas.", reply);
+                all_tools = true;
+                free(reply);
+                reply = NULL;
+                continue;
+            }
             /* "Te pongo play" sin haber usado ninguna herramienta: no se hizo
                nada. Se le reclama una vez; si insiste, no se dice. */
             if (!acted && asks_for_action(text) && claims_done(reply)) {
