@@ -42,8 +42,9 @@
 #define C_NAV_SEL RGB(0x28, 0x26, 0x3a)
 #define C_LINK RGB(0x9d, 0x92, 0xff)
 
-enum { SEC_HOME, SEC_ACCOUNT, SEC_DISPLAY, SEC_AUDIO, SEC_GENERAL, SEC_COUNT };
-static const wchar_t *SECTION_NAMES[SEC_COUNT] = {L"Inicio", L"Cuenta", L"Pantalla", L"Voz y audio", L"General"};
+enum { SEC_HOME, SEC_ACCOUNT, SEC_DISPLAY, SEC_AUDIO, SEC_GENERAL, SEC_DEVICES, SEC_COUNT };
+static const wchar_t *SECTION_NAMES[SEC_COUNT] = {L"Inicio", L"Cuenta", L"Pantalla", L"Voz y audio", L"General",
+                                                  L"Dispositivos"};
 
 typedef enum {
     W_LABEL,
@@ -65,8 +66,11 @@ enum {
 enum {
     A_NONE, A_GROQ_LINK, A_RESET_PW, A_SHOW_API, A_SHOW_STOP, A_TAILSCALE, A_COPY_SECRET, A_OBSIDIAN, A_PICK_SOUND,
     A_CLEAR_SOUND, A_OPEN_FOLDER, A_CHECK_UPDATE, A_SAVE, A_CANCEL, A_START, A_GO_SETTINGS, A_MUTE, A_TEST_AUDIO,
-    A_QUIT, A_MODE_CHANGED, A_OUTPUT_CHANGED, A_TEST_VOICE,
+    A_QUIT, A_MODE_CHANGED, A_OUTPUT_CHANGED, A_TEST_VOICE, A_FIREWALL, A_DETECT,
+    /* Por dispositivo de la lista: + su número. */
+    A_DEV_PROBE = 200, A_DEV_REMOVE = 300,
 };
+#define MAX_DEVICE_ROWS 5
 
 typedef struct {
     WType type;
@@ -116,6 +120,9 @@ static struct {
     int volume, sensitivity;
     wchar_t *status_line;
     bool api_visible, stop_visible;
+    MeshDevice *devs; /* tus dispositivos, releídos cada vez que se arma la sección */
+    int ndevs;
+    wchar_t dev_text[MAX_DEVICE_ROWS][200];
     uint32_t *px;
     HDC mem;
     HBITMAP bmp, old_bmp;
@@ -387,7 +394,7 @@ static const char *output_name_at(int index)
     return index > 0 && index <= S.nouts ? S.outputs[index - 1] : "";
 }
 
-static wchar_t g_tailscale_text[160];
+static wchar_t g_tailscale_text[320];
 static wchar_t g_sound_text[160];
 static wchar_t g_home_title[96];
 static wchar_t g_home_text[200];
@@ -513,16 +520,6 @@ static void layout(void)
     case SEC_GENERAL:
         y = layout_toggle(x, y, w, &S.autostart, L"Iniciar Sokari con Windows");
         y = layout_help(x, y - dp(6), w, L"Atajo: Ctrl+Alt+J para hablarle sin decir \"Hey Sokari\".") + dp(6);
-        y = layout_edit(x, y, w, L"Tus otros dispositivos (Tailscale) — secreto de malla", F_MESH, g_tailscale_text);
-        {
-            int bx = x;
-            if (!tailscale_installed()) {
-                layout_button(bx, y - dp(6), dp(170), L"Instalar Tailscale", A_TAILSCALE, false);
-                bx += dp(182);
-            }
-            layout_button(bx, y - dp(6), dp(170), L"Copiar secreto", A_COPY_SECRET, false);
-            y += dp(44);
-        }
         y = layout_label(x, y, w, L"Sonido de activación");
         y = layout_help(x, y - dp(4), w, g_sound_text);
         layout_button(x, y, dp(170), L"Elegir archivo…", A_PICK_SOUND, false);
@@ -546,6 +543,43 @@ static void layout(void)
                         L"Apagado nunca pregunta: un texto con instrucciones escondidas podría hacerlo actuar sin "
                         L"avisarte.");
         break;
+    case SEC_DEVICES: {
+        y = layout_help(x, y - dp(6), w, g_tailscale_text) + dp(2);
+        int bx = x;
+        if (!tailscale_installed()) {
+            layout_button(bx, y, dp(170), L"Instalar Tailscale", A_TAILSCALE, false);
+            bx += dp(182);
+        }
+        layout_button(bx, y, dp(220), L"Permitir en el firewall", A_FIREWALL, false);
+        y += dp(52);
+        int ey = y + dp(22);
+        y = layout_edit(x, y, w - dp(182), L"Secreto de malla (el mismo en todas tus PCs)", F_MESH, NULL);
+        layout_button(x + w - dp(170), ey + dp(2), dp(170), L"Copiar secreto", A_COPY_SECRET, false);
+        int ly = y;
+        y = layout_label(x, y, w - dp(240), L"Tus PCs");
+        layout_button(x + w - dp(230), ly - dp(8), dp(230), L"Detectar mis PCs", A_DETECT, false);
+        y += dp(10);
+        mesh_devices_free(S.devs, S.ndevs);
+        S.ndevs = mesh_devices(&S.devs);
+        if (!S.ndevs)
+            y = layout_help(x, y, w,
+                            L"Todavía no tienes ninguna. Con Tailscale conectado en las dos PCs dale a Detectar, o "
+                            L"dile a Sokari: «registra mi laptop en 100.x.y.z».");
+        for (int i = 0; i < S.ndevs && i < MAX_DEVICE_ROWS; i++) {
+            wchar_t *nm = utf8_to_wide(S.devs[i].name), *hs = utf8_to_wide(S.devs[i].host);
+            swprintf(S.dev_text[i], 200, L"%ls  ·  %ls", nm, hs);
+            free(nm);
+            free(hs);
+            Widget *row = add(W_LABEL, (RECT){x, y, x + w - dp(236), y + dp(36)});
+            row->text = S.dev_text[i];
+            layout_button(x + w - dp(224), y, dp(106), L"Probar", A_DEV_PROBE + i, false);
+            layout_button(x + w - dp(106), y, dp(106), L"Quitar", A_DEV_REMOVE + i, false);
+            y += dp(44);
+        }
+        if (S.ndevs)
+            y = layout_help(x, y + dp(2), w, L"Para mandarle algo, dile a Sokari: «dile a mi laptop que abra Spotify».");
+        break;
+    }
     }
 
     if (S.section != SEC_HOME) {
@@ -748,13 +782,22 @@ static char *edit_text(int field)
 static void refresh_tailscale_text(void)
 {
     char *ip = tailscale_installed() ? mesh_tailscale_ip() : NULL;
+    char *listening = mesh_listening_ip();
     if (!tailscale_installed())
-        swprintf(g_tailscale_text, 160, L"Conecta tus PCs para mandarles comandos (\"dile a mi escritorio que…\").");
-    else if (ip)
-        swprintf(g_tailscale_text, 160, L"Tailscale conectado ✓ (IP %hs). Usa el mismo secreto en todas tus PCs.", ip);
+        swprintf(g_tailscale_text, 320,
+                 L"Tailscale conecta tus PCs para mandarles órdenes («dile a mi laptop que…»). Instálalo en cada PC y "
+                 L"entra con la misma cuenta.");
+    else if (!ip)
+        swprintf(g_tailscale_text, 320, L"Tailscale está instalado, pero no está conectado. Ábrelo y entra con tu cuenta.");
+    else if (listening)
+        swprintf(g_tailscale_text, 320, L"Tailscale conectado ✓ (IP %hs). Esta PC recibe órdenes de tus otras PCs ✓", ip);
     else
-        swprintf(g_tailscale_text, 160, L"Tailscale instalado ✓, pero no está conectado ahora.");
+        swprintf(g_tailscale_text, 320,
+                 L"Tailscale conectado ✓ (IP %hs). Esta PC todavía no recibe órdenes: se activa sola unos segundos "
+                 L"después de iniciar Sokari.",
+                 ip);
     free(ip);
+    free(listening);
 }
 
 static void refresh_sound_text(void)
@@ -906,8 +949,35 @@ static void start_or_show(void)
 
 typedef struct {
     int action;
+    char *name, *host; /* A_DEV_PROBE: qué dispositivo */
     wchar_t *result;
 } AsyncJob;
+
+/* Busca tus otras PCs con Windows en Tailscale y registra las que falten. */
+static wchar_t *detect_devices(void)
+{
+    MeshDevice *peers, *known;
+    int np = tailscale_windows_peers(&peers), nk = mesh_devices(&known);
+    StrBuf added;
+    sb_init(&added);
+    for (int i = 0; i < np; i++) {
+        bool have = false;
+        for (int k = 0; k < nk && !have; k++)
+            have = !strcmp(known[k].host, peers[i].host) || !strcmp(known[k].name, peers[i].name);
+        if (!have && mesh_device_set(peers[i].name, peers[i].host))
+            sb_appendf(&added, "%s%s", added.len ? ", " : "", peers[i].name);
+    }
+    char *msg = np == 0 ? xstrdup("No encontré otras PCs con Windows en tu Tailscale. Revisa que estén prendidas y "
+                                  "conectadas con la misma cuenta.")
+                : added.len ? str_printf("Agregué: %s. Dale a Probar para ver si contesta.", added.data)
+                            : str_printf("Ya tenías registradas tus PCs de Tailscale (%d).", np);
+    wchar_t *w = utf8_to_wide(msg);
+    free(msg);
+    sb_free(&added);
+    mesh_devices_free(peers, np);
+    mesh_devices_free(known, nk);
+    return w;
+}
 
 static DWORD WINAPI async_worker(LPVOID arg)
 {
@@ -916,6 +986,16 @@ static DWORD WINAPI async_worker(LPVOID arg)
     if (job->action == A_CHECK_UPDATE) {
         char *msg = update_check_now();
         job->result = utf8_to_wide(msg ? msg : "");
+        free(msg);
+    } else if (job->action == A_FIREWALL) {
+        job->result = xwcsdup(mesh_allow_firewall()
+                                  ? L"Listo: el firewall ya deja pasar las órdenes de tus otras PCs (solo por Tailscale)."
+                                  : L"El firewall no cambió (¿le dijiste que no al permiso de administrador?).");
+    } else if (job->action == A_DETECT) {
+        job->result = detect_devices();
+    } else if (job->action == A_DEV_PROBE) {
+        char *msg = str_printf("%s: %s.", job->name, mesh_probe_text(mesh_probe(job->host)));
+        job->result = utf8_to_wide(msg);
         free(msg);
     } else {
         const wchar_t *id = job->action == A_TAILSCALE ? L"Tailscale.Tailscale" : L"Obsidian.Obsidian";
@@ -937,6 +1017,9 @@ static DWORD WINAPI async_worker(LPVOID arg)
         job->result = xwcsdup(buf);
     }
     CoUninitialize();
+    free(job->name);
+    free(job->host);
+    job->name = job->host = NULL;
     HWND h = S.hwnd;
     if (h && IsWindow(h)) PostMessageW(h, WM_APP_ASYNC_DONE, 0, (LPARAM)job);
     else {
@@ -946,13 +1029,22 @@ static DWORD WINAPI async_worker(LPVOID arg)
     return 0;
 }
 
-static void run_async(int action, const wchar_t *busy)
+static void run_async_on(int action, const MeshDevice *dev, const wchar_t *busy)
 {
     AsyncJob *job = xcalloc(1, sizeof *job);
     job->action = action;
+    if (dev) {
+        job->name = xstrdup(dev->name);
+        job->host = xstrdup(dev->host);
+    }
     set_status(busy);
     HANDLE t = CreateThread(NULL, 0, async_worker, job, 0, NULL);
     if (t) CloseHandle(t);
+}
+
+static void run_async(int action, const wchar_t *busy)
+{
+    run_async_on(action, NULL, busy);
 }
 
 static void pick_sound(void)
@@ -1019,7 +1111,32 @@ static void copy_secret(void)
 
 static void do_action(int action)
 {
+    if (action >= A_DEV_PROBE && action < A_DEV_PROBE + MAX_DEVICE_ROWS && action - A_DEV_PROBE < S.ndevs) {
+        const MeshDevice *d = &S.devs[action - A_DEV_PROBE];
+        wchar_t *nm = utf8_to_wide(d->name);
+        wchar_t busy[200];
+        swprintf(busy, 200, L"Probando %ls…", nm);
+        free(nm);
+        run_async_on(A_DEV_PROBE, d, busy);
+        return;
+    }
+    if (action >= A_DEV_REMOVE && action < A_DEV_REMOVE + MAX_DEVICE_ROWS && action - A_DEV_REMOVE < S.ndevs) {
+        char *msg = str_printf("Quité %s de tus PCs.", S.devs[action - A_DEV_REMOVE].name);
+        mesh_device_remove(S.devs[action - A_DEV_REMOVE].name);
+        wchar_t *w = utf8_to_wide(msg);
+        set_status(w);
+        free(w);
+        free(msg);
+        layout();
+        return;
+    }
     switch (action) {
+    case A_FIREWALL:
+        run_async(A_FIREWALL, L"Windows te va a pedir permiso de administrador para el firewall…");
+        break;
+    case A_DETECT:
+        run_async(A_DETECT, L"Buscando tus PCs en Tailscale…");
+        break;
     case A_GROQ_LINK:
         ShellExecuteW(NULL, L"open", L"https://console.groq.com/keys", NULL, NULL, SW_SHOWNORMAL);
         break;
@@ -1368,6 +1485,9 @@ static LRESULT CALLBACK proc(HWND h, UINT m, WPARAM w, LPARAM l)
         DeleteObject(S.surface_brush);
         free(S.status_line);
         S.status_line = NULL;
+        mesh_devices_free(S.devs, S.ndevs);
+        S.devs = NULL;
+        S.ndevs = 0;
         S.hwnd = NULL;
         if (quit) PostMessageW(ui_message_window(), WM_APP_QUIT, 0, 0);
         return 0;
