@@ -543,5 +543,16 @@
         ]
       }
     }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "terminar_conversacion",
+      "description": "Termina la conversación cuando la persona se despide o dice que ya no necesita nada (ej. 'ya vete', 'ya nada, gracias'). Luego Sokari espera al próximo 'Hey Sokari'.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    }
   }
 ]
