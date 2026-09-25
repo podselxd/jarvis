@@ -26,9 +26,9 @@ Se actualiza solo. Revisa GitHub al arrancar y cada 6 horas, y solo instala la v
 - Después de cada respuesta te sigue escuchando unos segundos, sin que repitas "Hey Sokari".
 - Si dices **"Hey Sokari"** (o Ctrl+Alt+J) mientras está hablando, se calla y te escucha. Otros ruidos ya no lo interrumpen.
 - Para cerrar la conversación dile "adiós", "ya vete" o "eso es todo". También termina cuando Sokari se despide o si dejas de hablarle. Si configuraste una palabra de apagado y la dices, Sokari se cierra al instante.
-- Con **Aparecer solo cuando le hablas** (Configuración → Pantalla, prendida de fábrica), la esfera aparece en tu modo de pantalla al hablarle y se esconde al terminar.
+- Con **Aparecer solo cuando le hablas** (Configuración → Pantalla, prendida de fábrica), la esfera aparece en tu modo de pantalla al hablarle y se esconde al terminar. Al abrir Sokari se ve y se queda hasta tu primera conversación.
 
-Menú del ícono de la bandeja (clic derecho): **Hablar con Sokari**, **Ocultar/Mostrar la esfera**, **Modo de pantalla**, **Silenciar micrófono**, **Ventana de inicio…**, **⚙ Configuración…**, **Abrir carpeta de Sokari** y **Salir**.
+Menú del ícono de la bandeja (clic derecho): **Hablar con Sokari**, **Ocultar/Mostrar la esfera**, **Modo de pantalla**, **Silenciar micrófono**, **Acceso completo (menos borrar)**, **Ventana de inicio…**, **⚙ Configuración…**, **Abrir carpeta de Sokari** y **Salir**.
 
 ### Ventana de Inicio
 
@@ -48,12 +48,12 @@ Sale al abrir `Sokari.exe` a mano, o desde **Ventana de inicio…** en la bandej
 | Cuenta | API key de Groq, tu nombre, contraseña de tu perfil y palabra de apagado |
 | Pantalla | Modo de pantalla, resolución de la esfera, estilo (halo de puntos o líneas), subtítulos y "Aparecer solo cuando le hablas" |
 | Voz y audio | Volumen, voz de Windows (Raúl de México por defecto, con botón **Probar**), micrófono, salida de audio y sensibilidad de "Hey Sokari" |
-| General | Iniciar con Windows, sonido de activación, Obsidian y pedir un "sí" antes de acciones delicadas |
+| General | Iniciar con Windows, sonido de activación, Obsidian y **Acceso completo (menos borrar)** |
 | Dispositivos | Tailscale, tus otras PCs (Detectar, Probar, Quitar), permiso en el firewall, Revisar la malla y el secreto para cuentas distintas. Ver [Tus otras PCs](#tus-otras-pcs) |
 
 Modos de pantalla:
 
-- **Pantalla completa:** siempre encima de todo. Se aparta sola cuando Sokari abre algo.
+- **Pantalla completa** (la de fábrica): siempre encima de todo. Se aparta sola cuando Sokari abre algo.
 - **Pantalla completa sin bordes:** ocupa la pantalla, pero tus ventanas pueden ir encima. Pasa al frente cuando le hablas.
 - **Esfera flotante:** una esfera transparente que puedes arrastrar a donde quieras.
 - **Ventana:** una ventana normal que puedes mover, agrandar o minimizar. **F11** (o doble clic) la pone en pantalla completa y **F11** o **Esc** la regresan. La X la oculta, pero Sokari sigue escuchando.
@@ -103,10 +103,12 @@ Sokari empieza a recibir órdenes solo en cuanto Tailscale se conecta, sin reini
 - La voz de Sokari se genera en tu PC con las voces de Windows. Las búsquedas van a DuckDuckGo, o a Bing si DuckDuckGo falla.
 - Lo que le pidas leer (un archivo, el portapapeles o el título de una ventana) viaja a Groq como parte de la conversación. Tenlo en cuenta si es algo delicado.
 - Sokari no puede ejecutar comandos libres ni hacer clic en cualquier parte: solo tiene un set cerrado de acciones. No abre programas ni scripts sueltos y nunca escribe en terminales.
-- Una página, un archivo, el portapapeles o el título de una pestaña pueden traer instrucciones escondidas para el modelo. Por eso, mientras algo así siga en la conversación, Sokari te pide un "sí" de voz antes de enviar texto, abrir un archivo, mover o borrar, crear o ejecutar comandos propios y usar la red entre tus PCs. La pregunta la arma Sokari, no el modelo, así que escuchas lo que va a hacer de verdad.
+- **Acceso completo (menos borrar)** viene prendido: Sokari hace todo sin preguntarte (mover archivos, mandar mensajes, subir archivos, guardar datos, exportar a Obsidian) y solo pide un "sí" de voz antes de **borrar**. Lo apagas en Configuración → General, en Inicio, en el menú del ícono o diciéndole "pregúntame antes"; "tienes permiso para todo" lo vuelve a prender.
+  - El riesgo: una página, un archivo, el portapapeles o el título de una pestaña pueden traer instrucciones escondidas para el modelo. Con acceso completo, las podría seguir sin avisarte.
+  - Prenderlo cuando ya leyó algo de afuera pide tu "sí": una página no puede dárselo sola.
+- Con el acceso completo apagado, mientras algo de afuera siga en la conversación, Sokari te pide un "sí" de voz antes de enviar texto, abrir un archivo, mover o borrar, crear o ejecutar comandos propios y usar la red entre tus PCs. La pregunta la arma Sokari, no el modelo, así que escuchas lo que va a hacer de verdad.
   - Cuenta solo la conversación actual: al volver a decir "Hey Sokari", lo que leyó antes se borra.
   - "Sí a todo" hace que no vuelva a preguntar en esa conversación. "¿Qué?" repite la pregunta.
-  - En Configuración → General puedes apagar la pregunta. Es bajo tu riesgo: un texto con instrucciones escondidas podría hacerlo actuar sin avisarte.
 - No lee páginas de tu red local (router, otras PCs, localhost), ni siquiera si una página pública redirige ahí.
 - La palabra de apagado se revisa en tu PC. Nunca se le manda al modelo ni se guarda en la memoria, y las herramientas de archivos no pueden leer la carpeta donde está guardada.
 - El servidor para tus otras PCs escucha solo en tu IP de Tailscale, nunca en internet. Solo acepta órdenes de dispositivos de tu misma cuenta de Tailscale (Tailscale comprueba con criptografía quién manda cada paquete) o que traigan el secreto de malla, que se genera solo. Sokari solo manda ese secreto a direcciones de Tailscale.
