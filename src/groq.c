@@ -247,6 +247,7 @@ static cJSON *clean_message(cJSON *msg)
 typedef struct {
     const char *id;
     bool qwen;
+    int max_out; /* tokens de respuesta que se piden: no pueden pasar del cupo por minuto del modelo */
     double cool_until;   /* no usar antes de este momento (epoch) */
     int remaining;       /* último cupo de tokens informado por Groq, -1 = desconocido */
     double measured_at;
@@ -255,10 +256,12 @@ typedef struct {
 
 /* Cada modelo gratis de Groq tiene su propio cupo de 8000 tokens por minuto:
    rotar entre los tres triplica lo que Sokari puede contestar seguido. */
+/* qwen en el plan gratis deja 1000 tokens de respuesta por minuto: si se le
+   piden 1024, Groq rechaza TODOS los pedidos ("Request too large"). */
 static ChatModel MODELS[] = {
-    {"openai/gpt-oss-120b", false, 0, -1, 0, 0},
-    {"qwen/qwen3.8-27b", true, 0, -1, 0, 0},
-    {"openai/gpt-oss-20b", false, 0, -1, 0, 0},
+    {"openai/gpt-oss-120b", false, 1024, 0, -1, 0, 0},
+    {"qwen/qwen3.8-27b", true, 700, 0, -1, 0, 0},
+    {"openai/gpt-oss-20b", false, 1024, 0, -1, 0, 0},
 };
 
 #define TOKEN_LIMIT 8000.0
@@ -300,7 +303,7 @@ static cJSON *chat_once(ChatModel *model, const cJSON *messages, const cJSON *to
     cJSON_AddStringToObject(req, "model", model->id);
     cJSON_AddItemToObject(req, "messages", cJSON_Duplicate(messages, 1));
     if (tools) cJSON_AddItemToObject(req, "tools", cJSON_Duplicate(tools, 1));
-    cJSON_AddNumberToObject(req, "max_completion_tokens", 1024);
+    cJSON_AddNumberToObject(req, "max_completion_tokens", model->max_out);
     if (model->qwen) {
         cJSON_AddStringToObject(req, "reasoning_effort", "none");
         cJSON_AddStringToObject(req, "reasoning_format", "hidden");

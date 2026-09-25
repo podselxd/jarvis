@@ -66,7 +66,7 @@ enum {
 enum {
     A_NONE, A_GROQ_LINK, A_RESET_PW, A_SHOW_API, A_SHOW_STOP, A_TAILSCALE, A_COPY_SECRET, A_OBSIDIAN, A_PICK_SOUND,
     A_CLEAR_SOUND, A_OPEN_FOLDER, A_CHECK_UPDATE, A_SAVE, A_CANCEL, A_START, A_GO_SETTINGS, A_MUTE, A_TEST_AUDIO,
-    A_QUIT, A_MODE_CHANGED, A_OUTPUT_CHANGED, A_FIREWALL, A_DETECT,
+    A_QUIT, A_MODE_CHANGED, A_OUTPUT_CHANGED, A_TEST_VOICE, A_FIREWALL, A_DETECT,
     /* Por dispositivo de la lista: + su número. */
     A_DEV_PROBE = 200, A_DEV_REMOVE = 300,
 };
@@ -82,6 +82,7 @@ typedef struct {
     const wchar_t *const *descs;
     int action;        /* botón/enlace; en una lista, se llama al elegir */
     int edit;          /* índice de F_* para W_EDIT */
+    int item_h;        /* tarjetas: alto de cada una (0 = CARD_H) */
     bool primary;
 } Widget;
 
@@ -103,6 +104,8 @@ static struct {
     AppConfig cfg;
     int autostart;
     int subtitles;
+    int show_only_talking;
+    int confirm; /* 1 = pide confirmación cuando hace falta; 0 = nunca */
     TtsVoice *voices;
     int nvoices;
     int voice_index;
@@ -472,26 +475,39 @@ static void layout(void)
                         L"Si la dices, Sokari se apaga al instante. Se revisa en tu PC: nunca se le manda a la IA.");
         break;
     case SEC_DISPLAY: {
-        y = layout_label(x, y, w, L"Modo de pantalla");
-        int ch = dp(CARD_H) * DISPLAY_MODE_COUNT + dp(CARD_GAP) * (DISPLAY_MODE_COUNT - 1);
-        Widget *c = add(W_CARDS, (RECT){x, y, x + w, y + ch});
-        c->value = &S.display_mode;
-        c->labels = DISPLAY_MODE_LABELS;
-        c->descs = MODE_DESCS;
-        c->options = DISPLAY_MODE_COUNT;
-        y += ch + dp(14);
-        y = layout_label(x, y, w, L"Resolución de la esfera");
-        y = layout_segment(x, y, w, &S.resolution_index, RES_LABELS, 5);
-        y = layout_label(x, y, w, L"Estilo");
-        y = layout_segment(x, y, w, &S.style, STYLE_LABELS, 2);
-        y = layout_toggle(x, y, w, &S.subtitles, L"Mostrar subtítulos de lo que dices y lo que responde");
+        /* Con la escala de Windows alta la ventana es más baja: si todo no cabe
+           arriba de Guardar/Cancelar, las tarjetas pierden su descripción (solo
+           se ve la del modo elegido). */
+        int first = S.nwidgets, y0 = y;
+        for (int compact = 0; compact < 2; compact++) {
+            S.nwidgets = first;
+            y = layout_label(x, y0, w, L"Modo de pantalla");
+            int item = dp(compact ? 36 : CARD_H);
+            int ch = item * DISPLAY_MODE_COUNT + dp(CARD_GAP) * (DISPLAY_MODE_COUNT - 1);
+            Widget *c = add(W_CARDS, (RECT){x, y, x + w, y + ch});
+            c->value = &S.display_mode;
+            c->labels = DISPLAY_MODE_LABELS;
+            c->descs = compact ? NULL : MODE_DESCS;
+            c->options = DISPLAY_MODE_COUNT;
+            c->item_h = item;
+            y += ch + dp(compact ? 6 : 14);
+            if (compact) y = layout_help(x, y, w, MODE_DESCS[S.display_mode]) + dp(2);
+            y = layout_label(x, y, w, L"Resolución de la esfera");
+            y = layout_segment(x, y, w, &S.resolution_index, RES_LABELS, 5);
+            y = layout_label(x, y, w, L"Estilo");
+            y = layout_segment(x, y, w, &S.style, STYLE_LABELS, 2);
+            y = layout_toggle(x, y, w, &S.subtitles, L"Mostrar subtítulos de lo que dices y lo que responde");
+            y = layout_toggle(x, y, w, &S.show_only_talking, L"Aparecer solo cuando le hablas (y esconderse al terminar)");
+            if (S.widgets[S.nwidgets - 1].r.bottom <= cr.bottom - dp(64) - dp(10)) break;
+        }
         break;
     }
     case SEC_AUDIO:
         y = layout_label(x, y, w, L"Volumen de la voz de Sokari");
         y = layout_slider(x, y, w, &S.volume);
         y = layout_label(x, y, w, L"Voz");
-        y = layout_dropdown(x, y, w, &S.voice_index, g_voice_labels, S.nvoices, A_NONE);
+        layout_button(x + w - dp(110), y + dp(2), dp(110), L"Probar", A_TEST_VOICE, false);
+        y = layout_dropdown(x, y, w - dp(122), &S.voice_index, g_voice_labels, S.nvoices, A_NONE);
         y = layout_label(x, y, w, L"Micrófono");
         y = layout_dropdown(x, y, w, &S.mic_index, g_mic_labels, S.nmics + 1, A_NONE);
         y = layout_label(x, y, w, L"Salida de audio");
@@ -520,8 +536,12 @@ static void layout(void)
             free(ob);
             y += dp(50);
         }
-        layout_button(x, y, dp(220), L"Buscar actualizaciones", A_CHECK_UPDATE, false);
-        y += dp(50);
+        y = layout_toggle(x, y, w, &S.confirm, L"Pedir un \"sí\" antes de acciones delicadas");
+        y = layout_help(x, y - dp(8), w,
+                        L"Solo pregunta si en esa conversación leyó algo de afuera (una página, un archivo, tus "
+                        L"ventanas) y va a mandar un mensaje, mover o borrar archivos u otra cosa delicada. "
+                        L"Apagado nunca pregunta: un texto con instrucciones escondidas podría hacerlo actuar sin "
+                        L"avisarte.");
         break;
     case SEC_DEVICES: {
         y = layout_help(x, y - dp(6), w, g_tailscale_text) + dp(2);
@@ -622,7 +642,7 @@ static void paint_widget(Widget *wd, int index)
         break;
     }
     case W_CARDS: {
-        int ch = dp(CARD_H);
+        int ch = wd->item_h ? wd->item_h : dp(CARD_H);
         for (int i = 0; i < wd->options; i++) {
             RECT c = {r.left, r.top + i * (ch + dp(CARD_GAP)), r.right, r.top + i * (ch + dp(CARD_GAP)) + ch};
             bool sel = *wd->value == i;
@@ -631,6 +651,11 @@ static void paint_widget(Widget *wd, int index)
             circle((float)(c.left + dp(22)), (float)(c.top + ch / 2), (float)dp(8), sel ? C_ACCENT : C_BORDER);
             circle((float)(c.left + dp(22)), (float)(c.top + ch / 2), (float)dp(6), sel ? C_ACCENT : C_SURFACE);
             if (sel) circle((float)(c.left + dp(22)), (float)(c.top + ch / 2), (float)dp(3), RGB(255, 255, 255));
+            if (!wd->descs) {
+                RECT t = {c.left + dp(44), c.top, c.right - dp(12), c.bottom};
+                text(wd->labels[i], t, S.f_body, C_TEXT, DT_LEFT | DT_SINGLELINE | DT_VCENTER);
+                continue;
+            }
             RECT t = {c.left + dp(44), c.top + dp(8), c.right - dp(12), c.top + dp(28)};
             text(wd->labels[i], t, S.f_body, C_TEXT, DT_LEFT | DT_SINGLELINE | DT_VCENTER);
             RECT d = {c.left + dp(44), c.top + dp(28), c.right - dp(12), c.bottom - dp(8)};
@@ -812,6 +837,8 @@ static void load_values(void)
         if (RESOLUTIONS[i] == S.cfg.resolution) S.resolution_index = i;
     S.style = S.cfg.sphere_style;
     S.subtitles = S.cfg.subtitles;
+    S.show_only_talking = S.cfg.show_only_talking;
+    S.confirm = !S.cfg.confirm_never;
     S.volume = S.cfg.volume;
     S.sensitivity = S.cfg.wake_sensitivity;
     S.autostart = autostart_is_enabled();
@@ -866,6 +893,8 @@ static void save(void)
     c.resolution = RESOLUTIONS[S.resolution_index];
     c.sphere_style = S.style;
     c.subtitles = S.subtitles != 0;
+    c.show_only_talking = S.show_only_talking != 0;
+    c.confirm_never = S.confirm == 0;
     c.volume = S.volume;
     c.wake_sensitivity = S.sensitivity;
     c.autostart = S.autostart != 0;
@@ -1193,6 +1222,16 @@ static void do_action(int action)
         set_status(msg);
         break;
     }
+    case A_TEST_VOICE:
+        if (S.voice_index >= S.nvoices) {
+            set_status(L"No encontré voces instaladas en Windows.");
+        } else if (voice_running()) {
+            voice_preview(S.voices[S.voice_index].id);
+            set_status(L"Escucha: así suena esa voz. Si te gusta, dale a Guardar.");
+        } else {
+            set_status(L"La voz se prueba con Sokari iniciado.");
+        }
+        break;
     case A_QUIT:
         if (ui_message_window()) PostMessageW(ui_message_window(), WM_APP_QUIT, 0, 0);
         break;
@@ -1243,8 +1282,14 @@ static void click(int i, int x, int y)
         break;
     }
     case W_CARDS: {
-        int idx = (y - w->r.top) / (dp(CARD_H) + dp(CARD_GAP));
-        if (idx >= 0 && idx < w->options) *w->value = idx;
+        int idx = (y - w->r.top) / ((w->item_h ? w->item_h : dp(CARD_H)) + dp(CARD_GAP));
+        if (idx >= 0 && idx < w->options && idx != *w->value) {
+            *w->value = idx;
+            if (!w->descs) {
+                layout(); /* compactas: debajo va la descripción del modo elegido */
+                return;
+            }
+        }
         break;
     }
     case W_TOGGLE:
@@ -1387,6 +1432,7 @@ static LRESULT CALLBACK proc(HWND h, UINT m, WPARAM w, LPARAM l)
             int idx = (y - dp(110)) / dp(46);
             if (y >= dp(110) && idx >= 0 && idx < SEC_COUNT && idx != S.section) {
                 S.section = idx;
+                set_status(NULL);
                 layout();
             }
             return 0;
@@ -1497,7 +1543,7 @@ static void open_window(HINSTANCE inst, bool first_run, bool home, bool starting
     S.section = home ? SEC_HOME : SEC_ACCOUNT;
     S.api_visible = S.stop_visible = false;
     UINT dpi = GetDpiForSystem();
-    int cw = MulDiv(900, (int)dpi, 96), ch = MulDiv(700, (int)dpi, 96);
+    int cw = MulDiv(900, (int)dpi, 96), ch = MulDiv(740, (int)dpi, 96);
     RECT wa;
     SystemParametersInfoW(SPI_GETWORKAREA, 0, &wa, 0);
     if (ch > wa.bottom - wa.top - 40) ch = wa.bottom - wa.top - 40;

@@ -11,7 +11,10 @@
 #include "sounds.h"
 #include "util.h"
 
-#define ACTIVATION_MAX_MS 900
+/* Sokari empieza a escucharte a los 0.9 s aunque tu sonido siga sonando; un
+   sonido de más de 10 s se corta ahí. */
+#define ACTIVATION_LISTEN_MS 900
+#define ACTIVATION_MAX_MS 10000
 
 static bool mci(const wchar_t *cmd)
 {
@@ -63,18 +66,39 @@ void sound_chime(void)
     free(pcm);
 }
 
+static unsigned mci_length_ms(const wchar_t *alias)
+{
+    wchar_t cmd[96], out[32] = L"";
+    swprintf(cmd, 96, L"set %ls time format milliseconds", alias);
+    mci(cmd);
+    swprintf(cmd, 96, L"status %ls length", alias);
+    if (mciSendStringW(cmd, out, 32, NULL) != 0) return 0;
+    return (unsigned)wcstoul(out, NULL, 10);
+}
+
+/* Tu sonido suena completo mientras Sokari ya te escucha. Con audífonos no
+   pasa nada; con bocinas el micrófono lo puede oír. */
 void sound_activation(void)
 {
     wchar_t *p = user_sound(L"activacion");
     if (p && mci_open(p, L"sokari_activacion")) {
-        mci(L"play sokari_activacion");
-        Sleep(ACTIVATION_MAX_MS);
-        mci(L"stop sokari_activacion");
-        mci(L"close sokari_activacion");
+        wchar_t cmd[96];
+        if (mci_length_ms(L"sokari_activacion") > ACTIVATION_MAX_MS)
+            swprintf(cmd, 96, L"play sokari_activacion from 0 to %d", ACTIVATION_MAX_MS);
+        else
+            wcscpy(cmd, L"play sokari_activacion");
+        mci(cmd);
+        Sleep(ACTIVATION_LISTEN_MS);
     } else {
         sound_chime();
     }
     free(p);
+}
+
+void sound_activation_stop(void)
+{
+    mci(L"stop sokari_activacion");
+    mci(L"close sokari_activacion");
 }
 
 void sound_search_start(void)

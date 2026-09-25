@@ -14,12 +14,17 @@ typedef struct {
 void agent_init(void);
 Conversation *conv_create(bool load_recent_memory);
 void conv_destroy(Conversation *c);
+/* Otra vez "Hey Sokari": lo que se leyó de afuera en las conversaciones
+   anteriores se borra del historial y ya no hace pedir confirmación; un
+   "sí a todo" o una acción pendiente de antes tampoco siguen valiendo. */
 void conv_new_session(Conversation *c);
 /* Conversación que llega por la malla: las acciones que piden confirmación
    de voz se niegan en vez de quedar esperando un "sí". */
 void conv_set_remote(Conversation *c, bool remote);
 
-typedef enum { ANSWER_OTHER, ANSWER_YES, ANSWER_NO } AgentAnswer;
+/* ALL: "sí a todo" (no vuelve a preguntar en esta conversación). REPEAT:
+   "¿qué?", "no te entendí": se repite la pregunta en vez de cancelarla. */
+typedef enum { ANSWER_OTHER, ANSWER_YES, ANSWER_NO, ANSWER_ALL, ANSWER_REPEAT } AgentAnswer;
 AgentAnswer agent_classify_answer(const char *text);
 
 /* Pipeline completo para un texto ya transcripto (o llegado por la malla):

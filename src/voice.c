@@ -35,8 +35,6 @@
    ~1/3 s después de que terminas de decir "Sokari", y para entonces la orden
    ya pudo empezar. Si se cuela el final del nombre, no pasa nada. */
 #define WAKE_HISTORY_FRAMES 5
-#define INTERRUPT_ENERGY_MULTIPLIER 4.5f
-#define INTERRUPT_FRAMES 2 /* voz fuerte sostenida, no un golpe o un movimiento suelto */
 #define REMINDER_CHECK_FRAMES (20 * MIC_RATE / MIC_FRAME)
 
 typedef struct Chunk {
@@ -64,6 +62,9 @@ static HANDLE g_quit;
 static HANDLE g_trigger;
 static volatile LONG g_settings_dirty;
 static volatile LONG g_test_audio;
+static SRWLOCK g_preview_lock = SRWLOCK_INIT;
+static char *g_preview_voice;
+static WakeWord *g_ww;
 static int g_silence = 300;
 static Conversation *g_conv;
 static Conversation *g_mesh_conv;
@@ -201,27 +202,30 @@ static int split_sentences(const char *text, char ***out)
 }
 
 typedef struct {
-    int loud;
     bool allow_interrupt;
 } PlayCtx;
 
 static bool input_read_nowait(int16_t *f);
 
+/* Mientras habla, solo lo calla "Hey Sokari" (o el atajo). Antes bastaba
+   cualquier ruido un poco más fuerte que el silencio del cuarto, y se cortaba
+   a media frase casi siempre. */
 static bool play_cb(float level, void *ctx)
 {
     PlayCtx *pc = ctx;
     app_set_level(level);
     if (WaitForSingleObject(g_quit, 0) == WAIT_OBJECT_0) return false;
     if (!pc->allow_interrupt) return true;
+    if (WaitForSingleObject(g_trigger, 0) == WAIT_OBJECT_0) {
+        log_msg("Interrumpido con el atajo.");
+        return false;
+    }
     int16_t f[MIC_FRAME];
     while (input_read_nowait(f)) {
-        if (frame_energy(f, MIC_FRAME) > (float)g_silence * INTERRUPT_ENERGY_MULTIPLIER) {
-            if (++pc->loud >= INTERRUPT_FRAMES) {
-                log_msg("Interrumpido: hablaste encima.");
-                return false;
-            }
-        } else {
-            pc->loud = 0;
+        if (g_ww && ww_process(g_ww, f) > config_wake_threshold()) {
+            log_msg("Interrumpido: dijiste \"Hey Sokari\".");
+            ww_reset(g_ww);
+            return false;
         }
     }
     return true;
@@ -232,6 +236,8 @@ static void input_flush(void);
 static void speak(const char *text, bool allow_interrupt)
 {
     if (str_is_blank(text)) return;
+    if (!g_sim_mode) sound_activation_stop();
+    if (g_ww) ww_reset(g_ww);
     log_msg("Sokari: %s", text);
     app_subtitle(false, text);
     app_set_state(JV_SPEAKING);
@@ -252,6 +258,7 @@ static void speak(const char *text, bool allow_interrupt)
     LeaveCriticalSection(&S.lock);
 
     PlayCtx ctx = {.allow_interrupt = allow_interrupt && !g_sim_mode};
+    bool cut = false;
     for (;;) {
         EnterCriticalSection(&S.lock);
         while (!S.head && !S.synth_done && !S.quit) SleepConditionVariableCS(&S.cv, &S.lock, 200);
@@ -267,6 +274,7 @@ static void speak(const char *text, bool allow_interrupt)
         free(c->pcm);
         free(c);
         if (!finished) {
+            cut = true;
             EnterCriticalSection(&S.lock);
             S.cancel = true;
             LeaveCriticalSection(&S.lock);
@@ -283,7 +291,9 @@ static void speak(const char *text, bool allow_interrupt)
     S.job_active = false;
     LeaveCriticalSection(&S.lock);
     app_set_level(0);
-    input_flush();
+    /* Si lo callaste con "Hey Sokari", lo que dices justo después es tu orden:
+       no se tira. */
+    if (!cut) input_flush();
 }
 
 /* -------------------------------------------------------------- entrada --- */
@@ -525,20 +535,38 @@ static char *mesh_handle(const char *cmd, const char *origen)
     char *title = str_printf("Orden desde %s", origen);
     app_notify(title, cmd);
     free(title);
+    /* Cada orden por la malla es una conversación aparte: lo que otra orden
+       leyó de afuera ya no cuenta (ni sirve para esconder instrucciones). */
+    conv_new_session(g_mesh_conv);
     TurnResult r = agent_process(g_mesh_conv, cmd);
     state_unlock();
     if (r.shutdown) app_request_quit();
     return r.reply ? r.reply : xstrdup("Listo.");
 }
 
+/* La voz se cambia en el hilo de síntesis, antes de la siguiente frase. */
+static void set_speech_voice(const char *id)
+{
+    EnterCriticalSection(&S.lock);
+    free(S.pending_voice);
+    S.pending_voice = xstrdup(id);
+    WakeAllConditionVariable(&S.cv);
+    LeaveCriticalSection(&S.lock);
+}
+
+static char *take_preview(void)
+{
+    AcquireSRWLockExclusive(&g_preview_lock);
+    char *v = g_preview_voice;
+    g_preview_voice = NULL;
+    ReleaseSRWLockExclusive(&g_preview_lock);
+    return v;
+}
+
 static void apply_settings(void)
 {
     AppConfig c = config_snapshot();
-    EnterCriticalSection(&S.lock);
-    free(S.pending_voice);
-    S.pending_voice = xstrdup(c.voice);
-    WakeAllConditionVariable(&S.cv);
-    LeaveCriticalSection(&S.lock);
+    set_speech_voice(c.voice);
     if (!g_sim_mode && strcmp(c.mic_name, g_mic_name ? g_mic_name : "")) {
         free(g_mic_name);
         g_mic_name = xstrdup(c.mic_name);
@@ -561,6 +589,7 @@ static DWORD WINAPI voice_main(LPVOID arg)
     const void *blob = res_data(IDR_WAKEWORD, &blen);
     const void *word = res_data(IDR_HEY_SOKARI, &wlen);
     WakeWord *ww = word ? ww_create(blob, blen, word, wlen) : NULL;
+    g_ww = ww;
     if (!word) {
         log_msg("Este exe no trae el modelo de \"Hey Sokari\": solo se le habla con Ctrl+Alt+J.");
         app_notify("Sokari", "Todavía no tengo mi palabra \"Hey Sokari\". Por ahora háblame con Ctrl+Alt+J.");
@@ -602,6 +631,19 @@ static DWORD WINAPI voice_main(LPVOID arg)
             nhist = 0;
             continue;
         }
+        char *preview = take_preview();
+        if (preview) {
+            AppConfig c = config_snapshot();
+            set_speech_voice(preview);
+            speak("Hola, soy Sokari. Así sueno con esta voz.", false);
+            set_speech_voice(c.voice);
+            config_free(&c);
+            free(preview);
+            app_set_state(JV_IDLE);
+            if (ww) ww_reset(ww);
+            nhist = 0;
+            continue;
+        }
         bool triggered = WaitForSingleObject(g_trigger, 0) == WAIT_OBJECT_0;
         bool got = input_read(f, 500);
         if (!got) {
@@ -636,6 +678,7 @@ static DWORD WINAPI voice_main(LPVOID arg)
     }
 
     mesh_stop();
+    g_ww = NULL;
     EnterCriticalSection(&S.lock);
     S.quit = true;
     S.cancel = true;
@@ -689,4 +732,12 @@ bool voice_running(void)
 void voice_test_audio(void)
 {
     InterlockedExchange(&g_test_audio, 1);
+}
+
+void voice_preview(const char *voice_id)
+{
+    AcquireSRWLockExclusive(&g_preview_lock);
+    free(g_preview_voice);
+    g_preview_voice = xstrdup(voice_id ? voice_id : "");
+    ReleaseSRWLockExclusive(&g_preview_lock);
 }

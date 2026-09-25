@@ -21,8 +21,10 @@
 
 struct Conversation {
     cJSON *history; /* [0] = system prompt, después user/assistant/tool */
+    int session_start; /* desde aquí empieza la conversación actual ("Hey Sokari") */
     bool announce_pending;
     bool remote;        /* llega por la malla: ahí nadie puede confirmar de voz */
+    bool trust_all;     /* dijo "sí a todo": no se vuelve a preguntar en esta conversación */
     char *pending_tool; /* acción que espera un "sí" de voz, con sus argumentos */
     char *pending_args;
 };
@@ -33,7 +35,18 @@ static char *g_system_prompt;
 static const char *FAREWELLS[] = {
     "adios", "adiós", "hasta luego", "hasta la proxima", "hasta la próxima", "nos vemos", "me despido", "chao",
     "chau", "bye", "eso es todo", "eso seria todo", "eso sería todo", "nada mas", "nada más", "ya esta", "ya está",
-    "ya no necesito nada", "gracias eso es todo",
+    "ya no necesito nada", "gracias eso es todo", "ya vete", "vete ya", "puedes irte", "te puedes ir",
+    "ya nada gracias", "ya es todo", "retirate", "retírate",
+};
+
+/* Cuando Sokari mismo se despide, la conversación también termina (y la
+   esfera se esconde si así está configurada). Una pregunta al final no cuenta:
+   "¿algo más? si no, hasta luego" sigue esperando respuesta. */
+static const char *SOKARI_FAREWELLS[] = {
+    "hasta luego", "hasta pronto", "hasta la proxima", "hasta la próxima", "nos vemos", "adios", "adiós",
+    "que tengas buen", "que tengas un buen", "que tengas lindo", "que tengas linda", "que tengas bonito",
+    "que tengas excelente", "que descanses", "cuidate", "cuídate", "bye", "chao", "aqui estare", "aquí estaré",
+    "quedo a la espera", "cuando me necesites",
 };
 
 void agent_init(void)
@@ -54,8 +67,9 @@ static cJSON *system_message(void)
 /* Corta solo justo antes de un mensaje "user": un assistant con tool_calls
    tiene que quedar pegado a sus resultados "tool", si no Groq rechaza todos
    los turnos siguientes. */
-static void trim_history(cJSON *h)
+static void trim_history(Conversation *c)
 {
+    cJSON *h = c->history;
     int n = cJSON_GetArraySize(h);
     if (n <= MAX_HISTORY_MESSAGES + 1) return;
     int cut = n - MAX_HISTORY_MESSAGES;
@@ -65,6 +79,8 @@ static void trim_history(cJSON *h)
         cut++;
     }
     for (int i = 1; i < cut; i++) cJSON_DeleteItemFromArray(h, 1);
+    c->session_start -= cut - 1;
+    if (c->session_start < 1) c->session_start = 1;
 }
 
 Conversation *conv_create(bool load_recent_memory)
@@ -72,12 +88,13 @@ Conversation *conv_create(bool load_recent_memory)
     Conversation *c = xcalloc(1, sizeof *c);
     c->history = cJSON_CreateArray();
     cJSON_AddItemToArray(c->history, system_message());
+    c->session_start = 1;
     if (load_recent_memory) {
         cJSON *recent = memory_recent_history(MEMORY_WINDOW_SECONDS);
         cJSON *m;
         while ((m = cJSON_DetachItemFromArray(recent, 0))) cJSON_AddItemToArray(c->history, m);
         cJSON_Delete(recent);
-        trim_history(c->history);
+        trim_history(c);
     }
     c->announce_pending = true;
     return c;
@@ -103,9 +120,36 @@ void conv_set_remote(Conversation *c, bool remote)
     c->remote = remote;
 }
 
+/* Lo que trajo una herramienta de afuera en una conversación anterior se
+   borra: si traía instrucciones escondidas, ya no están para seguirlas. Queda
+   la nota para que el historial siga siendo válido para Groq. */
+static void forget_outside_text(cJSON *history, int until)
+{
+    for (int i = 1; i < until; i++) {
+        const cJSON *call;
+        cJSON_ArrayForEach(call, cJSON_GetObjectItem(cJSON_GetArrayItem(history, i), "tool_calls"))
+        {
+            const char *name = cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetObjectItem(call, "function"), "name"));
+            const char *id = cJSON_GetStringValue(cJSON_GetObjectItem(call, "id"));
+            if (!id || !tool_brings_outside_text(name)) continue;
+            for (int j = i + 1; j < until; j++) {
+                cJSON *t = cJSON_GetArrayItem(history, j);
+                const char *tid = cJSON_GetStringValue(cJSON_GetObjectItem(t, "tool_call_id"));
+                cJSON *content = cJSON_GetObjectItem(t, "content");
+                if (tid && !strcmp(tid, id) && cJSON_IsString(content))
+                    cJSON_SetValuestring(content, "(texto de afuera de una conversación anterior; ya no está)");
+            }
+        }
+    }
+}
+
 void conv_new_session(Conversation *c)
 {
     c->announce_pending = true;
+    c->trust_all = false;
+    clear_pending(c);
+    c->session_start = cJSON_GetArraySize(c->history);
+    forget_outside_text(c->history, c->session_start);
 }
 
 /* Los resultados de herramientas (búsquedas, páginas, archivos) pueden ser
@@ -140,11 +184,11 @@ static void add_message(cJSON *history, const char *role, const char *content)
    página, un archivo, el portapapeles...)? Mientras quede, el modelo puede
    estar siguiendo instrucciones escondidas ahí, también en un turno posterior:
    por eso no alcanza con mirar solo el turno en que se leyó. */
-static bool history_has_outside_text(const cJSON *history)
+static bool history_has_outside_text(const Conversation *c)
 {
-    const cJSON *m;
-    cJSON_ArrayForEach(m, history)
-    {
+    int n = cJSON_GetArraySize(c->history);
+    for (int i = c->session_start; i < n; i++) {
+        const cJSON *m = cJSON_GetArrayItem(c->history, i);
         const cJSON *call;
         cJSON_ArrayForEach(call, cJSON_GetObjectItem(m, "tool_calls"))
         {
@@ -155,41 +199,89 @@ static bool history_has_outside_text(const cJSON *history)
     return false;
 }
 
-/* Respuesta corta a "¿Lo hago?". Cualquier "no" en la frase gana ("claro que
-   no", "sí, no, mejor no"), y una frase larga no cuenta como sí: así "sí, pero
-   primero abre Spotify" se procesa como un pedido nuevo. */
+static bool word_in(const char *w, const char *const *list, size_t n)
+{
+    for (size_t i = 0; i < n; i++)
+        if (!strcmp(w, list[i])) return true;
+    return false;
+}
+
+/* Respuesta a "¿Lo hago?". Cualquier "no" en la frase gana ("claro que no",
+   "sí, no, mejor no"). Un sí cuenta aunque venga acompañado ("ah ok, sí te lo
+   doy", "te confirmo", "confirmo que sí"), pero solo si la frase no trae nada
+   más: "sí, pero primero abre Spotify" se procesa como un pedido nuevo. */
 AgentAnswer agent_classify_answer(const char *text)
 {
-    static const char *const YES[] = {"si",         "sí",       "dale",  "hazlo", "confirmo", "adelante", "claro",
-                                      "ok",         "okay",     "okey",  "afirmativo", "correcto", "simón", "simon",
-                                      "ándale",     "andale",   "órale", "orale", "confirmado"};
+    static const char *const YES[] = {"si",       "sí",        "dale",      "hazlo",   "hazle",      "confirmo",
+                                      "confirma", "confirmado", "adelante", "claro",   "ok",         "okay",
+                                      "okey",     "afirmativo", "correcto", "simón",   "simon",      "ándale",
+                                      "andale",   "órale",      "orale",    "acuerdo", "autorizo",   "permiso"};
     static const char *const NO[] = {"no",      "cancela",  "cancelalo", "cancélalo", "olvidalo", "olvídalo",
                                      "nel",     "negativo", "nop",       "nope",      "tampoco",  "nunca"};
+    /* Palabras que acompañan al sí sin cambiarlo. */
+    static const char *const FILLER[] = {"ah",  "oh",  "eh",  "bueno", "pues", "que", "qué", "te",  "lo",
+                                         "le",  "la",  "doy", "de",    "a",    "al",  "ya",  "y",   "por",
+                                         "favor", "porfa", "sokari", "vale", "yo", "tienes", "mi"};
+    static const char *const ALL[] = {"todo", "todos", "toda", "todas"};
+    static const char *const REPEAT[] = {"que",         "qué",          "como",        "cómo",       "perdon",
+                                         "perdón",      "mande",        "que dijiste", "qué dijiste", "repite",
+                                         "repitelo",    "repítelo",     "otra vez",    "no te entendi",
+                                         "no te entendí", "no entendi", "no entendí",  "cual",       "cuál",
+                                         "que cosa",    "qué cosa",     "como dices",  "cómo dices"};
     char *low = str_lower(text);
     for (unsigned char *p = (unsigned char *)low; *p; p++) {
         if (p[0] == 0xC2 && (p[1] == 0xA1 || p[1] == 0xBF)) p[0] = p[1] = ' '; /* ¡ ¿ */
         else if (*p < 0x80 && !isalnum(*p)) *p = ' ';
     }
     str_collapse_spaces(low);
-    AgentAnswer a = ANSWER_OTHER;
+    char *t = str_trim(low);
+    free(low);
+    if (word_in(t, REPEAT, sizeof REPEAT / sizeof *REPEAT)) {
+        free(t);
+        return ANSWER_REPEAT;
+    }
     int words = 0;
-    bool any_no = false;
-    for (char *w = low; *w;) {
+    bool any_no = false, any_yes = false, any_all = false, only_known = true;
+    for (char *w = t; *w;) {
         char *end = strchr(w, ' ');
         if (end) *end = 0;
-        for (size_t i = 0; i < sizeof NO / sizeof *NO; i++)
-            if (!strcmp(w, NO[i])) any_no = true;
-        if (!words++)
-            for (size_t i = 0; i < sizeof YES / sizeof *YES; i++)
-                if (!strcmp(w, YES[i])) a = ANSWER_YES;
-        if (!strcmp(w, "acuerdo") && words == 2) a = ANSWER_YES; /* "de acuerdo" */
+        words++;
+        bool yes = word_in(w, YES, sizeof YES / sizeof *YES), all = word_in(w, ALL, sizeof ALL / sizeof *ALL);
+        if (word_in(w, NO, sizeof NO / sizeof *NO)) any_no = true;
+        any_yes |= yes;
+        any_all |= all;
+        if (!yes && !all && !word_in(w, FILLER, sizeof FILLER / sizeof *FILLER)) only_known = false;
         if (!end) break;
         w = end + 1;
     }
-    if (any_no) a = ANSWER_NO;
-    else if (words > 4) a = ANSWER_OTHER;
-    free(low);
-    return a;
+    free(t);
+    if (any_no) return ANSWER_NO;
+    if (!words || !only_known || words > 8) return ANSWER_OTHER;
+    if (any_all) return ANSWER_ALL; /* "a todo", "sí a todo", "confirma todo", "permiso a todo" */
+    return any_yes ? ANSWER_YES : ANSWER_OTHER;
+}
+
+/* "¿Qué?" con una acción pendiente: se vuelve a decir cuál es, sin
+   cancelarla. */
+static TurnResult repeat_pending(Conversation *c, const char *text)
+{
+    TurnResult r = {0};
+    cJSON *parsed = cJSON_Parse(c->pending_args);
+    if (!cJSON_IsObject(parsed)) {
+        cJSON_Delete(parsed);
+        parsed = cJSON_CreateObject();
+    }
+    char *desc = tool_describe_action(c->pending_tool, parsed);
+    cJSON_Delete(parsed);
+    r.reply = str_printf("Te preguntaba si puedo %s. ¿Lo hago? Di sí o no.", desc);
+    free(desc);
+    add_message(c->history, "user", text);
+    memory_persist("user", text);
+    add_message(c->history, "assistant", r.reply);
+    memory_persist("assistant", r.reply);
+    trim_history(c);
+    r.keep_going = true;
+    return r;
 }
 
 /* El "sí" ejecuta exactamente la acción guardada, sin volver a preguntarle
@@ -204,7 +296,7 @@ static TurnResult run_pending(Conversation *c, const char *text)
     memory_persist("user", text);
     add_message(c->history, "assistant", result);
     memory_persist("assistant", result);
-    trim_history(c->history);
+    trim_history(c);
     r.reply = result;
     r.keep_going = true;
     return r;
@@ -221,13 +313,51 @@ static bool contains_stop_word(const char *text)
     return hit;
 }
 
-static bool is_farewell(const char *text)
+static bool contains_any(const char *text, const char *const *list, size_t n)
 {
     char *low = str_lower(text);
     bool hit = false;
-    for (size_t i = 0; i < sizeof FAREWELLS / sizeof *FAREWELLS && !hit; i++) hit = strstr(low, FAREWELLS[i]) != NULL;
+    for (size_t i = 0; i < n && !hit; i++) hit = strstr(low, list[i]) != NULL;
     free(low);
     return hit;
+}
+
+static bool is_farewell(const char *text)
+{
+    return contains_any(text, FAREWELLS, sizeof FAREWELLS / sizeof *FAREWELLS);
+}
+
+static bool sokari_says_goodbye(const char *reply)
+{
+    char *t = str_trim(reply);
+    size_t n = strlen(t);
+    bool question = n && t[n - 1] == '?';
+    free(t);
+    return !question && contains_any(reply, SOKARI_FAREWELLS, sizeof SOKARI_FAREWELLS / sizeof *SOKARI_FAREWELLS);
+}
+
+/* A veces el modelo se traba y devuelve cientos de renglones de puntos y
+   rayas. Eso no se dice en voz alta ni se guarda: casi no trae letras. */
+static bool reply_is_garbage(const char *text)
+{
+    int letters = 0, other = 0, lines = 0;
+    for (const unsigned char *p = (const unsigned char *)text; *p;) {
+        int len = *p >= 0xF0 ? 4 : *p >= 0xE0 ? 3 : *p >= 0xC0 ? 2 : 1;
+        for (int k = 1; k < len; k++)
+            if (!p[k]) {
+                len = k;
+                break;
+            }
+        unsigned cp = *p;
+        if (len == 2) cp = ((p[0] & 0x1Fu) << 6) | (p[1] & 0x3Fu);
+        else if (len == 3) cp = ((p[0] & 0x0Fu) << 12) | ((p[1] & 0x3Fu) << 6) | (p[2] & 0x3Fu);
+        else if (len == 4) cp = 0x10000; /* emojis y demás: no son letras */
+        if (cp == '\n') lines++;
+        if (cp < 0x80 ? isalnum((int)cp) : (cp >= 0xC0 && cp <= 0x24F && cp != 0xD7 && cp != 0xF7)) letters++;
+        else if (cp > ' ') other++;
+        p += len;
+    }
+    return lines > 40 || (letters + other >= 20 && letters * 2 < letters + other);
 }
 
 /* La fecha se inyecta fresca en cada pedido (no queda en el historial) para
@@ -304,7 +434,12 @@ TurnResult agent_process(Conversation *c, const char *text)
     }
     if (c->pending_tool) {
         AgentAnswer ans = agent_classify_answer(text);
-        if (ans == ANSWER_YES) return run_pending(c, text);
+        if (ans == ANSWER_REPEAT) return repeat_pending(c, text);
+        if (ans == ANSWER_ALL) {
+            c->trust_all = true;
+            log_msg("Sí a todo: en esta conversación ya no pido confirmación.");
+        }
+        if (ans == ANSWER_YES || ans == ANSWER_ALL) return run_pending(c, text);
         clear_pending(c);
         if (ans == ANSWER_NO) {
             add_message(c->history, "user", text);
@@ -332,7 +467,7 @@ TurnResult agent_process(Conversation *c, const char *text)
 
     char *reply = NULL;
     GroqError err = {0};
-    bool failed = false;
+    bool failed = false, ending = false;
     for (int round = 0; round < MAX_TOOL_ROUNDS && !reply && !failed; round++) {
         app_status(round ? "Trabajando…" : "Pensando…");
         cJSON *msgs = build_request(c);
@@ -350,6 +485,7 @@ TurnResult agent_process(Conversation *c, const char *text)
             break;
         }
         cJSON_AddItemToArray(c->history, msg);
+        const char *said = cJSON_GetStringValue(cJSON_GetObjectItem(msg, "content"));
         cJSON *call;
         bool blocked = false;
         cJSON_ArrayForEach(call, calls)
@@ -369,7 +505,11 @@ TurnResult agent_process(Conversation *c, const char *text)
             if (blocked) {
                 /* cada tool_call necesita su resultado o Groq rechaza el historial */
                 result = xstrdup("No se hizo: primero hay que confirmar la acción anterior.");
-            } else if (tool_needs_confirmation(name, parsed) && history_has_outside_text(c->history)) {
+            } else if (!strcmp(name, "terminar_conversacion")) {
+                ending = true;
+                result = xstrdup("Listo: la conversación termina con esta respuesta.");
+            } else if (tool_needs_confirmation(name, parsed) && !c->trust_all && !config_confirm_never() &&
+                       history_has_outside_text(c)) {
                 blocked = true;
                 char *desc = tool_describe_action(name, parsed);
                 log_msg("[confirmación] %s(%s) espera un sí de voz", name, args);
@@ -400,6 +540,9 @@ TurnResult agent_process(Conversation *c, const char *text)
             cJSON_AddItemToArray(c->history, tm);
             free(result);
         }
+        /* Despedirse no necesita otra vuelta al modelo: se usa lo que dijo junto
+           con la herramienta, o un "hasta luego". */
+        if (ending && !reply) reply = str_trim(said && *said ? said : "Hasta luego.");
     }
     app_status("");
 
@@ -416,14 +559,21 @@ TurnResult agent_process(Conversation *c, const char *text)
         free(reply);
         reply = xstrdup("Listo.");
     }
+    if (reply_is_garbage(reply)) {
+        log_msg("El modelo respondió algo sin sentido (casi sin letras); lo descarto.");
+        free(reply);
+        reply = xstrdup("Me trabé con esa respuesta. ¿Me lo repites?");
+    }
     cJSON *am = cJSON_CreateObject();
     cJSON_AddStringToObject(am, "role", "assistant");
     cJSON_AddStringToObject(am, "content", reply);
     cJSON_AddItemToArray(c->history, am);
     shrink_tool_results(c->history, turn_start);
     memory_persist("assistant", reply);
-    trim_history(c->history);
+    trim_history(c);
     r.reply = reply;
-    r.keep_going = true;
+    /* Si quedó una pregunta de confirmación, la conversación sigue aunque la
+       respuesta suene a despedida: hay que poder contestarla. */
+    r.keep_going = c->pending_tool || (!ending && !sokari_says_goodbye(reply));
     return r;
 }

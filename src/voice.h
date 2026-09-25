@@ -15,6 +15,9 @@ bool voice_running(void);
 /* Tono + una frase por la salida de audio elegida (cuando Sokari no está en
    medio de una conversación). */
 void voice_test_audio(void);
+/* Dice una frase con esa voz (sin guardarla), para elegir desde
+   Configuración. Como voice_test_audio, espera a que no haya conversación. */
+void voice_preview(const char *voice_id);
 
 /* Voces disponibles, pedidas al hilo de síntesis (SAPI vive en ese hilo). */
 int voice_list_voices(TtsVoice **out);

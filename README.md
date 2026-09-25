@@ -8,7 +8,7 @@ Es **un solo `Sokari.exe`** de unos 3 MB, escrito en C. No necesita Python ni in
 
 1. Baja `Sokari.exe` de la [última versión](https://github.com/podselxd/sokari/releases/latest) y déjalo en la carpeta que quieras.
 2. Ábrelo. La primera vez te pide tu API key de Groq, que es gratis y no pide tarjeta: sácala en [console.groq.com/keys](https://console.groq.com/keys). Tu nombre y lo demás son opcionales.
-3. Listo. Aparece la esfera y un ícono en la bandeja, junto al reloj.
+3. Listo. Sokari dice "en línea" y queda un ícono en la bandeja, junto al reloj. La esfera aparece cuando le hablas.
 
 Cuando lo abres a mano después de la primera vez, sale la **ventana de Inicio** (abajo). Si lo pusiste a iniciar con Windows, al prender la PC arranca directo, sin esa ventana.
 
@@ -30,8 +30,10 @@ Baja `Sokari.exe` y ábrelo; la versión anterior no se actualiza sola a esta.
   - detectó el 94 % de las voces en inglés y ~50–60 % de una voz mexicana sintética.
   
   Con tu voz todavía no está medido. Si no te oye, usa **Ctrl+Alt+J**; lo que lo arregla es reentrenarlo con grabaciones de tu voz. Subir la sensibilidad ayuda poco. Detalles en [Entrenar "Hey Sokari"](#entrenar-hey-sokari).
-- Si le hablas mientras está hablando, se calla y te escucha.
-- Para cerrar la conversación dile "adiós" o "eso es todo". Si configuraste una palabra de apagado y la dices, Sokari se cierra al instante.
+- Después de cada respuesta te sigue escuchando unos segundos, sin que repitas "Hey Sokari".
+- Si dices **"Hey Sokari"** (o Ctrl+Alt+J) mientras está hablando, se calla y te escucha. Otros ruidos ya no lo interrumpen.
+- Para cerrar la conversación dile "adiós", "ya vete" o "eso es todo". También termina cuando Sokari se despide o si dejas de hablarle. Si configuraste una palabra de apagado y la dices, Sokari se cierra al instante.
+- Con **Aparecer solo cuando le hablas** (Configuración → Pantalla, prendida de fábrica), la esfera aparece en tu modo de pantalla al hablarle y se esconde al terminar.
 
 Menú del ícono de la bandeja (clic derecho): **Hablar con Sokari**, **Ocultar/Mostrar la esfera**, **Modo de pantalla**, **Silenciar micrófono**, **Ventana de inicio…**, **⚙ Configuración…**, **Abrir carpeta de Sokari** y **Salir**.
 
@@ -51,9 +53,10 @@ Sale al abrir `Sokari.exe` a mano, o desde **Ventana de inicio…** en la bandej
 |---|---|
 | Inicio | Iniciar, modo de pantalla, salida de audio y botones rápidos (ver arriba) |
 | Cuenta | API key de Groq, tu nombre, contraseña de tu perfil y palabra de apagado |
-| Pantalla | Modo de pantalla, resolución de la esfera, estilo (halo de puntos o líneas) y subtítulos |
-| Voz y audio | Volumen, voz de Windows (Raúl de México por defecto), micrófono, salida de audio y sensibilidad de "Hey Sokari" |
-| General | Iniciar con Windows, conectar tus PCs con Tailscale, sonido de activación, Obsidian y buscar actualizaciones |
+| Pantalla | Modo de pantalla, resolución de la esfera, estilo (halo de puntos o líneas), subtítulos y "Aparecer solo cuando le hablas" |
+| Voz y audio | Volumen, voz de Windows (Raúl de México por defecto, con botón **Probar**), micrófono, salida de audio y sensibilidad de "Hey Sokari" |
+| General | Iniciar con Windows, sonido de activación, Obsidian y pedir un "sí" antes de acciones delicadas |
+| Dispositivos | Tailscale, secreto de malla, tus otras PCs (Detectar, Probar, Quitar) y permiso en el firewall. Ver [Tus otras PCs](#tus-otras-pcs) |
 
 Modos de pantalla:
 
@@ -67,6 +70,20 @@ F11 solo funciona en Ventana y Minimizado, cuando la ventana tiene el foco. En l
 
 La salida de audio elegida vale para la voz de Sokari y su tono. Si pusiste un sonido de activación propio (MP3 o WAV), ese sale por la salida predeterminada de Windows.
 
+### Tus otras PCs
+
+Para decirle desde una PC "dile a mi laptop que abra Spotify":
+
+1. Instala Tailscale en cada PC (Configuración → Dispositivos → **Instalar Tailscale**) y entra **con la misma cuenta** en todas.
+2. En una PC dale **Copiar secreto** y pégalo en ese mismo campo en las demás. Dale **Guardar**.
+3. Dale **Detectar mis PCs**: agrega tus otras PCs con Windows que estén en tu Tailscale. También puedes decirle a Sokari "registra mi laptop en 100.x.y.z".
+4. Dale **Probar** a cada una. Te dice qué falta:
+   - "el secreto no coincide": repite el paso 2.
+   - "Sokari no le contesta": ábrelo en esa PC.
+   - "no contesta": que esté prendida, con Tailscale conectado y sin otra VPN. Si todo eso está bien, en **esa** PC dale **Permitir en el firewall** (pide permiso de administrador y abre el puerto solo para tu red de Tailscale).
+
+Sokari empieza a recibir órdenes solo en cuanto Tailscale se conecta, sin reiniciarlo. La PC que recibe una orden avisa con una notificación, y la respuesta se oye en la PC donde hablaste.
+
 ## Qué puede hacer
 
 - Platicar y responder preguntas. Usa los modelos gratis de Groq y rota entre GPT-OSS 120B, Qwen 3 y GPT-OSS 20B para no quedarse sin cupo.
@@ -75,7 +92,7 @@ La salida de audio elegida vale para la voz de Sokari y su tono. Si pusiste un s
 - Controlar el volumen (también a un nivel exacto) y la música: pausa, siguiente y anterior.
 - Mostrar el escritorio, cambiar de ventana, minimizar todo, bloquear la PC, poner un video en pantalla completa y cerrar la pestaña.
 - Ver qué ventanas tienes abiertas y traer una al frente.
-- Escribir texto donde está el cursor. Presiona Enter por su cuenta solo en cosas de bajo riesgo, como una búsqueda; si el texto le llega a otra persona, te pregunta antes (lo decide el modelo, con la regla de confirmación de abajo como respaldo). Nunca escribe en terminales.
+- Escribir texto donde está el cursor y darle Enter. No ve la pantalla: te dice en qué ventana escribió, pero no puede saber si se envió. Nunca escribe en terminales.
 - Leer y copiar al portapapeles.
 - Listar, leer, buscar y mover archivos, sin sobrescribir nada. Si borra algo, siempre va a la Papelera. No toca rutas de red ni las carpetas donde Sokari guarda su configuración y su memoria.
 - Ver CPU, RAM, disco y batería.
@@ -83,7 +100,7 @@ La salida de audio elegida vale para la voz de Sokari y su tono. Si pusiste un s
 - Poner recordatorios con hora (te avisa solo cuando llega el momento) o para la próxima vez que le hables.
 - Recordar datos para siempre, con perfiles por persona que puedes proteger con contraseña, y exportarlos a Obsidian.
 - Crear comandos propios que junten varias acciones ("crea un comando que abra X y ponga música").
-- Mandarle órdenes a tus otras PCs por Tailscale ("dile a mi laptop que…"). Solo registra direcciones de Tailscale.
+- Mandarle órdenes a tus otras PCs por Tailscale ("dile a mi laptop que…"). Solo registra direcciones de Tailscale. Ver [Tus otras PCs](#tus-otras-pcs).
 
 ## Privacidad y seguridad
 
@@ -92,6 +109,9 @@ La salida de audio elegida vale para la voz de Sokari y su tono. Si pusiste un s
 - Lo que le pidas leer (un archivo, el portapapeles o el título de una ventana) viaja a Groq como parte de la conversación. Tenlo en cuenta si es algo delicado.
 - Sokari no puede ejecutar comandos libres ni hacer clic en cualquier parte: solo tiene un set cerrado de acciones. No abre programas ni scripts sueltos y nunca escribe en terminales.
 - Una página, un archivo, el portapapeles o el título de una pestaña pueden traer instrucciones escondidas para el modelo. Por eso, mientras algo así siga en la conversación, Sokari te pide un "sí" de voz antes de enviar texto, abrir un archivo, mover o borrar, crear o ejecutar comandos propios y usar la red entre tus PCs. La pregunta la arma Sokari, no el modelo, así que escuchas lo que va a hacer de verdad.
+  - Cuenta solo la conversación actual: al volver a decir "Hey Sokari", lo que leyó antes se borra.
+  - "Sí a todo" hace que no vuelva a preguntar en esa conversación. "¿Qué?" repite la pregunta.
+  - En Configuración → General puedes apagar la pregunta. Es bajo tu riesgo: un texto con instrucciones escondidas podría hacerlo actuar sin avisarte.
 - No lee páginas de tu red local (router, otras PCs, localhost), ni siquiera si una página pública redirige ahí.
 - La palabra de apagado se revisa en tu PC. Nunca se le manda al modelo ni se guarda en la memoria, y las herramientas de archivos no pueden leer la carpeta donde está guardada.
 - El servidor para tus otras PCs escucha solo en tu IP de Tailscale, nunca en internet, y pide un secreto que se genera solo. Sokari solo manda ese secreto a direcciones de Tailscale.
@@ -102,7 +122,7 @@ La salida de audio elegida vale para la voz de Sokari y su tono. Si pusiste un s
 - `Escritorio\Sokari\`: tu memoria (datos, conversación reciente, perfiles, recordatorios y comandos propios).
 - Las carpetas de la versión anterior, si la tenías: el respaldo de lo de antes. Sokari ya no las usa y, como tienen copia de tu API key y tu memoria, sus herramientas de archivos no las pueden leer.
 
-Para usar sonidos propios, elige tu sonido de activación en Configuración → General. También puedes poner un `busqueda.mp3` en `%LOCALAPPDATA%\Sokari\sounds\`, que suena mientras busca.
+Para usar sonidos propios, elige tu sonido de activación en Configuración → General. Suena completo (hasta 10 s) mientras Sokari ya te escucha: con audífonos no hay problema; con bocinas, mejor uno corto, porque el micrófono lo puede oír. También puedes poner un `busqueda.mp3` en `%LOCALAPPDATA%\Sokari\sounds\`, que suena mientras busca.
 
 ## Compilar desde el código
 
