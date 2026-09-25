@@ -88,7 +88,7 @@ static void defaults(AppConfig *c)
     c->voice = xstrdup("");
     c->mic_name = xstrdup("");
     c->output_name = xstrdup("");
-    c->display_mode = DISPLAY_FULLSCREEN_BORDERLESS;
+    c->display_mode = DISPLAY_FULLSCREEN;
     c->resolution = 0;
     c->volume = 100;
     c->wake_sensitivity = 67;
@@ -99,7 +99,7 @@ static void defaults(AppConfig *c)
     c->autostart = false;
     c->mic_muted = false;
     c->show_only_talking = true;
-    c->confirm_never = false;
+    c->full_access = true;
 }
 
 static void apply_kv(AppConfig *c, const char *key, const char *value)
@@ -136,7 +136,7 @@ static void apply_kv(AppConfig *c, const char *key, const char *value)
     else if (!strcmp(key, "SOKARI_AUTOSTART")) c->autostart = parse_bool(value);
     else if (!strcmp(key, "SOKARI_MIC_MUTED")) c->mic_muted = parse_bool(value);
     else if (!strcmp(key, "SOKARI_SHOW_ONLY_TALKING")) c->show_only_talking = parse_bool(value);
-    else if (!strcmp(key, "SOKARI_CONFIRM_NEVER")) c->confirm_never = parse_bool(value);
+    else if (!strcmp(key, "SOKARI_FULL_ACCESS")) c->full_access = parse_bool(value);
 }
 
 static bool load_env_file(const wchar_t *path, AppConfig *c)
@@ -201,7 +201,7 @@ static bool save_locked(void)
     sb_appendf(&sb, "SOKARI_AUTOSTART=%d\n", g_cfg.autostart ? 1 : 0);
     sb_appendf(&sb, "SOKARI_MIC_MUTED=%d\n", g_cfg.mic_muted ? 1 : 0);
     sb_appendf(&sb, "SOKARI_SHOW_ONLY_TALKING=%d\n", g_cfg.show_only_talking ? 1 : 0);
-    sb_appendf(&sb, "SOKARI_CONFIRM_NEVER=%d\n", g_cfg.confirm_never ? 1 : 0);
+    sb_appendf(&sb, "SOKARI_FULL_ACCESS=%d\n", g_cfg.full_access ? 1 : 0);
     ensure_dir(g_paths.local_dir);
     bool ok = write_file_atomic(g_paths.config_file, sb.data, sb.len);
     sb_free(&sb);
@@ -306,12 +306,20 @@ bool config_show_only_talking(void)
     return v;
 }
 
-bool config_confirm_never(void)
+bool config_full_access(void)
 {
     AcquireSRWLockShared(&g_lock);
-    bool v = g_cfg.confirm_never;
+    bool v = g_cfg.full_access;
     ReleaseSRWLockShared(&g_lock);
     return v;
+}
+
+void config_set_full_access(bool on)
+{
+    AcquireSRWLockExclusive(&g_lock);
+    g_cfg.full_access = on;
+    save_locked();
+    ReleaseSRWLockExclusive(&g_lock);
 }
 
 void config_set_mic_muted(bool muted)

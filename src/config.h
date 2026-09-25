@@ -36,7 +36,7 @@ typedef struct {
     bool autostart;
     bool mic_muted;
     bool show_only_talking; /* la esfera se esconde cuando no le hablas */
-    bool confirm_never;     /* nunca pide un "sí" de voz, aunque haya leído algo de afuera */
+    bool full_access;       /* acceso completo: no pide permiso para nada, salvo antes de borrar */
 } AppConfig;
 
 typedef struct {
@@ -72,7 +72,8 @@ int config_volume(void);
 float config_wake_threshold(void);
 bool config_mic_muted(void);
 bool config_show_only_talking(void);
-bool config_confirm_never(void);
+bool config_full_access(void);
+void config_set_full_access(bool on);
 void config_set_mic_muted(bool muted);
 void config_set_orb_pos(int x, int y);
 void config_set_window_rect(int x, int y, int w, int h);

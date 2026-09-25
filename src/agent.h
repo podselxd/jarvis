@@ -26,6 +26,8 @@ void conv_set_remote(Conversation *c, bool remote);
    "¿qué?", "no te entendí": se repite la pregunta en vez de cancelarla. */
 typedef enum { ANSWER_OTHER, ANSWER_YES, ANSWER_NO, ANSWER_ALL, ANSWER_REPEAT } AgentAnswer;
 AgentAnswer agent_classify_answer(const char *text);
+/* ¿La respuesta del modelo termina pidiendo permiso para hacer algo? */
+bool agent_asks_permission(const char *reply);
 
 /* Pipeline completo para un texto ya transcripto (o llegado por la malla):
    palabra de apagado (chequeo local, nunca llega a Groq) -> despedida ->

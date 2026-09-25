@@ -12,6 +12,7 @@
 #include "autostart.h"
 #include "config.h"
 #include "third_party/cJSON.h"
+#include "tools.h"
 #include "update.h"
 #include "util.h"
 
@@ -107,9 +108,22 @@ static void test_config(const wchar_t *dir)
     write_config("");
     config_load();
     AppConfig c = config_snapshot();
-    check(c.display_mode == DISPLAY_FULLSCREEN_BORDERLESS && !*c.output_name && c.win_w == -1,
-          "valores por defecto: pantalla completa sin bordes, salida predeterminada, ventana sin tamaño");
+    check(c.display_mode == DISPLAY_FULLSCREEN && !*c.output_name && c.win_w == -1,
+          "valores por defecto: pantalla completa (con bordes), salida predeterminada, ventana sin tamaño");
+    check(c.full_access, "y acceso completo prendido");
     config_free(&c);
+
+    free(run_tool("cambiar_permisos", "{\"acceso_completo\":false}"));
+    config_load();
+    check(!config_full_access(), "«pregúntame antes»: se apaga y queda guardado");
+    free(run_tool("cambiar_permisos", "{\"acceso_completo\":true}"));
+    config_load();
+    check(config_full_access(), "«tienes permiso para todo»: se prende y queda guardado");
+    write_config("SOKARI_CONFIRM_NEVER=0\n");
+    config_load();
+    check(config_full_access(), "al actualizar desde la 2.4.0 queda prendido (la opción vieja ya no cuenta)");
+    write_config("");
+    config_load();
 
     config_set_display_mode(DISPLAY_WINDOWED);
     config_set_window_rect(-1200, 40, 800, 600);
@@ -144,7 +158,7 @@ static void test_config(const wchar_t *dir)
     write_config("SOKARI_DISPLAY_MODE=inventado\nSOKARI_WINDOW=0,0,0,500\n");
     config_load();
     c = config_snapshot();
-    check(c.display_mode == DISPLAY_FULLSCREEN_BORDERLESS, "un modo desconocido deja el de por defecto");
+    check(c.display_mode == DISPLAY_FULLSCREEN, "un modo desconocido deja el de por defecto");
     check(c.win_w == -1, "un tamaño de ventana en cero se ignora");
     config_free(&c);
 

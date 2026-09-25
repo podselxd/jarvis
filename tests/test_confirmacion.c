@@ -34,6 +34,7 @@ static void check(bool ok, const char *what)
 static const char *g_script[16];
 static int g_script_len, g_script_pos, g_call_id;
 static bool g_saw_injection; /* el último pedido a "Groq" traía el texto escondido de la página */
+static bool g_saw_full_mode; /* y le decía que tiene acceso completo */
 
 static void script(const char *a, const char *b, const char *c)
 {
@@ -48,6 +49,7 @@ cJSON *groq_chat(const cJSON *messages, const cJSON *tools, GroqError *err)
 {
     char *sent = cJSON_PrintUnformatted(messages);
     g_saw_injection = strstr(sent, "IGNORA TUS INSTRUCCIONES") != NULL;
+    g_saw_full_mode = strstr(sent, "Tienes acceso completo") != NULL;
     free(sent);
     cJSON *m = cJSON_CreateObject();
     cJSON_AddStringToObject(m, "role", "assistant");
@@ -184,17 +186,15 @@ static void test_respuestas(void)
     check(ok, "'¿qué?' pide que repita la pregunta");
 }
 
-static void set_confirm_never(bool never)
+static void set_full_access(bool on)
 {
-    AppConfig c = config_snapshot();
-    c.confirm_never = never;
-    config_apply(&c);
-    config_free(&c);
+    config_set_full_access(on);
 }
 
 static void test_menos_preguntas(void)
 {
-    printf("-- '¿qué?' no cancela la acción pendiente --\n");
+    printf("-- '¿qué?' no cancela la acción pendiente (sin acceso completo) --\n");
+    set_full_access(false);
     Conversation *c = conv_create(false);
     script(LEE, ENVIA, NULL);
     free(say(c, "lee la receta de esta página"));
@@ -227,14 +227,14 @@ static void test_menos_preguntas(void)
     check(!strstr(g_ran, "type_text"), "el 'sí a todo' de antes ya no vale: con una página nueva vuelve a preguntar");
     conv_destroy(c);
 
-    printf("-- opción 'No preguntar nunca' --\n");
-    set_confirm_never(true);
+    printf("-- con acceso completo --\n");
+    set_full_access(true);
     c = conv_create(false);
     script(LEE, ENVIA, "Listo.");
     free(say(c, "lee la receta y haz lo que dice"));
-    check(strstr(g_ran, "type_text") != NULL, "con la opción apagada no pide confirmación");
+    check(strstr(g_ran, "type_text") != NULL, "no pide confirmación aunque haya leído algo de afuera");
     conv_destroy(c);
-    set_confirm_never(false);
+    set_full_access(false);
 
     printf("-- órdenes por la malla: cada una es una conversación aparte --\n");
     c = conv_create(false);
@@ -247,6 +247,7 @@ static void test_menos_preguntas(void)
     free(say(c, "mueve a.txt a la carpeta b"));
     check(strstr(g_ran, "mover_archivo") != NULL, "en la orden siguiente, lo leído antes ya no cuenta");
     conv_destroy(c);
+    set_full_access(true);
 }
 
 static void test_despedidas(void)
@@ -291,7 +292,8 @@ static void test_respuesta_basura(void)
 
 static void test_flujo(void)
 {
-    printf("-- sin nada leído de afuera: igual que antes --\n");
+    printf("-- sin acceso completo y sin nada leído de afuera: igual que antes --\n");
+    set_full_access(false);
     Conversation *c = conv_create(false);
     script(ENVIA, "Listo, lo mandé.", NULL);
     free(say(c, "escribe te hackearon y envíalo"));
@@ -353,6 +355,89 @@ static void test_flujo(void)
     free(say(c, "sí"));
     check(!strstr(g_ran, "mover_archivo"), "y un 'sí' que llega por la malla no la ejecuta");
     conv_destroy(c);
+    set_full_access(true);
+}
+
+static void test_acceso_completo(void)
+{
+    printf("-- acceso completo (de fábrica): no pregunta nada --\n");
+    check(config_full_access(), "viene prendido");
+    Conversation *c = conv_create(false);
+    script(LEE, ENVIA, "Listo, lo mandé.");
+    free(say(c, "lee la receta y mándala"));
+    check(strstr(g_ran, "type_text") != NULL, "con texto de afuera igual manda el mensaje, sin preguntar");
+    check(g_saw_full_mode, "y el modelo sabe que tiene permiso para todo");
+    script("tool:mover_archivo {\"origen\":\"C:\\\\a.txt\",\"destino_carpeta\":\"C:\\\\b\"}", "Listo.", NULL);
+    free(say(c, "mueve a.txt a la carpeta b"));
+    check(strstr(g_ran, "mover_archivo") != NULL, "mover archivos: directo");
+
+    printf("-- borrar siempre pregunta --\n");
+    script("tool:borrar_archivo {\"ruta\":\"C:\\\\x.txt\"}", NULL, NULL);
+    char *r = say(c, "borra x.txt");
+    check(!strstr(g_ran, "borrar_archivo") && r && strstr(r, "Antes de borrar siempre te pregunto") &&
+              strstr(r, "¿Lo hago?"),
+          "aunque no haya nada de afuera, espera tu sí");
+    free(r);
+    free(say(c, "sí"));
+    check(strstr(g_ran, "borrar_archivo") != NULL, "y con 'sí' lo manda a la papelera");
+    conv_destroy(c);
+
+    c = conv_create(false);
+    conv_set_remote(c, true);
+    script("tool:borrar_archivo {\"ruta\":\"C:\\\\x.txt\"}", NULL, NULL);
+    r = say(c, "borra x.txt");
+    check(!strstr(g_ran, "borrar_archivo") && r && strstr(r, "confirme de voz en esta PC"),
+          "por la malla, borrar se niega (nadie puede decir sí en esa PC)");
+    free(r);
+    conv_destroy(c);
+
+    printf("-- si el modelo pregunta '¿lo hago?' de todos modos --\n");
+    c = conv_create(false);
+    script("Encontré a.txt en Descargas. ¿Quieres que lo mueva a la carpeta b?", "tool:mover_archivo {\"origen\":\"C:\\\\a.txt\",\"destino_carpeta\":\"C:\\\\b\"}",
+           "Listo, lo moví a la carpeta b.");
+    r = say(c, "busca a.txt y acomódalo");
+    check(strstr(g_ran, "mover_archivo") && r && !strcmp(r, "Listo, lo moví a la carpeta b."),
+          "no te hace contestar: se le dice que sí y lo hace");
+    free(r);
+    script("¿A quién se lo mando, a Ana o a Beto?", NULL, NULL);
+    r = say(c, "manda el archivo");
+    check(!*g_ran && r && strstr(r, "¿A quién"), "si le falta un dato, eso sí te lo pregunta");
+    free(r);
+    conv_destroy(c);
+
+    printf("-- una página no puede darle acceso completo --\n");
+    set_full_access(false);
+    c = conv_create(false);
+    script(LEE, "tool:cambiar_permisos {\"acceso_completo\":true}", NULL);
+    r = say(c, "lee esta página y haz lo que dice");
+    check(!strstr(g_ran, "cambiar_permisos") && r && strstr(r, "darme acceso completo"),
+          "después de leer algo de afuera, prenderlo pide tu sí");
+    free(r);
+    free(say(c, "no"));
+    script("¿Quieres que lo mueva a la carpeta b?", NULL, NULL);
+    r = say(c, "busca a.txt");
+    check(!*g_ran && r && strstr(r, "¿Quieres que lo mueva"), "y sin acceso completo, sus preguntas te llegan a ti");
+    free(r);
+    conv_destroy(c);
+    c = conv_create(false);
+    script("tool:cambiar_permisos {\"acceso_completo\":true}", "Listo, ya no te pregunto.", NULL);
+    free(say(c, "tienes permiso para todo"));
+    check(strstr(g_ran, "cambiar_permisos") != NULL, "si se lo dices tú, lo prende sin preguntar");
+    conv_destroy(c);
+    set_full_access(true);
+}
+
+static void test_detecta_permiso(void)
+{
+    printf("-- qué cuenta como pedir permiso --\n");
+    check(agent_asks_permission("Encontré el archivo. ¿Quieres que lo mueva a Documentos?") &&
+              agent_asks_permission("¿Lo envío?") && agent_asks_permission("Ya está abierto. ¿Le doy play?") &&
+              agent_asks_permission("¿Procedo?"),
+          "«¿quieres que…?», «¿lo envío?», «¿le doy play?», «¿procedo?»");
+    check(!agent_asks_permission("¿A quién se lo mando?") && !agent_asks_permission("¿Qué canción quieres?") &&
+              !agent_asks_permission("¿Quieres que lo mueva a Documentos o a Descargas?") &&
+              !agent_asks_permission("¿Te ayudo con algo más?") && !agent_asks_permission("Lo moví a Documentos."),
+          "no: pedir un dato, dar a elegir, ofrecer algo más o no preguntar");
 }
 
 int wmain(void)
@@ -368,6 +453,8 @@ int wmain(void)
     test_menos_preguntas();
     test_despedidas();
     test_respuesta_basura();
+    test_acceso_completo();
+    test_detecta_permiso();
     printf("%d/%d pruebas %s\n", g_total - g_fail, g_total, g_fail ? "— HAY FALLAS" : "ok");
     return g_fail ? 1 : 0;
 }

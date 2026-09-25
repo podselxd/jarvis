@@ -360,6 +360,56 @@ static bool reply_is_garbage(const char *text)
     return lines > 40 || (letters + other >= 20 && letters * 2 < letters + other);
 }
 
+/* Borrar siempre pide un sí de voz, con o sin acceso completo. */
+static bool tool_is_delete(const char *name)
+{
+    return !strcmp(name, "borrar_archivo");
+}
+
+/* Con acceso completo solo se pregunta antes de borrar. Sin él, como antes:
+   las acciones delicadas, cuando en la conversación hay texto de afuera. */
+static bool must_confirm(const Conversation *c, const char *name, const cJSON *args)
+{
+    if (c->trust_all) return false;
+    if (tool_is_delete(name)) return true;
+    return !config_full_access() && tool_needs_confirmation(name, args) && history_has_outside_text(c);
+}
+
+/* ¿La respuesta termina pidiendo permiso para hacer algo ("¿Quieres que lo
+   mueva?", "¿Lo envío?")? No cuentan las que piden un dato (¿a quién?, ¿cuál?),
+   las que dan a elegir (¿esto o aquello?) ni las que ofrecen algo más. */
+bool agent_asks_permission(const char *reply)
+{
+    char *t = str_trim(reply);
+    size_t n = strlen(t);
+    bool ends_q = n && t[n - 1] == '?';
+    const char *q = NULL;
+    for (const char *p = strstr(t, "¿"); p; p = strstr(p + 1, "¿")) q = p;
+    if (!q) {
+        q = t;
+        for (const char *p = t; *p; p++)
+            if ((*p == '.' || *p == '!' || *p == '\n') && p[1]) q = p + 1;
+    }
+    char *low = str_lower(q);
+    static const char *const ASK[] = {
+        "quieres que",   "deseas que",     "te gustaría que", "te parece si",   "te parece que",  "prefieres que lo",
+        "lo hago",       "procedo",        "confirmas",       "estás seguro",   "estas seguro",   "seguro que quieres",
+        "lo envío",      "lo envio",       "lo mando",        "lo guardo",      "lo recuerdo",    "lo exporto",
+        "lo muevo",      "lo abro",        "lo cierro",       "lo subo",        "lo publico",     "lo intento",
+        "te lo mando",   "te lo envío",    "sigo",            "continúo",       "continuo",       "puedo",
+        "me permites",   "me das permiso", "autorizas",       "está bien si",   "esta bien si",   "le doy",
+    };
+    static const char *const NOT[] = {"qué",     "cuál",    "cuáles",   "quién",     "quiénes",   "dónde",
+                                      "cuándo",  "cómo",    "cuánto",   "cuánta",    "cuántos",   "cuántas",
+                                      " o ",     "algo más", "otra cosa", "en qué más", "más ayuda", "ayudarte con"};
+    bool ask = false;
+    for (size_t i = 0; i < sizeof ASK / sizeof *ASK && !ask; i++) ask = strstr(low, ASK[i]) != NULL;
+    for (size_t i = 0; i < sizeof NOT / sizeof *NOT && ask; i++) ask = strstr(low, NOT[i]) == NULL;
+    free(low);
+    free(t);
+    return ends_q && ask;
+}
+
 /* La fecha se inyecta fresca en cada pedido (no queda en el historial) para
    que los recordatorios relativos ("en 10 minutos") se calculen bien. */
 static cJSON *context_message(Conversation *c)
@@ -381,6 +431,19 @@ static cJSON *context_message(Conversation *c)
         sb_appendf(&sb, "%s%s", i ? ", " : "\nDispositivos registrados para gestionar_dispositivo: ", devs[i].name);
     if (nd) sb_append(&sb, ".");
     mesh_devices_free(devs, nd);
+    /* Va en cada pedido: si cambia el modo, cuenta desde el siguiente. */
+    if (config_full_access())
+        sb_append(&sb, "\nTienes acceso completo: quien habla te dio permiso para todo. Nunca pidas permiso ni "
+                       "confirmación ('¿lo hago?', '¿quieres que...?'): hazlo directo y di en pocas palabras qué "
+                       "hiciste. Guarda sin preguntar los datos personales que te cuente, exporta a Obsidian sin "
+                       "preguntar y manda mensajes con type_text (enviar=true) sin preguntar. Solo borrar necesita un "
+                       "sí, y ese lo pide el sistema.");
+    else
+        sb_append(&sb, "\nPide permiso solo en estos casos: si te cuenta o corrige un dato personal, pregunta si "
+                       "quiere que lo recuerdes (si ya te lo pidió, guárdalo directo); antes de exportar_a_obsidian, "
+                       "pregunta y espera un sí; si type_text le llega a otra persona (mensaje, email, publicación), "
+                       "deja enviar=false y pregunta antes, salvo que ya te lo haya pedido. Fuera de esos casos no "
+                       "pidas permiso: hazlo; si una acción necesita confirmación, el sistema la pide solo.");
     if (c->announce_pending) {
         char *pend = reminders_take_pending_for(current_speaker());
         if (*pend)
@@ -467,7 +530,7 @@ TurnResult agent_process(Conversation *c, const char *text)
 
     char *reply = NULL;
     GroqError err = {0};
-    bool failed = false, ending = false;
+    bool failed = false, ending = false, auto_yes = false;
     for (int round = 0; round < MAX_TOOL_ROUNDS && !reply && !failed; round++) {
         app_status(round ? "Trabajando…" : "Pensando…");
         cJSON *msgs = build_request(c);
@@ -482,6 +545,17 @@ TurnResult agent_process(Conversation *c, const char *text)
             cJSON *content = cJSON_GetObjectItem(msg, "content");
             reply = str_trim(cJSON_IsString(content) ? content->valuestring : "");
             cJSON_Delete(msg);
+            /* Con acceso completo, si aun así pregunta "¿lo hago?", se le
+               contesta que sí (una vez por turno) en vez de hacerte contestar. */
+            if (!auto_yes && config_full_access() && round + 1 < MAX_TOOL_ROUNDS && agent_asks_permission(reply)) {
+                auto_yes = true;
+                log_msg("Acceso completo: el modelo preguntó «%s» y le contesto que sí.", reply);
+                add_message(c->history, "assistant", reply);
+                add_message(c->history, "user", "Sí, hazlo. Tienes acceso completo: no vuelvas a preguntar.");
+                free(reply);
+                reply = NULL;
+                continue;
+            }
             break;
         }
         cJSON_AddItemToArray(c->history, msg);
@@ -508,8 +582,7 @@ TurnResult agent_process(Conversation *c, const char *text)
             } else if (!strcmp(name, "terminar_conversacion")) {
                 ending = true;
                 result = xstrdup("Listo: la conversación termina con esta respuesta.");
-            } else if (tool_needs_confirmation(name, parsed) && !c->trust_all && !config_confirm_never() &&
-                       history_has_outside_text(c)) {
+            } else if (must_confirm(c, name, parsed)) {
                 blocked = true;
                 char *desc = tool_describe_action(name, parsed);
                 log_msg("[confirmación] %s(%s) espera un sí de voz", name, args);
@@ -521,8 +594,10 @@ TurnResult agent_process(Conversation *c, const char *text)
                     c->pending_tool = xstrdup(name);
                     c->pending_args = xstrdup(args);
                     result = xstrdup("Pendiente: se le pidió confirmación de voz a quien habla.");
-                    reply = str_printf("Como en esta conversación leí algo de afuera, confirma primero: %s. ¿Lo hago? "
-                                       "Di sí o no.",
+                    reply = str_printf("%s: %s. ¿Lo hago? Di sí o no.",
+                                       tool_is_delete(name) ? "Antes de borrar siempre te pregunto"
+                                                            : "Como en esta conversación leí algo de afuera, "
+                                                              "confirma primero",
                                        desc);
                 }
                 free(desc);
