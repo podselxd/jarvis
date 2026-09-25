@@ -6,8 +6,9 @@
      uniforme, sin acumularse en los polos); el borde brilla solo porque ahí
      los puntos se apilan en perspectiva.
    - Líneas: 140 meridianos de 60 segmentos, como el diseño original.
-   Siempre en movimiento; con la voz de Sokari palpita (se agranda con cada
-   sílaba) y agrega una ondulación rápida con destellos. Rasterizador propio
+   Siempre en movimiento; con la voz de Sokari agrega una ondulación rápida
+   con destellos, y el halo de puntos además palpita con cada sílaba (se
+   agranda y se aclara hacia blanco). Rasterizador propio
    con antialiasing, repartido en varios hilos por franjas horizontales. */
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -24,7 +25,10 @@
 #define DOT_MAX_PER_RING 170
 #define BUCKETS 12
 #define MAX_WORKERS 8
-#define MARGIN 0.80f /* la esfera ocupa menos que el lienzo: las ondas y el pulso nunca se cortan */
+#define MARGIN 0.80f /* la esfera ocupa menos que el lienzo: las ondas y el pulso de los puntos no se cortan */
+/* Las líneas al hablar llegan a 1.6 veces su radio (medido): con un lienzo
+   1.32 veces más grande tampoco se cortan. */
+#define LINES_ROOM 1.32f
 
 const SphereParams SPHERE_IDLE = {{0x45, 0x50, 0xe6}, {0xff, 0x2b, 0xd1}, 0.15f, 0.24f, 8.0f};
 const SphereParams SPHERE_SPEAK = {{0x5b, 0x3d, 0xf0}, {0xff, 0x47, 0xe0}, 0.32f, 0.40f, 11.0f};
@@ -58,6 +62,7 @@ struct SphereRenderer {
     Dot *dots;
     int ndots;
     SphereStyle style;
+    float fit; /* fracción del tamaño normal de la esfera en este lienzo */
     float colors[BUCKETS][3];
     float widths[BUCKETS];
     float *acc, *glow_a, *glow_b, *colacc;
@@ -343,10 +348,21 @@ static void build_dots(SphereRenderer *r)
     r->ndots = n;
 }
 
+float sphere_room(SphereStyle style)
+{
+    return style == SPHERE_STYLE_LINES ? LINES_ROOM : 1.0f;
+}
+
 SphereRenderer *sphere_create(int size)
+{
+    return sphere_create_fit(size, 1.0f);
+}
+
+SphereRenderer *sphere_create_fit(int size, float fit)
 {
     if (size < 64) size = 64;
     SphereRenderer *r = xcalloc(1, sizeof *r);
+    r->fit = fit > 0.0f && fit <= 1.0f ? fit : 1.0f;
     r->factor = size >= 800 ? 4 : 2;
     size -= size % r->factor;
     r->size = size;
@@ -360,7 +376,7 @@ SphereRenderer *sphere_create(int size)
             r->bz[m][j] = sinf(r->theta[j]) * sinf(r->phi[m]);
         }
     build_dots(r);
-    float s = (float)size / 960.0f;
+    float s = (float)size / 960.0f * r->fit;
     for (int i = 0; i < BUCKETS; i++) {
         float f = (float)i / (BUCKETS - 1);
         r->widths[i] = (0.5f + f * 1.3f) * s;
@@ -413,6 +429,7 @@ int sphere_size(const SphereRenderer *r)
 
 typedef struct {
     float cx, cy, R, D, ripple, voice;
+    float white; /* cuánto se aclaran los puntos hacia blanco (el pulso) */
     float cosA, sinA, cosT, sinT;
     float vt;
 } Frame;
@@ -480,23 +497,31 @@ static void dot_style(const SphereParams *p, const Frame *f, const Projected *pr
     if (hue > 1) hue = 1;
     float bright = 0.12f + 0.75f * rim + 0.12f * depth + 0.40f * smoothstep(0.5f, 1.1f, crest);
     bright *= 1.0f + 0.35f * f->voice;
-    for (int k = 0; k < 3; k++) d->c[k] = (p->low[k] + (p->high[k] - p->low[k]) * hue) * bright;
+    for (int k = 0; k < 3; k++) {
+        float c = (p->low[k] + (p->high[k] - p->low[k]) * hue) * bright;
+        d->c[k] = c + (255.0f * bright - c) * f->white;
+    }
     d->rad = (0.75f + 0.85f * fminf(bright, 1.0f)) * s;
     d->x = pr->sx;
     d->y = pr->sy;
 }
 
 void sphere_render(SphereRenderer *r, double t, double angle, double voice_t, const SphereParams *p, float voice,
-                   SphereStyle style, uint32_t *out, int stride, bool premultiplied)
+                   float pulse, SphereStyle style, uint32_t *out, int stride, bool premultiplied)
 {
     int size = r->size;
-    float s = (float)size / 960.0f;
+    float s = (float)size / 960.0f * r->fit;
     if (voice < 0) voice = 0;
     if (voice > 1) voice = 1;
+    bool dots = style == SPHERE_STYLE_DOTS;
+    /* El pulso es solo del halo de puntos: las líneas ya se mueven de sobra. */
+    if (pulse < 0 || !dots) pulse = 0;
+    if (pulse > 1) pulse = 1;
     Frame f;
     f.cx = size * 0.5f;
     f.cy = size * 0.5f;
-    f.R = 360.0f * s * MARGIN * (1.0f + 0.06f * voice);
+    f.R = 360.0f * s * MARGIN * (dots ? 1.0f + 0.04f * voice + 0.11f * pulse : 1.0f + 0.06f * voice);
+    f.white = 0.5f * pulse;
     f.D = 760.0f * s * MARGIN;
     f.ripple = p->ripple > 0.0001f ? p->ripple : 0.0001f;
     f.voice = voice;
@@ -509,7 +534,6 @@ void sphere_render(SphereRenderer *r, double t, double angle, double voice_t, co
     float wt = (float)voice_t;
     r->style = style;
 
-    bool dots = style == SPHERE_STYLE_DOTS;
     if (dots) {
         /* El halo es más redondo que las líneas: misma onda, menos amplitud. */
         Frame fd = f;
@@ -548,7 +572,7 @@ void sphere_render(SphereRenderer *r, double t, double angle, double voice_t, co
     }
 
     parallel(r, 1);
-    float glow = p->glow + 4.0f * voice;
+    float glow = p->glow + 4.0f * voice + 3.0f * pulse;
     blur_glow(r, glow * s);
     if (glow <= 0.01f) memset(r->glow_a, 0, sizeof(float) * (size_t)r->half * r->half * 3);
     r->out = out;
