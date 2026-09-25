@@ -26,6 +26,11 @@
 
 #define HUD_CLASS L"SokariHUD"
 #define HOTKEY_TALK 1
+/* "Aparecer solo cuando le hablas": al terminar de hablar, la esfera espera
+   un momento (que se vea que terminó) y se esconde. */
+#define WM_APP_AUTOHIDE (WM_APP + 9)
+#define TIMER_AUTOHIDE 1
+#define AUTOHIDE_MS 1500
 #define SUBTITLE_SECONDS 8.0
 #define ORB_FRACTION 0.40f
 
@@ -65,7 +70,10 @@ void app_set_state(JvState s)
 {
     LONG prev = InterlockedExchange(&U.state, (LONG)s);
     if (U.wake) SetEvent(U.wake);
-    if (s == JV_LISTENING && prev != JV_LISTENING && U.msg) PostMessageW(U.msg, WM_APP_SHOWHUD, 2, 0);
+    if (!U.msg) return;
+    if (s == JV_LISTENING && prev != JV_LISTENING) PostMessageW(U.msg, WM_APP_SHOWHUD, 2, 0);
+    if (s != JV_IDLE && prev == JV_IDLE) PostMessageW(U.msg, WM_APP_SHOWHUD, 4, 0);
+    if (s == JV_IDLE && prev != JV_IDLE) PostMessageW(U.msg, WM_APP_AUTOHIDE, 0, 0);
 }
 
 JvState app_get_state(void)
@@ -771,8 +779,14 @@ static LRESULT CALLBACK msg_proc(HWND h, UINT m, WPARAM w, LPARAM l)
         }
         return 0;
     case WM_APP_SHOWHUD:
-        /* 2: empezó a escucharte; si no, un HudShow. */
-        if (w == 2) {
+        /* 2: empezó a escucharte; 4: empezó a escuchar, pensar o hablar (con
+           "Aparecer solo cuando le hablas" es cuando la esfera aparece); si no,
+           un HudShow. */
+        if (w == 4) {
+            KillTimer(h, TIMER_AUTOHIDE);
+            if (config_show_only_talking() && U.mode != DISPLAY_MINIMIZED && !hud_shown())
+                show_hud(true, HUD_SHOW_QUIET);
+        } else if (w == 2) {
             bool vis = InterlockedCompareExchange(&U.visible, 1, 1);
             if (InterlockedExchange(&U.yielded, 0) && U.hud && vis) ShowWindow(U.hud, SW_SHOWNOACTIVATE);
             bool raise = U.mode == DISPLAY_FULLSCREEN_BORDERLESS || (U.mode == DISPLAY_WINDOWED && !IsIconic(U.hud));
@@ -781,6 +795,16 @@ static LRESULT CALLBACK msg_proc(HWND h, UINT m, WPARAM w, LPARAM l)
             SetEvent(U.wake);
         } else {
             show_hud(true, (HudShow)w);
+        }
+        return 0;
+    case WM_APP_AUTOHIDE:
+        if (config_show_only_talking() && U.mode != DISPLAY_MINIMIZED) SetTimer(h, TIMER_AUTOHIDE, AUTOHIDE_MS, NULL);
+        return 0;
+    case WM_TIMER:
+        if (w == TIMER_AUTOHIDE) {
+            KillTimer(h, TIMER_AUTOHIDE);
+            if (config_show_only_talking() && U.mode != DISPLAY_MINIMIZED && app_get_state() == JV_IDLE && hud_shown())
+                show_hud(false, HUD_SHOW_QUIET);
         }
         return 0;
     case WM_APP_SETTINGS:

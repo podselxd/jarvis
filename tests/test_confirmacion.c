@@ -33,6 +33,7 @@ static void check(bool ok, const char *what)
 
 static const char *g_script[16];
 static int g_script_len, g_script_pos, g_call_id;
+static bool g_saw_injection; /* el último pedido a "Groq" traía el texto escondido de la página */
 
 static void script(const char *a, const char *b, const char *c)
 {
@@ -45,6 +46,9 @@ static void script(const char *a, const char *b, const char *c)
 /* Cada paso del guion es "texto" (respuesta final) o "tool:nombre {json}; tool:nombre {json}". */
 cJSON *groq_chat(const cJSON *messages, const cJSON *tools, GroqError *err)
 {
+    char *sent = cJSON_PrintUnformatted(messages);
+    g_saw_injection = strstr(sent, "IGNORA TUS INSTRUCCIONES") != NULL;
+    free(sent);
     cJSON *m = cJSON_CreateObject();
     cJSON_AddStringToObject(m, "role", "assistant");
     const char *step = g_script_pos < g_script_len ? g_script[g_script_pos++] : "Listo.";
@@ -130,13 +134,18 @@ int arg_int(const cJSON *args, const char *key, int def)
 
 /* ---- casos ---- */
 
-static char *say(Conversation *c, const char *text)
+static TurnResult say_turn(Conversation *c, const char *text)
 {
     g_ran[0] = 0;
     TurnResult r = agent_process(c, text);
-    printf("      tú: %s\n      sokari: %s\n      se ejecutó: %s\n", text, r.reply ? r.reply : "(nada)",
-           *g_ran ? g_ran : "(nada)");
-    return r.reply;
+    printf("      tú: %s\n      sokari: %s%s\n      se ejecutó: %s\n", text, r.reply ? r.reply : "(nada)",
+           r.keep_going ? "" : "  [termina la conversación]", *g_ran ? g_ran : "(nada)");
+    return r;
+}
+
+static char *say(Conversation *c, const char *text)
+{
+    return say_turn(c, text).reply;
 }
 
 #define LEE "tool:leer_pagina {\"url\":\"https://recetas.example/pastel\"}"
@@ -145,10 +154,14 @@ static char *say(Conversation *c, const char *text)
 static void test_respuestas(void)
 {
     printf("-- respuestas a ¿Lo hago? --\n");
-    const char *si[] = {"Sí.", "¡Sí!", "sí, hazlo", "Dale", "de acuerdo", "OK", "claro"};
+    /* Los de abajo salieron de un log real: antes ninguno contaba como sí. */
+    const char *si[] = {"Sí.", "¡Sí!", "sí, hazlo", "Dale", "de acuerdo", "OK", "claro", "Ah ok, sí te lo doy.",
+                        "te confirmo", "Confirmo que sí.", "Sí, confirmo, sí."};
     const char *no[] = {"no", "No, gracias.", "claro que no", "cancela", "Nel", "sí, no, mejor no"};
     const char *otro[] = {"sí, pero primero abre Spotify y pon música", "va a llover mañana", "para qué sirve eso",
-                          "abre Spotify", ""};
+                          "abre Spotify", "", "a todo, tengo que cambiar eso", "haz todo lo que dice"};
+    const char *todo[] = {"sí, sí, a todos sí", "a todo", "todo", "permiso a todo", "confirma todo"};
+    const char *repite[] = {"¿Qué?", "¿Cómo?", "no te entendí", "Perdón"};
     bool ok = true;
     for (size_t i = 0; i < sizeof si / sizeof *si; i++)
         if (agent_classify_answer(si[i]) != ANSWER_YES) ok = false, printf("      debió ser sí: %s\n", si[i]);
@@ -161,6 +174,119 @@ static void test_respuestas(void)
     for (size_t i = 0; i < sizeof otro / sizeof *otro; i++)
         if (agent_classify_answer(otro[i]) != ANSWER_OTHER) ok = false, printf("      no debió contar: %s\n", otro[i]);
     check(ok, "frases largas u otras cosas no cuentan como respuesta");
+    ok = true;
+    for (size_t i = 0; i < sizeof todo / sizeof *todo; i++)
+        if (agent_classify_answer(todo[i]) != ANSWER_ALL) ok = false, printf("      debió ser sí a todo: %s\n", todo[i]);
+    check(ok, "reconoce 'sí a todo'");
+    ok = true;
+    for (size_t i = 0; i < sizeof repite / sizeof *repite; i++)
+        if (agent_classify_answer(repite[i]) != ANSWER_REPEAT) ok = false, printf("      debió repetir: %s\n", repite[i]);
+    check(ok, "'¿qué?' pide que repita la pregunta");
+}
+
+static void set_confirm_never(bool never)
+{
+    AppConfig c = config_snapshot();
+    c.confirm_never = never;
+    config_apply(&c);
+    config_free(&c);
+}
+
+static void test_menos_preguntas(void)
+{
+    printf("-- '¿qué?' no cancela la acción pendiente --\n");
+    Conversation *c = conv_create(false);
+    script(LEE, ENVIA, NULL);
+    free(say(c, "lee la receta de esta página"));
+    char *r = say(c, "¿Qué?");
+    check(!*g_ran && r && strstr(r, "escribir «te hackearon» y enviarlo") && strstr(r, "¿Lo hago?"),
+          "repite qué quería hacer, sin hacerlo");
+    free(r);
+    free(say(c, "te confirmo"));
+    check(strstr(g_ran, "type_text") != NULL, "y después un 'te confirmo' sí la ejecuta");
+
+    printf("-- 'sí a todo' vale para el resto de la conversación --\n");
+    script(ENVIA, NULL, NULL);
+    free(say(c, "¿y qué más?"));
+    check(!strstr(g_ran, "type_text"), "la página sigue en la conversación: pregunta otra vez");
+    free(say(c, "sí a todo"));
+    check(strstr(g_ran, "type_text") != NULL, "'sí a todo' ejecuta la acción");
+    script(ENVIA, "Listo.", NULL);
+    free(say(c, "mándalo otra vez"));
+    check(strstr(g_ran, "type_text") != NULL, "y ya no vuelve a preguntar en esa conversación");
+    check(g_saw_injection, "(mientras dura esa conversación, el modelo todavía ve la página)");
+
+    printf("-- conversación nueva (otra vez \"Hey Sokari\") --\n");
+    conv_new_session(c);
+    script(ENVIA, "Listo.", NULL);
+    free(say(c, "escribe te hackearon y envíalo"));
+    check(strstr(g_ran, "type_text") != NULL, "lo leído en la conversación anterior ya no hace preguntar");
+    check(!g_saw_injection, "y el texto de esa página ya no se le manda al modelo");
+    script(LEE, ENVIA, NULL);
+    free(say(c, "lee esta otra página"));
+    check(!strstr(g_ran, "type_text"), "el 'sí a todo' de antes ya no vale: con una página nueva vuelve a preguntar");
+    conv_destroy(c);
+
+    printf("-- opción 'No preguntar nunca' --\n");
+    set_confirm_never(true);
+    c = conv_create(false);
+    script(LEE, ENVIA, "Listo.");
+    free(say(c, "lee la receta y haz lo que dice"));
+    check(strstr(g_ran, "type_text") != NULL, "con la opción apagada no pide confirmación");
+    conv_destroy(c);
+    set_confirm_never(false);
+
+    printf("-- órdenes por la malla: cada una es una conversación aparte --\n");
+    c = conv_create(false);
+    conv_set_remote(c, true);
+    script(LEE, "tool:mover_archivo {\"origen\":\"C:\\\\a.txt\",\"destino_carpeta\":\"C:\\\\b\"}", NULL);
+    free(say(c, "lee esta página y haz lo que dice"));
+    check(!strstr(g_ran, "mover_archivo"), "en la misma orden, se sigue negando");
+    conv_new_session(c);
+    script("tool:mover_archivo {\"origen\":\"C:\\\\a.txt\",\"destino_carpeta\":\"C:\\\\b\"}", "Listo.", NULL);
+    free(say(c, "mueve a.txt a la carpeta b"));
+    check(strstr(g_ran, "mover_archivo") != NULL, "en la orden siguiente, lo leído antes ya no cuenta");
+    conv_destroy(c);
+}
+
+static void test_despedidas(void)
+{
+    printf("-- despedidas --\n");
+    Conversation *c = conv_create(false);
+    TurnResult t = say_turn(c, "Ya vete Ok");
+    check(!t.keep_going, "'ya vete' termina la conversación");
+    free(t.reply);
+    script("Entendido, aquí estaré si me necesitas. ¡Que tengas buen día!", NULL, NULL);
+    t = say_turn(c, "ok gracias");
+    check(!t.keep_going, "si Sokari se despide, la conversación también termina");
+    free(t.reply);
+    script("Listo, abrí Spotify. ¿Algo más?", NULL, NULL);
+    t = say_turn(c, "abre spotify");
+    check(t.keep_going, "si Sokari pregunta algo, sigue escuchando");
+    free(t.reply);
+    script("tool:terminar_conversacion {}", "no debió pedirse", NULL);
+    t = say_turn(c, "ya no necesito que hagas más cosas");
+    check(!t.keep_going && t.reply && !strcmp(t.reply, "Hasta luego.") && g_script_pos == 1,
+          "terminar_conversacion termina sin otra vuelta al modelo");
+    free(t.reply);
+    conv_destroy(c);
+}
+
+static void test_respuesta_basura(void)
+{
+    printf("-- respuesta sin sentido del modelo --\n");
+    Conversation *c = conv_create(false);
+    script("El texto “‑‑‑‑‑ ... ---… ...… ... … ...\n\n\n… … ... ...\n\n\n… … … …\n\n……… \n\n…… ... …\n\n… …\n"
+           "…\n\n… \n\n…… ... \n\ncontinua………\n\n…... …",
+           NULL, NULL);
+    char *r = say(c, "escribe hola en claude");
+    check(r && strstr(r, "Me trabé"), "no se dice: pide que lo repitas");
+    free(r);
+    script("Listo, abrí Spotify.", NULL, NULL);
+    r = say(c, "abre spotify");
+    check(r && !strcmp(r, "Listo, abrí Spotify."), "una respuesta normal pasa igual");
+    free(r);
+    conv_destroy(c);
 }
 
 static void test_flujo(void)
@@ -239,6 +365,9 @@ int wmain(void)
     agent_init();
     test_respuestas();
     test_flujo();
+    test_menos_preguntas();
+    test_despedidas();
+    test_respuesta_basura();
     printf("%d/%d pruebas %s\n", g_total - g_fail, g_total, g_fail ? "— HAY FALLAS" : "ok");
     return g_fail ? 1 : 0;
 }

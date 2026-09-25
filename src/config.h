@@ -4,8 +4,8 @@
 #include <stdbool.h>
 #include <wchar.h>
 
-#define SOKARI_VERSION "2.3.1"
-#define SOKARI_VERSION_W L"2.3.1"
+#define SOKARI_VERSION "2.4.0"
+#define SOKARI_VERSION_W L"2.4.0"
 #define GITHUB_REPO "podselxd/sokari"
 
 typedef enum {
@@ -35,6 +35,8 @@ typedef struct {
     bool subtitles;
     bool autostart;
     bool mic_muted;
+    bool show_only_talking; /* la esfera se esconde cuando no le hablas */
+    bool confirm_never;     /* nunca pide un "sí" de voz, aunque haya leído algo de afuera */
 } AppConfig;
 
 typedef struct {
@@ -70,6 +72,8 @@ char *config_mesh_secret(bool create);
 int config_volume(void);
 float config_wake_threshold(void);
 bool config_mic_muted(void);
+bool config_show_only_talking(void);
+bool config_confirm_never(void);
 void config_set_mic_muted(bool muted);
 void config_set_orb_pos(int x, int y);
 void config_set_window_rect(int x, int y, int w, int h);

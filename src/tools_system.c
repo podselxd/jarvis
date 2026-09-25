@@ -611,13 +611,26 @@ char *tool_type_text(const cJSON *a)
     wchar_t *w = utf8_to_wide(texto);
     type_unicode(w);
     free(w);
+    /* Sokari escribe a ciegas: dice dónde lo escribió, pero no puede saber si
+       ahí había un chat abierto, así que no afirma que se envió. */
+    wchar_t title[128] = L"";
+    GetWindowTextW(GetForegroundWindow(), title, 128);
+    char *where = wide_to_utf8(*title ? title : L"la ventana de enfrente");
+    char *r;
     if (enviar) {
         Sleep(40);
         WORD enter = VK_RETURN;
         send_keys(&enter, 1);
-        return xstrdup("Listo, lo escribí y lo envié.");
+        r = str_printf("Escribí el texto en «%s» y le di Enter. No veo la pantalla: si ahí no había un chat o un "
+                       "cuadro de texto abierto, no se envió.",
+                       where);
+    } else {
+        r = str_printf("Escribí el texto en «%s», sin enviarlo. No veo la pantalla: que revise que quedó donde "
+                       "quería.",
+                       where);
     }
-    return xstrdup("Listo, lo escribí — no lo envié, tú decides si mandarlo.");
+    free(where);
+    return r;
 }
 
 static bool open_clipboard(void)
