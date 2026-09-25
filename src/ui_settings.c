@@ -66,7 +66,7 @@ enum {
 enum {
     A_NONE, A_GROQ_LINK, A_RESET_PW, A_SHOW_API, A_SHOW_STOP, A_TAILSCALE, A_COPY_SECRET, A_OBSIDIAN, A_PICK_SOUND,
     A_CLEAR_SOUND, A_OPEN_FOLDER, A_CHECK_UPDATE, A_SAVE, A_CANCEL, A_START, A_GO_SETTINGS, A_MUTE, A_TEST_AUDIO,
-    A_QUIT, A_MODE_CHANGED, A_OUTPUT_CHANGED, A_TEST_VOICE, A_FIREWALL, A_DETECT, A_DIAGNOSE,
+    A_QUIT, A_MODE_CHANGED, A_OUTPUT_CHANGED, A_TEST_VOICE, A_FIREWALL, A_DETECT, A_DIAGNOSE, A_FULL_ACCESS,
     /* Por dispositivo de la lista: + su número. */
     A_DEV_PROBE = 200, A_DEV_REMOVE = 300,
 };
@@ -105,7 +105,7 @@ static struct {
     int autostart;
     int subtitles;
     int show_only_talking;
-    int confirm; /* 1 = pide confirmación cuando hace falta; 0 = nunca */
+    int full_access; /* acceso completo: no pregunta nada salvo antes de borrar */
     TtsVoice *voices;
     int nvoices;
     int voice_index;
@@ -115,7 +115,7 @@ static struct {
     char **outputs;
     int nouts;
     int output_index;
-    int home_display, home_output; /* lo que está en uso ahora (Inicio lo aplica al momento) */
+    int home_display, home_output, home_full; /* lo que está en uso ahora (Inicio lo aplica al momento) */
     int display_mode, resolution_index, style;
     int volume, sensitivity;
     wchar_t *status_line;
@@ -404,6 +404,7 @@ static void layout_home(int x, int y, int w)
     AppConfig c = config_snapshot();
     S.home_display = c.display_mode;
     S.home_output = output_index_of(c.output_name);
+    S.home_full = c.full_access;
     bool muted = c.mic_muted, running = voice_running();
     config_free(&c);
     bool word = res_has_wake_word();
@@ -422,6 +423,8 @@ static void layout_home(int x, int y, int w)
     y = layout_help(x, y - dp(10), w,
                     L"Por aquí sale la voz de Sokari y su tono. Si pusiste un sonido de activación propio, ese "
                     L"sale por la predeterminada de Windows.") + dp(6);
+    y = layout_toggle(x, y - dp(4), w, &S.home_full, L"Acceso completo (menos borrar): no te pregunta nada");
+    S.widgets[S.nwidgets - 1].action = A_FULL_ACCESS;
     int bw = (w - dp(24)) / 3;
     layout_button(x, y, bw, L"Configuración", A_GO_SETTINGS, false);
     layout_button(x + bw + dp(12), y, bw, muted ? L"Activar micrófono" : L"Silenciar micrófono", A_MUTE, false);
@@ -536,12 +539,12 @@ static void layout(void)
             free(ob);
             y += dp(50);
         }
-        y = layout_toggle(x, y, w, &S.confirm, L"Pedir un \"sí\" antes de acciones delicadas");
+        y = layout_toggle(x, y, w, &S.full_access, L"Acceso completo (menos borrar)");
         y = layout_help(x, y - dp(8), w,
-                        L"Solo pregunta si en esa conversación leyó algo de afuera (una página, un archivo, tus "
-                        L"ventanas) y va a mandar un mensaje, mover o borrar archivos u otra cosa delicada. "
-                        L"Apagado nunca pregunta: un texto con instrucciones escondidas podría hacerlo actuar sin "
-                        L"avisarte.");
+                        L"Prendido, hace todo sin preguntarte: mover archivos, mandar mensajes, subir archivos, "
+                        L"guardar datos. Solo pide un «sí» antes de borrar. Riesgo: si lee una página con "
+                        L"instrucciones escondidas, podría obedecerlas sin avisarte. Apagado, pregunta antes de "
+                        L"acciones delicadas cuando leyó algo de afuera.");
         break;
     case SEC_DEVICES: {
         y = layout_help(x, y - dp(6), w, g_tailscale_text) + dp(2);
@@ -840,7 +843,7 @@ static void load_values(void)
     S.style = S.cfg.sphere_style;
     S.subtitles = S.cfg.subtitles;
     S.show_only_talking = S.cfg.show_only_talking;
-    S.confirm = !S.cfg.confirm_never;
+    S.full_access = S.cfg.full_access;
     S.volume = S.cfg.volume;
     S.sensitivity = S.cfg.wake_sensitivity;
     S.autostart = autostart_is_enabled();
@@ -896,7 +899,7 @@ static void save(void)
     c.sphere_style = S.style;
     c.subtitles = S.subtitles != 0;
     c.show_only_talking = S.show_only_talking != 0;
-    c.confirm_never = S.confirm == 0;
+    c.full_access = S.full_access != 0;
     c.volume = S.volume;
     c.wake_sensitivity = S.sensitivity;
     c.autostart = S.autostart != 0;
@@ -1252,6 +1255,12 @@ static void do_action(int action)
     case A_QUIT:
         if (ui_message_window()) PostMessageW(ui_message_window(), WM_APP_QUIT, 0, 0);
         break;
+    case A_FULL_ACCESS:
+        config_set_full_access(S.home_full != 0);
+        S.full_access = S.home_full;
+        set_status(S.home_full ? L"Acceso completo prendido: ya no te pregunta nada, salvo antes de borrar."
+                               : L"Acceso completo apagado: vuelve a preguntar antes de acciones delicadas.");
+        break;
     case A_MODE_CHANGED:
         S.display_mode = S.home_display;
         ui_set_display_mode(S.home_display);
@@ -1311,6 +1320,7 @@ static void click(int i, int x, int y)
     }
     case W_TOGGLE:
         *w->value = !*w->value;
+        if (w->action) do_action(w->action);
         break;
     case W_SLIDER:
         S.drag = i;
@@ -1530,6 +1540,7 @@ void settings_sync(void)
     if (!S.hwnd) return;
     AppConfig c = config_snapshot();
     S.display_mode = c.display_mode;
+    S.full_access = S.home_full = c.full_access;
     config_free(&c);
     layout();
 }

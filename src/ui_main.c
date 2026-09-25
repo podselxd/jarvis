@@ -62,6 +62,9 @@ static struct {
 
     volatile LONG state;
     volatile LONG level_milli;
+    /* Ya le hablaste al menos una vez: antes de eso, "Aparecer solo cuando le
+       hablas" no la esconde (al abrir Sokari se ve y se queda). */
+    volatile LONG conversed;
 } U = {.hud_lock = SRWLOCK_INIT, .text_lock = SRWLOCK_INIT};
 
 /* ---------------------------------------------------------- puente app --- */
@@ -71,6 +74,7 @@ void app_set_state(JvState s)
     LONG prev = InterlockedExchange(&U.state, (LONG)s);
     if (U.wake) SetEvent(U.wake);
     if (!U.msg) return;
+    if (s == JV_LISTENING) InterlockedExchange(&U.conversed, 1);
     if (s == JV_LISTENING && prev != JV_LISTENING) PostMessageW(U.msg, WM_APP_SHOWHUD, 2, 0);
     if (s != JV_IDLE && prev == JV_IDLE) PostMessageW(U.msg, WM_APP_SHOWHUD, 4, 0);
     if (s == JV_IDLE && prev != JV_IDLE) PostMessageW(U.msg, WM_APP_AUTOHIDE, 0, 0);
@@ -740,6 +744,14 @@ static LRESULT CALLBACK msg_proc(HWND h, UINT m, WPARAM w, LPARAM l)
             settings_sync();
             break;
         }
+        case IDM_FULL_ACCESS: {
+            bool on = !config_full_access();
+            config_set_full_access(on);
+            tray_notify(L"Sokari", on ? L"Acceso completo: ya no te pregunto nada, salvo antes de borrar."
+                                      : L"Vuelvo a pedirte permiso antes de acciones delicadas.");
+            settings_sync();
+            break;
+        }
         case IDM_SETTINGS:
             settings_open(U.inst, false, U.on_saved);
             break;
@@ -798,7 +810,8 @@ static LRESULT CALLBACK msg_proc(HWND h, UINT m, WPARAM w, LPARAM l)
         }
         return 0;
     case WM_APP_AUTOHIDE:
-        if (config_show_only_talking() && U.mode != DISPLAY_MINIMIZED) SetTimer(h, TIMER_AUTOHIDE, AUTOHIDE_MS, NULL);
+        if (config_show_only_talking() && U.mode != DISPLAY_MINIMIZED && InterlockedCompareExchange(&U.conversed, 1, 1))
+            SetTimer(h, TIMER_AUTOHIDE, AUTOHIDE_MS, NULL);
         return 0;
     case WM_TIMER:
         if (w == TIMER_AUTOHIDE) {

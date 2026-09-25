@@ -65,5 +65,6 @@ char *tool_run_macro(const cJSON *a);
 char *tool_calcular(const cJSON *a);
 char *tool_registrar_dispositivo(const cJSON *a);
 char *tool_gestionar_dispositivo(const cJSON *a);
+char *tool_cambiar_permisos(const cJSON *a);
 
 #endif

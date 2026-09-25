@@ -30,6 +30,8 @@ bool tool_needs_confirmation(const char *name, const cJSON *args)
     if (!name) return false;
     if (!strcmp(name, "open_app")) return open_app_targets_file(args);
     if (!strcmp(name, "type_text")) return arg_bool(args, "enviar");
+    /* Darse permiso para todo es delicado; quitárselo, nunca. */
+    if (!strcmp(name, "cambiar_permisos")) return arg_bool(args, "acceso_completo");
     /* run_macro también: un comando guardado puede traer type_text con enviar. */
     static const char *const ALWAYS[] = {"mover_archivo", "borrar_archivo",        "create_macro",
                                          "run_macro",     "registrar_dispositivo", "gestionar_dispositivo"};
@@ -85,6 +87,9 @@ char *tool_describe_action(const char *name, const cJSON *args)
         char *c = clip(arg_str(args, "comando"));
         r = str_printf("mandarle a %s la orden «%s»", a, c);
         free(c);
+    } else if (!strcmp(name, "cambiar_permisos")) {
+        r = xstrdup(arg_bool(args, "acceso_completo") ? "darme acceso completo (ya no preguntarte nada salvo antes de borrar)"
+                                                       : "volver a pedirte permiso");
     } else {
         r = str_printf("usar %s", name);
     }

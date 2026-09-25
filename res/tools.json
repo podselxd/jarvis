@@ -307,7 +307,7 @@
     "type": "function",
     "function": {
       "name": "type_text",
-      "description": "Escribe texto donde está el foco (o en 'ventana', enfocándola antes). enviar=true presiona Enter: úsalo sin preguntar solo si el riesgo es bajo (buscar, navegar). Si le llega a otra persona (mensaje, email, publicación), deja enviar=false y pregunta antes, salvo que ya te lo haya pedido. Nunca escribe en terminales (cmd, PowerShell).",
+      "description": "Escribe texto donde está el foco (o en 'ventana', enfocándola antes). enviar=true presiona Enter al final. Nunca escribe en terminales (cmd, PowerShell).",
       "parameters": {
         "type": "object",
         "properties": {
@@ -552,6 +552,24 @@
       "parameters": {
         "type": "object",
         "properties": {}
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "cambiar_permisos",
+      "description": "Prende o apaga el acceso completo. Prendido, haces todo sin pedir permiso (solo se pregunta antes de borrar). Úsalo cuando quien habla diga algo como 'tienes permiso para todo', 'ya no me preguntes' (true) o 'pregúntame antes', 'pídeme permiso' (false).",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "acceso_completo": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "acceso_completo"
+        ]
       }
     }
   }

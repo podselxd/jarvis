@@ -13,6 +13,7 @@
 #include <string.h>
 
 #include "app.h"
+#include "config.h"
 #include "log.h"
 #include "tools.h"
 #include "util.h"
@@ -732,4 +733,15 @@ char *tool_info_sistema(const cJSON *a)
         return xstrdup("No pude leer el estado del sistema.");
     }
     return sb_steal(&sb);
+}
+
+/* "Tienes permiso para todo" / "pregúntame antes". Prenderlo con texto de
+   afuera en la conversación pide un sí de voz (ver tool_needs_confirmation). */
+char *tool_cambiar_permisos(const cJSON *a)
+{
+    bool on = arg_bool(a, "acceso_completo");
+    config_set_full_access(on);
+    log_msg(on ? "Acceso completo prendido por voz." : "Acceso completo apagado por voz: vuelvo a pedir permiso.");
+    return xstrdup(on ? "Listo: acceso completo prendido. Ya no te pregunto nada, salvo antes de borrar."
+                      : "Listo: acceso completo apagado. Vuelvo a pedirte permiso antes de acciones delicadas.");
 }

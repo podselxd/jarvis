@@ -39,6 +39,7 @@ static const ToolEntry TOOLS[] = {
     {"calcular", tool_calcular},
     {"registrar_dispositivo", tool_registrar_dispositivo},
     {"gestionar_dispositivo", tool_gestionar_dispositivo},
+    {"cambiar_permisos", tool_cambiar_permisos},
 };
 
 const char *arg_str(const cJSON *args, const char *key)

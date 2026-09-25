@@ -25,6 +25,7 @@ enum {
     IDM_OPEN_DATA,
     IDM_QUIT,
     IDM_HOME,
+    IDM_FULL_ACCESS,
     IDM_MODE_BASE = 1100, /* + modo de pantalla (DisplayMode) */
 };
 

@@ -128,6 +128,8 @@ void tray_show_menu(HWND owner, bool hud_visible, bool muted, int display_mode)
                        MF_BYCOMMAND);
     AppendMenuW(m, MF_POPUP, (UINT_PTR)modes, L"Modo de pantalla");
     AppendMenuW(m, MF_STRING | (muted ? MF_CHECKED : 0), IDM_MUTE, L"Silenciar micrófono");
+    AppendMenuW(m, MF_STRING | (config_full_access() ? MF_CHECKED : 0), IDM_FULL_ACCESS,
+                L"Acceso completo (menos borrar)");
     AppendMenuW(m, MF_SEPARATOR, 0, NULL);
     AppendMenuW(m, MF_STRING, IDM_HOME, L"Ventana de inicio…");
     AppendMenuW(m, MF_STRING, IDM_SETTINGS, L"Configuración…");
