@@ -138,6 +138,17 @@ static void test_config(const wchar_t *dir)
           "valores por defecto: pantalla completa (con bordes), salida predeterminada, ventana sin tamaño");
     check(c.full_access, "y acceso completo prendido");
     check(!c.mexa, "y contesta neutro (el modo mexa viene apagado)");
+    check(c.end_silence == 1 && c.duck, "y espera 0.8 s cuando te callas, bajando el volumen mientras escucha");
+    c.end_silence = 2;
+    c.duck = false;
+    config_apply(&c);
+    config_free(&c);
+    config_load();
+    check(config_end_silence() == 2 && !config_duck(), "«Más» y sin bajar el volumen quedan guardados");
+    c = config_snapshot();
+    c.end_silence = 1;
+    c.duck = true;
+    config_apply(&c);
     config_free(&c);
 
     free(run_tool("cambiar_permisos", "{\"acceso_completo\":false}"));

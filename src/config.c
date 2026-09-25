@@ -101,6 +101,8 @@ static void defaults(AppConfig *c)
     c->mic_muted = false;
     c->show_only_talking = true;
     c->full_access = true;
+    c->end_silence = 1;
+    c->duck = true;
 }
 
 static void apply_kv(AppConfig *c, const char *key, const char *value)
@@ -126,6 +128,10 @@ static void apply_kv(AppConfig *c, const char *key, const char *value)
     } else if (!strcmp(key, "SOKARI_WAKE_SENSITIVITY")) {
         int v = atoi(value);
         c->wake_sensitivity = v < 0 ? 0 : v > 100 ? 100 : v;
+    } else if (!strcmp(key, "SOKARI_END_SILENCE")) {
+        c->end_silence = !strcmp(value, "corta") ? 0 : !strcmp(value, "larga") ? 2 : 1;
+    } else if (!strcmp(key, "SOKARI_DUCK")) {
+        c->duck = parse_bool(value);
     } else if (!strcmp(key, "SOKARI_SPHERE_STYLE")) {
         c->sphere_style = !strcmp(value, "lineas") ? 1 : 0;
     } else if (!strcmp(key, "SOKARI_ORB_POS")) {
@@ -199,6 +205,8 @@ static bool save_locked(void)
     sb_appendf(&sb, "SOKARI_VOLUME=%d\n", g_cfg.volume);
     sb_appendf(&sb, "SOKARI_WAKE_SENSITIVITY=%d\n", g_cfg.wake_sensitivity);
     sb_appendf(&sb, "SOKARI_SPHERE_STYLE=%s\n", g_cfg.sphere_style == 1 ? "lineas" : "puntos");
+    sb_appendf(&sb, "SOKARI_END_SILENCE=%s\n", g_cfg.end_silence == 0 ? "corta" : g_cfg.end_silence == 2 ? "larga" : "normal");
+    sb_appendf(&sb, "SOKARI_DUCK=%d\n", g_cfg.duck ? 1 : 0);
     sb_appendf(&sb, "SOKARI_ORB_POS=%d,%d\n", g_cfg.orb_x, g_cfg.orb_y);
     sb_appendf(&sb, "SOKARI_WINDOW=%d,%d,%d,%d\n", g_cfg.win_x, g_cfg.win_y, g_cfg.win_w, g_cfg.win_h);
     sb_appendf(&sb, "SOKARI_SUBTITLES=%d\n", g_cfg.subtitles ? 1 : 0);
@@ -317,6 +325,22 @@ bool config_full_access(void)
 {
     AcquireSRWLockShared(&g_lock);
     bool v = g_cfg.full_access;
+    ReleaseSRWLockShared(&g_lock);
+    return v;
+}
+
+int config_end_silence(void)
+{
+    AcquireSRWLockShared(&g_lock);
+    int v = g_cfg.end_silence;
+    ReleaseSRWLockShared(&g_lock);
+    return v;
+}
+
+bool config_duck(void)
+{
+    AcquireSRWLockShared(&g_lock);
+    bool v = g_cfg.duck;
     ReleaseSRWLockShared(&g_lock);
     return v;
 }

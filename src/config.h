@@ -31,6 +31,7 @@ typedef struct {
     int volume;     /* 0-100, volumen de la voz de Sokari (no el del sistema) */
     int wake_sensitivity; /* 0-100 */
     int sphere_style;     /* 0 = halo de puntos, 1 = líneas */
+    int end_silence;      /* cuánto esperar callado para terminar tu orden: 0 corta, 1 normal, 2 larga */
     int orb_x, orb_y;     /* posición de la ventana flotante; -1 = centrada */
     int win_x, win_y, win_w, win_h; /* modo Ventana; win_w <= 0 = tamaño y lugar por defecto */
     bool subtitles;
@@ -39,6 +40,7 @@ typedef struct {
     bool show_only_talking; /* la esfera se esconde cuando no le hablas */
     bool full_access;       /* acceso completo: no pide permiso para nada, salvo antes de borrar */
     bool mexa;              /* habla como mexicano ("háblame como mexa"); entenderlo, siempre */
+    bool duck;              /* baja el volumen de la PC mientras te escucha */
 } AppConfig;
 
 typedef struct {
@@ -81,6 +83,8 @@ bool config_mic_muted(void);
 bool config_show_only_talking(void);
 bool config_full_access(void);
 bool config_mexa(void);
+int config_end_silence(void);
+bool config_duck(void);
 void config_set_mexa(bool on);
 void config_set_full_access(bool on);
 void config_set_mic_muted(bool muted);

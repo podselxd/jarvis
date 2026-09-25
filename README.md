@@ -16,7 +16,9 @@ Se actualiza solo. Revisa GitHub al arrancar y cada 6 horas, y solo instala la v
 
 ## Uso
 
-- Di **"Hey Sokari"** y habla. Puedes decirlo todo de corrido ("Hey Sokari, abre Spotify") o hacer una pausa y esperar el tono. Deja de escuchar cuando te callas.
+- Di **"Hey Sokari"** y habla. Puedes decirlo todo de corrido ("Hey Sokari, abre Spotify") o hacer una pausa y esperar el tono.
+- Te escucha solo mientras hablas, hasta 30 s. Termina 0.8 s después de que te callas, aunque siga el ruido de fondo (un ventilador, un zumbido). Si te corta a media frase, en Configuración → Voz y audio elige **Más** (1.2 s); si quieres que conteste antes, **Poco** (0.6 s).
+- Mientras te escucha, baja el volumen de la PC y luego lo regresa, para que un video o música no tapen tu voz. Se apaga en Configuración → Voz y audio. Si no dijiste nada (solo hubo ruido), no manda nada a transcribir.
 - **Ctrl+Alt+J** sirve para hablarle sin decir "Hey Sokari".
 - **"Hey Sokari" es beta.** Se entrenó solo con voces sintéticas. En pruebas con voces que nunca oyó:
   - se activó por error 0.35 veces por hora de audio real;
@@ -47,7 +49,7 @@ Sale al abrir `Sokari.exe` a mano, o desde **Ventana de inicio…** en la bandej
 | Inicio | Iniciar, modo de pantalla, salida de audio y botones rápidos (ver arriba) |
 | Cuenta | API key de Groq, tu nombre, contraseña de tu perfil y palabra de apagado |
 | Pantalla | Modo de pantalla, resolución de la esfera, estilo (halo de puntos o líneas), subtítulos y "Aparecer solo cuando le hablas" |
-| Voz y audio | Volumen, voz de Windows (Raúl de México por defecto, con botón **Probar**), micrófono, salida de audio y sensibilidad de "Hey Sokari" |
+| Voz y audio | Volumen, voz de Windows (Raúl de México por defecto, con botón **Probar**), micrófono, salida de audio, sensibilidad de "Hey Sokari", cuánto espera cuando te callas y bajar el volumen de la PC mientras te escucha |
 | General | Iniciar con Windows, sonido de activación, Obsidian y **Acceso completo (menos borrar)** |
 | Dispositivos | Tailscale, tus otras PCs (Detectar, Probar, Quitar), permiso en el firewall, Revisar la malla y el secreto para cuentas distintas. Ver [Tus otras PCs](#tus-otras-pcs) |
 
@@ -208,6 +210,7 @@ El clasificador de "Hey Sokari" se entrena con voces sintéticas (muchas voces d
 ## Créditos
 
 - [cJSON](https://github.com/DaveGamble/cJSON) (licencia MIT), en `src/third_party/`.
+- El detector de voz de [WebRTC](https://webrtc.org/) (licencia BSD), en `src/third_party/webrtc_vad/`.
 - El detector de la palabra es un puerto a C de [openWakeWord](https://github.com/dscripka/openWakeWord) (código Apache 2.0).
 - Sus modelos (la parte común, `wakeword.bin`) y el clasificador de "Hey Sokari" que se entrena encima (`hey_sokari.jww`) están bajo [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/): uso no comercial y con crédito, y quien los modifique tiene que compartirlos igual. Por eso Sokari es gratis y no comercial. Detalles en `herramientas/LEEME.md`.
 - "Hey Sokari" se entrenó con:
