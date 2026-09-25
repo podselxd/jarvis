@@ -17,7 +17,8 @@ def _load_mel():
     """Pesos del mel que usa Sokari (res/wakeword.bin): DFT real/imaginaria y
     banco de filtros. Así la cuenta es la de wakeword.c."""
     import struct
-    d = open("/home/user/jarvis/res/wakeword.bin", "rb").read()
+    raiz = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
+    d = open(os.path.join(raiz, "res", "wakeword.bin"), "rb").read()
     n, off, t = struct.unpack("<I", d[4:8])[0], 8, {}
     for _ in range(n):
         ln = struct.unpack("<I", d[off:off + 4])[0]; off += 4

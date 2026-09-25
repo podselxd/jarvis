@@ -42,9 +42,8 @@ typedef struct {
 typedef struct {
     wchar_t *local_dir;  /* %LOCALAPPDATA%\Sokari: config, log, dispositivos */
     wchar_t *memory_dir; /* <OneDrive o perfil>\Desktop\Sokari: memoria, datos, perfiles */
-    /* Las de la versión anterior: se copian la primera vez y se quedan como
-       respaldo (con tu API key y tu memoria adentro, así que también están
-       protegidas). Ver compat_jarvis.h. */
+    /* Las de la versión anterior, que se quedaron como respaldo con tu API key
+       y tu memoria adentro: solo se usan para protegerlas también. */
     wchar_t *legacy_local_dir;
     wchar_t *legacy_memory_dir;
     wchar_t *config_file;
