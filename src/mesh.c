@@ -35,10 +35,31 @@ static HANDLE g_watch, g_watch_quit;
 static SRWLOCK g_ip_lock = SRWLOCK_INIT;
 static char *g_listen_ip; /* donde escucha ahora, NULL si no escucha */
 
+/* Dónde está tailscale.exe: donde lo deja su instalador o, si no, en el PATH
+   (nunca en la carpeta actual). NULL si no está. */
+static wchar_t *tailscale_exe(void)
+{
+    static const wchar_t *const CANDIDATES[] = {L"%ProgramFiles%\\Tailscale\\tailscale.exe",
+                                                L"%ProgramW6432%\\Tailscale\\tailscale.exe",
+                                                L"%ProgramFiles(x86)%\\Tailscale\\tailscale.exe"};
+    for (size_t i = 0; i < sizeof CANDIDATES / sizeof *CANDIDATES; i++) {
+        wchar_t *p = expand_env(CANDIDATES[i]);
+        if (file_exists(p)) return p;
+        free(p);
+    }
+    /* Lo pueden buscar a la vez el servidor y la ventana: nada estático. */
+    DWORD cap = 32768;
+    wchar_t *path = xmalloc(cap * sizeof *path), found[MAX_PATH];
+    DWORD n = GetEnvironmentVariableW(L"PATH", path, cap);
+    wchar_t *r = n && n < cap && SearchPathW(path, L"tailscale.exe", NULL, MAX_PATH, found, NULL) ? xwcsdup(found) : NULL;
+    free(path);
+    return r;
+}
+
 bool tailscale_installed(void)
 {
-    wchar_t *p = expand_env(L"%ProgramFiles%\\Tailscale\\tailscale.exe");
-    bool ok = file_exists(p);
+    wchar_t *p = tailscale_exe();
+    bool ok = p != NULL;
     free(p);
     return ok;
 }
@@ -163,7 +184,9 @@ static const char *find_header(const char *headers, const char *name, size_t *le
     return NULL;
 }
 
-static void handle_client(SOCKET c, const char *origin)
+static bool peer_is_mine(const char *ip);
+
+static void handle_client(SOCKET c, const char *origin, const char *ip)
 {
     DWORD timeout = 10000;
     setsockopt(c, SOL_SOCKET, SO_RCVTIMEO, (const char *)&timeout, sizeof timeout);
@@ -195,6 +218,10 @@ static void handle_client(SOCKET c, const char *origin)
     bool authorized = *expected && secure_equal(given, expected);
     free(given);
     free(expected);
+    if (!authorized && peer_is_mine(ip)) {
+        authorized = true;
+        log_msg("Malla: %s es de tu misma cuenta de Tailscale, así que no hace falta el secreto.", origin);
+    }
     if (!authorized) {
         respond(c, 401, "Unauthorized", "secreto invalido");
         free(buf);
@@ -246,7 +273,7 @@ static DWORD WINAPI server_thread(LPVOID arg)
         char ip[16];
         snprintf(ip, sizeof ip, "%u.%u.%u.%u", b[0], b[1], b[2], b[3]);
         char *name = mesh_device_name_for_ip(ip);
-        handle_client(c, name ? name : ip);
+        handle_client(c, name ? name : ip, ip);
         free(name);
         shutdown(c, SD_BOTH);
         closesocket(c);
@@ -355,6 +382,19 @@ char *mesh_listening_ip(void)
     char *ip = g_listen_ip ? xstrdup(g_listen_ip) : NULL;
     ReleaseSRWLockShared(&g_ip_lock);
     return ip;
+}
+
+bool mesh_listen_at(const char *ip, MeshHandler handler)
+{
+    WSADATA wsa;
+    WSAStartup(MAKEWORD(2, 2), &wsa);
+    g_handler = handler;
+    return listen_on(ip);
+}
+
+void mesh_listen_stop(void)
+{
+    stop_listening();
 }
 
 /* ------------------------------------------------------- dispositivos --- */
@@ -476,8 +516,8 @@ const char *mesh_probe_text(MeshProbe p)
     case MESH_OK: return "responde y el secreto coincide ✓";
     case MESH_BUSY: return "responde ✓ (ahorita está ocupado con otra cosa)";
     case MESH_BAD_SECRET:
-        return "responde, pero el secreto de malla no coincide: copia el de una PC (Dispositivos → Copiar secreto) y "
-               "pégalo en la otra";
+        return "responde, pero no te reconoce: revisa que las dos PCs estén en la misma cuenta de Tailscale (o copia "
+               "el secreto de una, con Copiar secreto, en la otra)";
     case MESH_NO_SOKARI:
         return "está en tu red, pero Sokari no le contesta: ábrelo en esa PC (si ya está abierto, espera a que su "
                "Tailscale se conecte)";
@@ -486,7 +526,8 @@ const char *mesh_probe_text(MeshProbe p)
     case MESH_ERROR: return "respondió con un error";
     default:
         return "no contesta: revisa que esté prendida, con Tailscale conectado y sin otra VPN prendida; si todo eso "
-               "está bien, en esa PC abre Configuración → Dispositivos y dale «Permitir en el firewall»";
+               "está bien, en esa PC abre Configuración → Dispositivos, dale «Permitir en el firewall» y luego "
+               "«Revisar la malla»";
     }
 }
 
@@ -495,52 +536,197 @@ MeshProbe mesh_probe(const char *host)
     if (!mesh_host_allowed(host)) return MESH_BAD_HOST;
     char *ip = resolve_tailscale(host);
     if (!ip) return MESH_NOT_FOUND;
-    HttpResponse r = post_command(ip, "", 8000);
+    MeshProbe p = mesh_send_ip(ip, "", 8000, NULL);
     free(ip);
+    return p;
+}
+
+MeshProbe mesh_send_ip(const char *ip, const char *comando, int timeout_ms, char **reply)
+{
+    HttpResponse r = post_command(ip, comando, timeout_ms);
     MeshProbe p = classify_response(&r);
+    if (reply) *reply = r.status == 200 && r.body ? xstrdup(r.body) : NULL;
     http_response_free(&r);
     return p;
 }
 
 /* ------------------------------------------------ tailscale y firewall --- */
 
-/* Corre "tailscale status --json" y devuelve su salida (heap) o NULL. */
-static char *tailscale_status_json(void)
+/* Lee lo que haya en el tubo; hasta el final si el proceso ya terminó. */
+static void drain(HANDLE rd, StrBuf *sb, bool to_end)
 {
-    wchar_t *exe = expand_env(L"%ProgramFiles%\\Tailscale\\tailscale.exe");
+    char buf[4097];
+    for (;;) {
+        DWORD avail = 0, got = 0;
+        if (!to_end && (!PeekNamedPipe(rd, NULL, 0, NULL, &avail, NULL) || !avail)) return;
+        DWORD want = to_end || avail > sizeof buf - 1 ? sizeof buf - 1 : avail;
+        if (sb->len > (1u << 22) || !ReadFile(rd, buf, want, &got, NULL) || !got) return;
+        buf[got] = 0;
+        sb_append(sb, buf);
+    }
+}
+
+/* Corre exe con esos argumentos, sin ventana, y devuelve lo que imprime
+   (heap; NULL si no arrancó). Lo que imprime como error va aparte en *err:
+   mezclado, cualquier advertencia de Tailscale rompía su JSON. Si tarda más
+   de timeout_ms, lo termina. */
+static char *run_capture(const wchar_t *exe, const wchar_t *args, int timeout_ms, DWORD *exit_code, char **err)
+{
+    if (exit_code) *exit_code = (DWORD)-1;
+    if (err) *err = NULL;
     SECURITY_ATTRIBUTES sa = {sizeof sa, NULL, TRUE};
-    HANDLE rd = NULL, wr = NULL;
+    HANDLE out_rd = NULL, out_wr = NULL, err_rd = NULL, err_wr = NULL;
     char *out = NULL;
-    if (file_exists(exe) && CreatePipe(&rd, &wr, &sa, 0)) {
-        SetHandleInformation(rd, HANDLE_FLAG_INHERIT, 0);
-        wchar_t cmd[MAX_PATH + 32];
-        swprintf(cmd, MAX_PATH + 32, L"\"%ls\" status --json", exe);
+    if (CreatePipe(&out_rd, &out_wr, &sa, 1 << 16) && CreatePipe(&err_rd, &err_wr, &sa, 1 << 16)) {
+        SetHandleInformation(out_rd, HANDLE_FLAG_INHERIT, 0);
+        SetHandleInformation(err_rd, HANDLE_FLAG_INHERIT, 0);
+        size_t len = wcslen(exe) + wcslen(args) + 8;
+        wchar_t *cmd = xmalloc(len * sizeof *cmd);
+        swprintf(cmd, len, L"\"%ls\" %ls", exe, args);
         STARTUPINFOW si = {sizeof si};
         si.dwFlags = STARTF_USESTDHANDLES;
-        si.hStdOutput = wr;
-        si.hStdError = wr;
+        si.hStdOutput = out_wr;
+        si.hStdError = err_wr;
         PROCESS_INFORMATION pi;
         if (CreateProcessW(NULL, cmd, NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
-            CloseHandle(wr);
-            wr = NULL;
-            StrBuf sb;
-            sb_init(&sb);
-            char buf[4097];
-            DWORD got;
-            while (sb.len < (1u << 22) && ReadFile(rd, buf, sizeof buf - 1, &got, NULL) && got) {
-                buf[got] = 0;
-                sb_append(&sb, buf);
+            CloseHandle(out_wr);
+            CloseHandle(err_wr);
+            out_wr = err_wr = NULL;
+            StrBuf so, se;
+            sb_init(&so);
+            sb_init(&se);
+            uint64_t end = GetTickCount64() + (uint64_t)timeout_ms;
+            bool done = false;
+            while (!done) {
+                done = WaitForSingleObject(pi.hProcess, 20) != WAIT_TIMEOUT;
+                if (!done && GetTickCount64() > end) {
+                    TerminateProcess(pi.hProcess, 1);
+                    WaitForSingleObject(pi.hProcess, 1000);
+                    done = true;
+                }
+                drain(out_rd, &so, done);
             }
-            WaitForSingleObject(pi.hProcess, 5000);
+            drain(err_rd, &se, true);
+            if (exit_code) GetExitCodeProcess(pi.hProcess, exit_code);
             CloseHandle(pi.hThread);
             CloseHandle(pi.hProcess);
-            out = sb.data;
+            out = so.data;
+            if (err) *err = se.data;
+            else sb_free(&se);
         }
+        free(cmd);
     }
-    if (wr) CloseHandle(wr);
-    if (rd) CloseHandle(rd);
+    if (out_wr) CloseHandle(out_wr);
+    if (err_wr) CloseHandle(err_wr);
+    if (out_rd) CloseHandle(out_rd);
+    if (err_rd) CloseHandle(err_rd);
+    return out;
+}
+
+static char *run_tailscale(const wchar_t *args, DWORD *exit_code, char **err)
+{
+    wchar_t *exe = tailscale_exe();
+    char *out = exe ? run_capture(exe, args, 8000, exit_code, err) : NULL;
+    if (!exe && exit_code) *exit_code = (DWORD)-1;
+    if (!exe && err) *err = NULL;
     free(exe);
     return out;
+}
+
+/* El JSON empieza en la primera llave: antes puede venir una advertencia
+   ("Warning: client version ... != tailscaled server version ..."). */
+static const char *json_start(const char *s)
+{
+    return s ? strchr(s, '{') : NULL;
+}
+
+bool tailscale_parse_status(const char *out, TailscaleStatus *st)
+{
+    memset(st, 0, sizeof *st);
+    cJSON *j = cJSON_Parse(json_start(out));
+    if (!cJSON_IsObject(j)) {
+        cJSON_Delete(j);
+        return false;
+    }
+    const char *state = cJSON_GetStringValue(cJSON_GetObjectItem(j, "BackendState"));
+    st->state = xstrdup(state ? state : "");
+    /* La cuenta: Self.UserID apunta a una entrada de User. */
+    const cJSON *uid = cJSON_GetObjectItem(cJSON_GetObjectItem(j, "Self"), "UserID");
+    const cJSON *u;
+    cJSON_ArrayForEach(u, cJSON_GetObjectItem(j, "User"))
+    {
+        const cJSON *id = cJSON_GetObjectItem(u, "ID");
+        const char *login = cJSON_GetStringValue(cJSON_GetObjectItem(u, "LoginName"));
+        bool same = cJSON_IsNumber(uid) && cJSON_IsNumber(id) && !(id->valuedouble < uid->valuedouble) &&
+                    !(id->valuedouble > uid->valuedouble);
+        if (same && login && *login && !st->account) st->account = xstrdup(login);
+    }
+    st->peers = cJSON_GetArraySize(cJSON_GetObjectItem(j, "Peer"));
+    cJSON_Delete(j);
+    return true;
+}
+
+void tailscale_status_free(TailscaleStatus *st)
+{
+    free(st->state);
+    free(st->account);
+    memset(st, 0, sizeof *st);
+}
+
+char *tailscale_parse_whois_account(const char *out)
+{
+    cJSON *j = cJSON_Parse(json_start(out));
+    const char *login = cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetObjectItem(j, "UserProfile"), "LoginName"));
+    char *r = login && *login ? xstrdup(login) : NULL;
+    cJSON_Delete(j);
+    return r;
+}
+
+static SRWLOCK g_account_lock = SRWLOCK_INIT;
+static char *g_account;
+static uint64_t g_account_at;
+
+/* Tu cuenta de Tailscale en esta PC (heap) o NULL. Se vuelve a leer cada
+   10 minutos. */
+static char *my_account(void)
+{
+    uint64_t now = GetTickCount64();
+    AcquireSRWLockExclusive(&g_account_lock);
+    if (!g_account || now - g_account_at > 10 * 60 * 1000) {
+        char *out = run_tailscale(L"status --json", NULL, NULL);
+        TailscaleStatus st;
+        if (tailscale_parse_status(out, &st) && st.account) {
+            free(g_account);
+            g_account = xstrdup(st.account);
+            g_account_at = now;
+        }
+        tailscale_status_free(&st);
+        free(out);
+    }
+    char *r = g_account ? xstrdup(g_account) : NULL;
+    ReleaseSRWLockExclusive(&g_account_lock);
+    return r;
+}
+
+/* ¿Esa IP de Tailscale es de un dispositivo de tu misma cuenta? Tailscale ya
+   comprobó con criptografía quién manda cada paquete, así que entre tus
+   propios dispositivos no hace falta compartir un secreto. Los dispositivos
+   con etiqueta (sin dueño) nunca cuentan. */
+static bool peer_is_mine(const char *ip)
+{
+    char *me = my_account();
+    bool mine = false;
+    if (me && strchr(me, '@')) {
+        wchar_t args[64];
+        swprintf(args, 64, L"whois --json %hs", ip);
+        char *out = run_tailscale(args, NULL, NULL);
+        char *owner = tailscale_parse_whois_account(out);
+        mine = owner && !_stricmp(owner, me);
+        free(owner);
+        free(out);
+    }
+    free(me);
+    return mine;
 }
 
 /* "LAPTOP-Ismael" -> "laptop-ismael": el nombre con el que se le habla. */
@@ -561,7 +747,7 @@ static char *device_name_from(const char *host_name)
 
 int tailscale_parse_peers(const char *json, MeshDevice **out)
 {
-    cJSON *j = json ? cJSON_Parse(json) : NULL;
+    cJSON *j = cJSON_Parse(json_start(json));
     cJSON *peers = cJSON_GetObjectItem(j, "Peer");
     int n = 0, cap = cJSON_GetArraySize(peers);
     MeshDevice *list = xcalloc((size_t)cap + 1, sizeof *list);
@@ -592,11 +778,43 @@ int tailscale_parse_peers(const char *json, MeshDevice **out)
     return n;
 }
 
-int tailscale_windows_peers(MeshDevice **out)
+/* Por qué Detectar no encontró ninguna PC, en palabras para el usuario. */
+static char *peers_problem(const char *out, DWORD code, const char *err)
 {
-    char *json = tailscale_status_json();
+    if (!tailscale_installed()) return xstrdup("No encontré Tailscale en esta PC: instálalo y entra con tu cuenta.");
+    TailscaleStatus st;
+    char *r;
+    if (!tailscale_parse_status(out, &st)) {
+        char *line = err ? xstrndup(err, strcspn(err, "\r\n")) : xstrdup("");
+        r = *line ? str_printf("Tailscale no me contestó bien (código %lu: %s).", (unsigned long)code, line)
+                  : str_printf("Tailscale no me contestó bien (código %lu).", (unsigned long)code);
+        free(line);
+        return r;
+    }
+    if (strcmp(st.state, "Running"))
+        r = str_printf("Tailscale no está conectado en esta PC (estado: %s). Ábrelo y entra con tu cuenta.",
+                       *st.state ? st.state : "desconocido");
+    else if (!st.peers)
+        r = str_printf("Tu cuenta de Tailscale (%s) no ve ningún otro dispositivo: en la otra PC entra a Tailscale con esa "
+                       "misma cuenta.",
+                       st.account ? st.account : "sin nombre");
+    else
+        r = str_printf("Tailscale ve %d dispositivo%s, pero ninguno con Windows. Dale a «Revisar la malla» para ver "
+                       "cuáles son.",
+                       st.peers, st.peers == 1 ? "" : "s");
+    tailscale_status_free(&st);
+    return r;
+}
+
+int tailscale_windows_peers(MeshDevice **out, char **why)
+{
+    DWORD code;
+    char *err;
+    char *json = run_tailscale(L"status --json", &code, &err);
     int n = tailscale_parse_peers(json, out);
+    if (why) *why = n ? NULL : peers_problem(json, code, err);
     free(json);
+    free(err);
     return n;
 }
 
@@ -628,6 +846,108 @@ bool mesh_allow_firewall(void)
     log_msg(code == 0 ? "Firewall: la malla quedó permitida para tu red de Tailscale." : "Firewall: netsh falló (%lu).",
             (unsigned long)code);
     return code == 0;
+}
+
+/* ------------------------------------------------------ revisar malla --- */
+
+/* Lo que ve tu red de Tailscale: "laptop (windows, en línea), pixel (android,
+   desconectado)". Devuelve cuántos son. */
+static int describe_peers(const char *out, StrBuf *seen)
+{
+    cJSON *j = cJSON_Parse(json_start(out));
+    const cJSON *p;
+    int n = 0;
+    cJSON_ArrayForEach(p, cJSON_GetObjectItem(j, "Peer"))
+    {
+        const char *hn = cJSON_GetStringValue(cJSON_GetObjectItem(p, "HostName"));
+        const char *os = cJSON_GetStringValue(cJSON_GetObjectItem(p, "OS"));
+        bool online = cJSON_IsTrue(cJSON_GetObjectItem(p, "Online"));
+        sb_appendf(seen, "%s%s (%s, %s)", n ? ", " : "", hn ? hn : "?", os && *os ? os : "?",
+                   online ? "en línea" : "desconectado");
+        n++;
+    }
+    cJSON_Delete(j);
+    return n;
+}
+
+char *mesh_diagnose(void)
+{
+    StrBuf r;
+    sb_init(&r);
+    sb_appendf(&r, "Revisión de la malla (Sokari %s)\n\n", SOKARI_VERSION);
+
+    wchar_t *exe = tailscale_exe();
+    char *exe8 = exe ? wide_to_utf8(exe) : NULL;
+    if (exe8) sb_appendf(&r, "✓ Tailscale instalado: %s\n", exe8);
+    else sb_append(&r, "✗ No encontré Tailscale en esta PC. Instálalo (botón Instalar Tailscale) y entra con tu cuenta.\n");
+    free(exe8);
+
+    DWORD code = 0;
+    char *err = NULL;
+    char *out = exe ? run_capture(exe, L"status --json", 8000, &code, &err) : NULL;
+    free(exe);
+    TailscaleStatus st;
+    bool parsed = tailscale_parse_status(out, &st);
+    if (out && !parsed) {
+        char *first = err ? xstrndup(err, strcspn(err, "\r\n")) : xstrdup("");
+        sb_appendf(&r, "✗ Tailscale no contestó bien (código %lu)%s%s\n", (unsigned long)code, *first ? ": " : "",
+                   first);
+        free(first);
+    } else if (!out && tailscale_installed()) {
+        sb_append(&r, "✗ No pude correr tailscale.exe\n");
+    } else if (parsed && strcmp(st.state, "Running")) {
+        sb_appendf(&r, "✗ Tailscale no está conectado (estado: %s). Ábrelo y entra con tu cuenta.\n",
+                   *st.state ? st.state : "desconocido");
+    } else if (parsed) {
+        sb_appendf(&r, "✓ Tailscale conectado con la cuenta %s\n", st.account ? st.account : "(sin nombre)");
+    }
+    free(err);
+
+    char *ip = mesh_tailscale_ip(), *listening = mesh_listening_ip();
+    if (ip) sb_appendf(&r, "✓ IP de esta PC en Tailscale: %s\n", ip);
+    else sb_append(&r, "✗ No encontré la IP de Tailscale de esta PC (¿está conectado?)\n");
+    if (listening) {
+        sb_appendf(&r, "✓ Esta PC recibe órdenes en %s:%d\n", listening, MESH_PORT);
+        MeshProbe p = mesh_send_ip(listening, "", 5000, NULL);
+        if (p == MESH_OK) sb_append(&r, "✓ Prueba local: el servidor de esta PC contesta\n");
+        else sb_appendf(&r, "✗ Prueba local: el servidor de esta PC %s\n", mesh_probe_text(p));
+    } else {
+        sb_append(&r, "✗ Esta PC todavía no recibe órdenes: se activa sola unos segundos después de que Tailscale se "
+                      "conecta.\n");
+    }
+    free(ip);
+    free(listening);
+
+    wchar_t *netsh = expand_env(L"%SystemRoot%\\System32\\netsh.exe");
+    DWORD fw = (DWORD)-1;
+    free(run_capture(netsh, L"advfirewall firewall show rule name=\"Sokari (malla)\"", 8000, &fw, NULL));
+    free(netsh);
+    if (fw == 0) sb_append(&r, "✓ El firewall tiene la regla «Sokari (malla)»\n");
+    else sb_append(&r, "✗ Falta la regla del firewall: dale «Permitir en el firewall» en esta PC\n");
+
+    if (parsed) {
+        StrBuf seen;
+        sb_init(&seen);
+        int n = describe_peers(out, &seen);
+        if (n) sb_appendf(&r, "✓ Tu red de Tailscale ve %d dispositivo%s: %s\n", n, n == 1 ? "" : "s", seen.data);
+        else
+            sb_appendf(&r, "✗ Tu red de Tailscale no ve ningún otro dispositivo: en la otra PC entra a Tailscale con %s\n",
+                       st.account ? st.account : "la misma cuenta");
+        sb_free(&seen);
+    }
+    tailscale_status_free(&st);
+    free(out);
+
+    MeshDevice *devs;
+    int nd = mesh_devices(&devs);
+    if (!nd) sb_append(&r, "· Todavía no tienes PCs registradas: dale a «Detectar mis PCs».\n");
+    for (int i = 0; i < nd; i++) {
+        MeshProbe p = mesh_probe(devs[i].host);
+        sb_appendf(&r, "%s %s (%s): %s\n", p == MESH_OK || p == MESH_BUSY ? "✓" : "✗", devs[i].name, devs[i].host,
+                   mesh_probe_text(p));
+    }
+    mesh_devices_free(devs, nd);
+    return r.data;
 }
 
 char *tool_registrar_dispositivo(const cJSON *a)
