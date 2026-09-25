@@ -700,6 +700,65 @@ static void test_frases_del_log(void)
     check(ok == (int)(sizeof LOG_PHRASES / sizeof *LOG_PHRASES), "cada frase del log va a donde debe, con su herramienta");
 }
 
+static void test_mexicano(void)
+{
+    printf("-- español de México --\n");
+    const char *yes[] = {"simón", "sale", "arre", "a huevo", "sobres", "órale pues", "sip", "cámara wey",
+                         "de una", "va que va", "sale y vale", "por supuesto", "obvio"};
+    const char *no[] = {"nel", "ni madres", "ni de chiste", "nel pastel", "para nada", "nanai", "ni de broma",
+                        "déjalo así"};
+    bool all_yes = true, all_no = true;
+    for (size_t i = 0; i < sizeof yes / sizeof *yes; i++)
+        if (agent_classify_answer(yes[i]) != ANSWER_YES) printf("      no fue sí: %s\n", yes[i]), all_yes = false;
+    for (size_t i = 0; i < sizeof no / sizeof *no; i++)
+        if (agent_classify_answer(no[i]) != ANSWER_NO) printf("      no fue no: %s\n", no[i]), all_no = false;
+    check(all_yes, "sí a la mexicana: simón, sale, arre, a huevo, sobres…");
+    check(all_no, "no a la mexicana: nel, ni madres, ni de chiste…");
+    check(agent_classify_answer("¿Mande?") == ANSWER_REPEAT && agent_classify_answer("no te escuché") == ANSWER_REPEAT,
+          "«¿mande?» o «no te escuché» repiten la pregunta");
+
+    Conversation *c = conv_create(false);
+    script("(no se debe usar)", NULL, NULL);
+    TurnResult t = say_turn(c, "Órale pues, ahí nos vidrios");
+    check(!t.keep_going && g_script_pos == 0, "«ahí nos vidrios» es despedida");
+    free(t.reply);
+    t = say_turn(c, "ya estuvo");
+    check(!t.keep_going, "«ya estuvo» solo, también");
+    free(t.reply);
+    t = say_turn(c, "ya estuvo bueno de videos, ponle pausa");
+    check(t.keep_going && strstr(g_ran, "play_pause"), "pero «ya estuvo bueno de videos, ponle pausa» es un comando");
+    free(t.reply);
+
+    printf("-- entiende mexicano, pero lo habla solo si le pides --\n");
+    config_set_mexa(false);
+    script("Va.", NULL, NULL);
+    free(say(c, "¿qué hora es?"));
+    check(!strstr(g_last_sent, "Habla como mexicano"), "de fábrica contesta neutro");
+    const char *on[] = {"háblame como mexa", "Sokari, platícame como mexicano", "contéstame como mexica",
+                        "habla como chilango porfa", "háblame en mexicano", "ponte mexa"};
+    bool all_on = true;
+    for (size_t i = 0; i < sizeof on / sizeof *on; i++) {
+        config_set_mexa(false);
+        int calls = g_script_pos;
+        char *r = say(c, on[i]);
+        if (!config_mexa() || g_script_pos != calls || !r || !strstr(r, "Órale")) {
+            printf("      no prendió: %s\n", on[i]);
+            all_on = false;
+        }
+        free(r);
+    }
+    check(all_on, "«como mexa», «como mexicano», «como mexica», «como chilango», «en mexicano», «ponte mexa»");
+    script("Qué onda, son las cinco.", NULL, NULL);
+    free(say(c, "¿qué hora es?"));
+    check(strstr(g_last_sent, "Habla como mexicano") != NULL, "y desde ahí el modelo habla como mexa");
+    free(say(c, "ya no hables como mexicano"));
+    check(!config_mexa(), "«ya no hables como mexicano» lo apaga");
+    config_set_mexa(true);
+    free(say(c, "habla normal"));
+    check(!config_mexa(), "«habla normal» también");
+    conv_destroy(c);
+}
+
 static void test_detecta_permiso(void)
 {
     printf("-- qué cuenta como pedir permiso --\n");
@@ -742,6 +801,7 @@ int wmain(void)
     test_respuestas_limpias();
     test_youtube();
     test_frases_del_log();
+    test_mexicano();
     printf("%d/%d pruebas %s\n", g_total - g_fail, g_total, g_fail ? "— HAY FALLAS" : "ok");
     return g_fail ? 1 : 0;
 }

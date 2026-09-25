@@ -137,6 +137,7 @@ static void test_config(const wchar_t *dir)
     check(c.display_mode == DISPLAY_FULLSCREEN && !*c.output_name && c.win_w == -1,
           "valores por defecto: pantalla completa (con bordes), salida predeterminada, ventana sin tamaño");
     check(c.full_access, "y acceso completo prendido");
+    check(!c.mexa, "y contesta neutro (el modo mexa viene apagado)");
     config_free(&c);
 
     free(run_tool("cambiar_permisos", "{\"acceso_completo\":false}"));
@@ -145,6 +146,10 @@ static void test_config(const wchar_t *dir)
     free(run_tool("cambiar_permisos", "{\"acceso_completo\":true}"));
     config_load();
     check(config_full_access(), "«tienes permiso para todo»: se prende y queda guardado");
+    config_set_mexa(true);
+    config_load();
+    check(config_mexa(), "el modo mexa queda guardado");
+    config_set_mexa(false);
     write_config("SOKARI_CONFIRM_NEVER=0\n");
     config_load();
     check(config_full_access(), "al actualizar desde la 2.4.0 queda prendido (la opción vieja ya no cuenta)");

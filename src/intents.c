@@ -142,7 +142,11 @@ static const char *const FILLER =
     "puedas pudieras quiero quisiera necesito haz hazme dale andale orale vamos ok okey sale si ahi aqui alla eso "
     "esto ese esa este un una poco poquito tantito nuevo otra vez amigo amiga carnal compa bro wey guey chido "
     "rapido rapidito tambien porfavor sokari es se ves ve mira no muy cierto entonces asi porfis yo creo voy "
-    "pobre sea refiero digo ";
+    "pobre sea refiero digo "
+    /* Relleno mexicano: saludos, apodos y muletillas. */
+    "pedo quiubo quihubo rollo hubo we carnal carnala mano manito chavo chava neta chale orale andale sale "
+    "simon arre camara sobres chida padre chingon chingona manches mames pos pus fijate tons horita orita rato "
+    "hijole ay aguas jefe jefa compadre rey reina hermano brother morro morra cuate cuata vato bato valedor ";
 
 typedef struct {
     const char *pattern; /* palabras completas, con espacios alrededor */
@@ -161,6 +165,15 @@ static const Trigger TRIGGERS[] = {
     {" para la cancion ", IN_PAUSE, NULL},       {" parale ", IN_PAUSE, NULL},
     {" deten el video ", IN_PAUSE, NULL},        {" deten la musica ", IN_PAUSE, NULL},
     {" siguiente ", IN_NEXT, NULL},              {" la que sigue ", IN_NEXT, NULL},
+    {" otra rola ", IN_NEXT, NULL},              {" ponme otra ", IN_NEXT, NULL},
+    {" pon otra ", IN_NEXT, NULL},               {" cambiala ", IN_NEXT, NULL},
+    {" regresale ", IN_PREV, NULL},              {" regresa la rola ", IN_PREV, NULL},
+    {" mas recio ", IN_VOL_UP, NULL},            {" mas quedito ", IN_VOL_DOWN, NULL},
+    {" quitale el volumen ", IN_MUTE, NULL},     {" grax ", IN_THANKS, NULL},
+    {" se agradece ", IN_THANKS, NULL},          {" te la rifaste ", IN_THANKS, NULL},
+    {" eres un crack ", IN_THANKS, NULL},        {" stop ", IN_PAUSE, NULL},
+    {" mas duro ", IN_VOL_UP, NULL},             {" mas suave ", IN_VOL_DOWN, NULL},
+    {" escondela ", IN_MINIMIZE, NULL},          {" escondelo ", IN_MINIMIZE, NULL},
     {" otra cancion ", IN_NEXT, NULL},           {" cambia la cancion ", IN_NEXT, NULL},
     {" cambiale ", IN_NEXT, NULL},               {" salta la cancion ", IN_NEXT, NULL},
     {" saltala ", IN_NEXT, NULL},                {" saltate ", IN_NEXT, NULL},
@@ -197,17 +210,19 @@ static const char *vocab(IntentKind k)
     case IN_PAUSE:
         return " play pausa pausale pausalo pausar pausas reanuda reanudalo reanudar continua continuar quitale quita "
                "ponle pon ponla ponlo ponme ponerle poner darle video videos musica cancion canciones rola audio "
-               "youtube spotify reproduccion deten para parale ";
+               "youtube spotify reproduccion deten para parale picale puchale pushale picalo puchalo stop ";
     case IN_NEXT:
     case IN_PREV:
         return " siguiente sigue otra cancion rola tema pista video cambia cambiale salta saltate saltala adelanta "
-               "pasa pasale skip anterior antes regresa regresale pasada pon ponme ponle ";
+               "pasa pasale skip anterior antes regresa regresale pasada pon ponme ponle picale puchale pushale "
+               "cambiala rolas ";
     case IN_VOL_UP:
     case IN_VOL_DOWN:
     case IN_VOL_SET:
     case IN_MUTE:
         return " sube subele subelo baja bajale bajalo volumen mas menos fuerte bajo bajito alto sonido audio musica "
-               "mutea silencia quita quitale sin nivel ciento pon ponle ponlo computadora compu pc ";
+               "mutea silencia quita quitale sin nivel ciento pon ponle ponlo computadora compu pc buen harto recio "
+               "quedito maximo minimo tope picale puchale duro suave rayitas rayita dos tres ";
     case IN_MINIMIZE:
     case IN_MINIMIZE_ALL:
     case IN_MAXIMIZE:
@@ -216,7 +231,7 @@ static const char *vocab(IntentKind k)
     case IN_CLOSE_WINDOW:
         return " minimiza minimizala minimizalo minimizar maximiza maximizala maximizalo maximizar agranda agrandala "
                "cierra cerrar ventana ventanas pestana pestanas pantalla completa app aplicacion programa navegador "
-               "todo todas muestra ve escritorio pon ponlo ponla video ";
+               "todo todas muestra ve escritorio pon ponlo ponla video escondela escondelo ";
     case IN_EXPLORER:
     case IN_FOLDER:
         return " abre abreme abrir explorador archivos equipo pc computadora descargas documentos escritorio imagenes "
@@ -225,7 +240,8 @@ static const char *vocab(IntentKind k)
         return " abre abreme abrir abrela abrelo pestana ventana app aplicacion programa navegador abierta abierto "
                "abiertas ";
     case IN_THANKS:
-        return " gracias muchas mil muy perfecto excelente buenisimo genial ";
+        return " gracias muchas mil muy perfecto excelente buenisimo genial grax agradece rifaste te la se eres un "
+               "crack ";
     }
     return " ";
 }
@@ -275,6 +291,8 @@ static bool negated(const char *norm)
         char w0[16], w1[24] = "", w2[24] = "";
         if (sscanf(p + 1, "%15s %23s %23s", w0, w1, w2) < 2) continue;
         if (strcmp(w0, "no") && strcmp(w0, "nunca") && strcmp(w0, "tampoco")) continue;
+        /* "No mames", "no manches", "no inventes": expresiones, no un no. */
+        if (in_list(" mames manches inventes friegues chingues jodas mamen ", w1)) continue;
         for (size_t i = 0; i < sizeof ROOTS / sizeof *ROOTS; i++)
             if (str_starts_with(w1, ROOTS[i]) || str_starts_with(w2, ROOTS[i])) return true;
     }
@@ -333,6 +351,14 @@ bool intents_parse(const char *text, IntentList *out)
     if ((has(norm, " minimiza") || has(norm, " minimizar ")) && out->n) {
         for (int i = 0; i < out->n; i++)
             if (out->items[i].kind == IN_FULLSCREEN) out->items[i--] = out->items[--out->n];
+    }
+    /* "Súbele al máximo" / "bájale al mínimo": un nivel exacto. */
+    for (int i = 0; i < out->n; i++) {
+        bool up = out->items[i].kind == IN_VOL_UP, down = out->items[i].kind == IN_VOL_DOWN;
+        if (up && (has(norm, " maximo ") || has(norm, " al tope ") || has(norm, " a todo ")))
+            out->items[i].kind = IN_VOL_SET, snprintf(out->items[i].arg, sizeof out->items[i].arg, "100");
+        else if (down && has(norm, " minimo "))
+            out->items[i].kind = IN_VOL_SET, snprintf(out->items[i].arg, sizeof out->items[i].arg, "5");
     }
     const char *vol = strstr(norm, " volumen ");
     if (vol) {
