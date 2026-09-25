@@ -27,6 +27,9 @@ void memory_identify_on_start(const char *user_name);
 
 void memory_persist(const char *role, const char *content);
 cJSON *memory_recent_history(double window_seconds);
+/* Borra de la conversación guardada lo que se dijo desde 'since' (epoch).
+   Devuelve cuántos mensajes borró, o -1 si no pudo escribir. */
+int memory_forget_since(double since);
 
 char *hash_password(const char *password);
 

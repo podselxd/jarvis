@@ -575,5 +575,24 @@
         ]
       }
     }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "borrar_memoria_reciente",
+      "description": "Borra lo que han hablado: 'hoy' (de fábrica) o 'todo'. Los datos guardados no se tocan.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "periodo": {
+            "type": "string",
+            "enum": [
+              "hoy",
+              "todo"
+            ]
+          }
+        }
+      }
+    }
   }
 ]

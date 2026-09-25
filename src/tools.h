@@ -54,6 +54,7 @@ UrlCheck web_url_check(const char *url);
 /* memoria y perfiles */
 char *tool_guardar_dato(const cJSON *a);
 char *tool_recordar(const cJSON *a);
+char *tool_borrar_memoria_reciente(const cJSON *a);
 char *tool_identificarse(const cJSON *a);
 char *tool_proteger_perfil(const cJSON *a);
 char *tool_exportar_a_obsidian(const cJSON *a);

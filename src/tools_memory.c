@@ -55,6 +55,27 @@ char *tool_guardar_dato(const cJSON *a)
     return r;
 }
 
+/* "Borra la memoria de hoy": lo que se habló desde la medianoche (o todo lo
+   hablado, con periodo "todo"). Los datos que guardaste con guardar_dato no se
+   tocan. Borrar siempre pide un sí de voz (ver must_confirm en agent.c). */
+char *tool_borrar_memoria_reciente(const cJSON *a)
+{
+    bool all = !strcmp(arg_str(a, "periodo"), "todo");
+    double since = 0;
+    if (!all) {
+        time_t now = time(NULL);
+        struct tm lt;
+        localtime_s(&lt, &now);
+        lt.tm_hour = lt.tm_min = lt.tm_sec = 0;
+        since = (double)mktime(&lt);
+    }
+    int n = memory_forget_since(since);
+    if (n < 0) return xstrdup("No pude borrar la memoria de la conversación.");
+    log_msg("Memoria de la conversación borrada (%s): %d mensajes.", all ? "toda" : "hoy", n);
+    return str_printf("Listo: borré %d mensajes de lo que hablamos%s. Tus datos guardados siguen.", n,
+                      all ? "" : " hoy");
+}
+
 char *tool_recordar(const cJSON *a)
 {
     char *q = str_lower(arg_str(a, "query"));
