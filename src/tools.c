@@ -14,6 +14,7 @@ typedef struct {
 static const ToolEntry TOOLS[] = {
     {"open_app", tool_open_app},
     {"web_search", tool_web_search},
+    {"poner_en_youtube", tool_poner_en_youtube},
     {"control_media", tool_control_media},
     {"control_desktop", tool_control_desktop},
     {"create_macro", tool_create_macro},

@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "intents.h"
+#include "tools.h"
 #include "util.h"
 
 static int g_fail, g_total;
@@ -129,11 +130,23 @@ static void test_nombre(void)
     check(!any_no, "palabras de verdad que suenan parecido no (sacar, socorro, cari…)");
 }
 
+static void test_youtube(void)
+{
+    printf("-- YouTube: el primer video de la búsqueda --\n");
+    char id[12];
+    const char *html = "<script>var ytInitialData = {\"contents\":{\"sectionListRenderer\":{\"contents\":[{\"videoRenderer\":"
+                       "{\"videoId\":\"pAgnJDJN4VA\",\"thumbnail\":{}}},{\"videoRenderer\":{\"videoId\":\"etAIpkdhU9Q\"}}]}}};";
+    check(youtube_first_video_id(html, id) && !strcmp(id, "pAgnJDJN4VA"), "toma el primer video de los resultados");
+    check(!youtube_first_video_id("{\"videoId\":\"corto\"}", id) && !*id, "un id que no tiene 11 caracteres no cuenta");
+    check(!youtube_first_video_id("<html>Antes de ir a YouTube…</html>", id), "sin resultados (aviso de cookies): nada");
+}
+
 int wmain(void)
 {
     SetConsoleOutputCP(CP_UTF8);
     test_del_log();
     test_nombre();
+    test_youtube();
     printf("%d/%d pruebas %s\n", g_total - g_fail, g_total, g_fail ? "— HAY FALLAS" : "ok");
     return g_fail ? 1 : 0;
 }

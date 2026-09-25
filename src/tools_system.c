@@ -52,6 +52,66 @@ static bool shell_open(const wchar_t *target, const wchar_t *params)
     return ShellExecuteExW(&sei) != 0;
 }
 
+/* Un navegador instalado por su nombre ("opera", "chrome", "edge"…), tal como
+   se registra en SOFTWARE\Clients\StartMenuInternet. Devuelve su .exe o NULL. */
+static wchar_t *browser_exe(const char *name)
+{
+    wchar_t *want = utf8_to_wide(name);
+    CharLowerW(want);
+    wchar_t *found = NULL;
+    const HKEY roots[] = {HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
+    for (int r = 0; r < 2 && !found; r++) {
+        HKEY k;
+        if (RegOpenKeyExW(roots[r], L"SOFTWARE\\Clients\\StartMenuInternet", 0, KEY_READ, &k)) continue;
+        wchar_t sub[256];
+        for (DWORD i = 0; !found; i++) {
+            DWORD len = 256;
+            if (RegEnumKeyExW(k, i, sub, &len, NULL, NULL, NULL, NULL)) break;
+            wchar_t low[256];
+            wcscpy(low, sub);
+            CharLowerW(low);
+            if (!wcsstr(low, want)) continue;
+            wchar_t path[512], cmd[1024];
+            swprintf(path, 512, L"%ls\\shell\\open\\command", sub);
+            DWORD bytes = sizeof cmd;
+            if (RegGetValueW(k, path, NULL, RRF_RT_REG_SZ, NULL, cmd, &bytes)) continue;
+            /* "C:\...\opera.exe" --algo  ->  C:\...\opera.exe */
+            const wchar_t *s = cmd;
+            wchar_t exe[MAX_PATH] = L"";
+            if (*s == L'"') swscanf(s + 1, L"%259l[^\"]", exe);
+            else swscanf(s, L"%259ls", exe);
+            if (file_exists(exe)) found = xwcsdup(exe);
+        }
+        RegCloseKey(k);
+    }
+    free(want);
+    return found;
+}
+
+static bool looks_like_url(const char *s);
+
+bool open_url(const char *url, const char *browser)
+{
+    /* Nada de comillas ni espacios: va entre comillas como argumento. */
+    if (strpbrk(url, "\" \t\r\n")) return false;
+    char *full = str_starts_with(url, "http") ? xstrdup(url) : str_printf("https://%s", url);
+    wchar_t *w = utf8_to_wide(full);
+    free(full);
+    bool ok = false;
+    wchar_t *exe = browser && *browser ? browser_exe(browser) : NULL;
+    if (exe) {
+        wchar_t *arg = xmalloc(sizeof(wchar_t) * (wcslen(w) + 3));
+        swprintf(arg, wcslen(w) + 3, L"\"%ls\"", w);
+        ok = shell_open(exe, arg);
+        free(arg);
+    } else if (!browser || !*browser) {
+        ok = shell_open(w, NULL);
+    }
+    free(exe);
+    free(w);
+    return ok;
+}
+
 static bool looks_like_url(const char *s)
 {
     if (str_starts_with(s, "http://") || str_starts_with(s, "https://") || str_starts_with(s, "www.")) return true;
@@ -321,6 +381,11 @@ char *tool_open_app(const cJSON *a)
         if (SUCCEEDED(AssocQueryStringW(ASSOCF_NONE, ASSOCSTR_EXECUTABLE, L"http", L"open", exe, &n)) &&
             shell_open(exe, NULL))
             result = xstrdup("Abrí tu navegador.");
+    } else if (looks_like_url(target) && *arg_str(a, "navegador")) {
+        /* "Abre YouTube en Opera": esa dirección, en ese navegador. */
+        const char *nav = arg_str(a, "navegador");
+        if (open_url(target, nav)) result = str_printf("Abrí %s en %s.", target, nav);
+        else result = str_printf("No encontré el navegador «%s» instalado; dime otro o lo abro en el predeterminado.", nav);
     } else if (looks_like_url(target)) {
         char *url = str_starts_with(target, "http") ? xstrdup(target) : str_printf("https://%s", target);
         wchar_t *w = utf8_to_wide(url);

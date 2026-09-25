@@ -3,13 +3,16 @@
     "type": "function",
     "function": {
       "name": "open_app",
-      "description": "Abre una app por nombre (si ya está abierta, la trae al frente), 'explorador', 'navegador' (el predeterminado), una carpeta, un archivo o una página web. No abre .exe, .bat ni accesos directos sueltos.",
+      "description": "Abre una app por nombre (si ya está abierta, la trae al frente), 'explorador', 'navegador' (el predeterminado), una carpeta, un archivo o una página web. No abre .exe, .bat ni accesos directos sueltos. Para una página en un navegador en particular, pasa 'navegador' (ej. 'opera'); no escribas la dirección en la página.",
       "parameters": {
         "type": "object",
         "properties": {
           "name": {
             "type": "string",
             "description": "Ej: 'discord', 'descargas', 'youtube.com'"
+          },
+          "navegador": {
+            "type": "string"
           }
         },
         "required": [
@@ -32,6 +35,27 @@
         },
         "required": [
           "query"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "poner_en_youtube",
+      "description": "Pone una canción o video: abre directo el primer resultado de YouTube ('navegador' opcional).",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "busqueda": {
+            "type": "string"
+          },
+          "navegador": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "busqueda"
         ]
       }
     }

@@ -472,7 +472,7 @@ static bool claims_done(const char *reply)
 static const char *const CORE_TOOLS[] = {
     "open_app",   "web_search", "control_media", "control_desktop",       "focus_window",     "list_windows",
     "type_text",  "leer_pagina", "guardar_dato", "recordar",              "crear_recordatorio", "terminar_conversacion",
-    "cambiar_permisos", "run_macro",
+    "cambiar_permisos", "run_macro", "poner_en_youtube",
 };
 
 typedef struct {
