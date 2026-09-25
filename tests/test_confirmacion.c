@@ -588,6 +588,18 @@ static void test_respuestas_limpias(void)
     conv_destroy(c);
 }
 
+static void test_youtube(void)
+{
+    printf("-- poner una canción --\n");
+    Conversation *c = conv_create(false);
+    script("tool:poner_en_youtube {\"busqueda\":\"AC/DC Back in Black\"}", "Te puse Back in Black de AC/DC.", NULL);
+    char *r = say(c, "pon la canción de ACDC de Black in Black");
+    check(strstr(g_last_tools, " poner_en_youtube ") && strstr(g_ran, "poner_en_youtube") && r && strstr(r, "Back in Black"),
+          "va siempre entre las herramientas y la usa (en vez de escribir a ciegas en la página)");
+    free(r);
+    conv_destroy(c);
+}
+
 static void test_detecta_permiso(void)
 {
     printf("-- qué cuenta como pedir permiso --\n");
@@ -628,6 +640,7 @@ int wmain(void)
     test_nombre();
     test_menos_cupo();
     test_respuestas_limpias();
+    test_youtube();
     printf("%d/%d pruebas %s\n", g_total - g_fail, g_total, g_fail ? "— HAY FALLAS" : "ok");
     return g_fail ? 1 : 0;
 }

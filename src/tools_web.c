@@ -283,6 +283,52 @@ static int search_bing(const char *query, StrBuf *out)
     return found;
 }
 
+bool youtube_first_video_id(const char *html, char id[12])
+{
+    for (const char *p = html; p && (p = strstr(p, "\"videoId\":\"")); p++) {
+        const char *v = p + 11;
+        size_t n = 0;
+        while (n < 11 && (isalnum((unsigned char)v[n]) || v[n] == '-' || v[n] == '_')) n++;
+        if (n == 11 && v[11] == '"') {
+            memcpy(id, v, 11);
+            id[11] = 0;
+            return true;
+        }
+    }
+    id[0] = 0;
+    return false;
+}
+
+/* "Pon la canción de AC/DC Back in Black": busca en YouTube y abre directo el
+   primer video, en vez de escribir a ciegas en la página. */
+char *tool_poner_en_youtube(const cJSON *a)
+{
+    char *q = str_trim(arg_str(a, "busqueda"));
+    const char *nav = arg_str(a, "navegador");
+    if (!*q) {
+        free(q);
+        return xstrdup("¿Qué quieres que ponga?");
+    }
+    char *enc = url_encode(q);
+    char *search = str_printf("https://www.youtube.com/results?search_query=%s", enc);
+    free(enc);
+    HttpResponse r = http_get(search, 10000, true);
+    char id[12];
+    bool found = r.status == 200 && r.body && youtube_first_video_id(r.body, id);
+    http_response_free(&r);
+    char *url = found ? str_printf("https://www.youtube.com/watch?v=%s", id) : xstrdup(search);
+    bool ok = open_url(url, nav);
+    char *res;
+    if (!ok && *nav) res = str_printf("No encontré el navegador «%s» instalado.", nav);
+    else if (!ok) res = xstrdup("No pude abrir el navegador.");
+    else if (found) res = str_printf("Te puse «%s» en YouTube.", q);
+    else res = str_printf("Abrí la búsqueda de «%s» en YouTube; no pude elegir el video, escoge uno.", q);
+    free(url);
+    free(search);
+    free(q);
+    return res;
+}
+
 char *tool_web_search(const cJSON *a)
 {
     char *query = str_trim(arg_str(a, "query"));

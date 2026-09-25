@@ -23,6 +23,12 @@ int arg_int(const cJSON *args, const char *key, int def);
 
 /* sistema */
 char *tool_open_app(const cJSON *a);
+/* Abre una dirección en ese navegador ("opera", "chrome"…) o, sin navegador, en
+   el predeterminado. false si no se pudo (o no está ese navegador). */
+bool open_url(const char *url, const char *browser);
+/* El primer video de una página de resultados de YouTube: 11 caracteres en id. */
+bool youtube_first_video_id(const char *html, char id[12]);
+char *tool_poner_en_youtube(const cJSON *a);
 char *tool_control_media(const cJSON *a);
 char *tool_control_desktop(const cJSON *a);
 char *tool_focus_window(const cJSON *a);
