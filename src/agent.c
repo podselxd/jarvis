@@ -8,6 +8,7 @@
 #include "groq.h"
 #include "log.h"
 #include "memory.h"
+#include "mesh.h"
 #include "resource.h"
 #include "resources.h"
 #include "tools.h"
@@ -243,6 +244,13 @@ static cJSON *context_message(Conversation *c)
         sb_appendf(&sb, "\nEstás hablando con: %s.", name);
         free(name);
     }
+    /* Los nombres exactos de tus PCs: así "dile a mi laptop" llega a la que es. */
+    MeshDevice *devs;
+    int nd = mesh_devices(&devs);
+    for (int i = 0; i < nd; i++)
+        sb_appendf(&sb, "%s%s", i ? ", " : "\nDispositivos registrados para gestionar_dispositivo: ", devs[i].name);
+    if (nd) sb_append(&sb, ".");
+    mesh_devices_free(devs, nd);
     if (c->announce_pending) {
         char *pend = reminders_take_pending_for(current_speaker());
         if (*pend)

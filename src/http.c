@@ -175,11 +175,13 @@ HttpResponse http_request(const HttpRequest *r)
     free(method);
     free(object);
     if (!req) {
-        resp.error = win_error_text(GetLastError());
+        resp.error_code = GetLastError();
+        resp.error = win_error_text(resp.error_code);
         goto done;
     }
     int t = r->timeout_ms > 0 ? r->timeout_ms : 60000;
-    WinHttpSetTimeouts(req, t, t, t, t);
+    int ct = r->connect_timeout_ms > 0 ? r->connect_timeout_ms : t;
+    WinHttpSetTimeouts(req, t, ct, t, t);
     if (r->no_redirects) {
         DWORD feature = WINHTTP_DISABLE_REDIRECTS;
         WinHttpSetOption(req, WINHTTP_OPTION_DISABLE_FEATURE, &feature, sizeof feature);
@@ -190,7 +192,8 @@ HttpResponse http_request(const HttpRequest *r)
                                    (LPVOID)r->body, (DWORD)r->body_len, (DWORD)r->body_len, 0);
     free(headers);
     if (!sent || !WinHttpReceiveResponse(req, NULL)) {
-        resp.error = win_error_text(GetLastError());
+        resp.error_code = GetLastError();
+        resp.error = win_error_text(resp.error_code);
         goto done;
     }
 
