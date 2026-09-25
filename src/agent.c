@@ -411,6 +411,42 @@ bool agent_asks_permission(const char *reply)
     return ends_q && ask;
 }
 
+/* ¿Pidió que se hiciera algo? (No una pregunta ni plática.) */
+static bool asks_for_action(const char *text)
+{
+    static const char *const VERBS[] = {"pon",    "abre",     "abri",    "cierra",   "minimiz", "maximiz", "sube",
+                                        "baja",   "busca",    "manda",   "envia",    "escribe", "reproduc", "play",
+                                        "pausa",  "apaga",    "prende",  "enciende", "mueve",   "borra",   "dile",
+                                        "lee",    "copia",    "pega",    "guarda",   "cambia",  "activa",  "desactiva",
+                                        "silenci", "quita",   "agrega",  "crea",     "haz",     "llama",   "ejecuta",
+                                        "instala", "descarga", "entra",  "navega",   "anota",   "exporta", "registra"};
+    char *n = intents_normalize(text);
+    bool hit = false;
+    for (const char *p = n; *p && !hit; p++) {
+        if (*p != ' ' || !p[1]) continue;
+        for (size_t i = 0; i < sizeof VERBS / sizeof *VERBS && !hit; i++) hit = str_starts_with(p + 1, VERBS[i]);
+    }
+    free(n);
+    return hit;
+}
+
+/* ¿La respuesta dice que ya lo hizo ("Listo", "te pongo play", "abrí…")? */
+static bool claims_done(const char *reply)
+{
+    static const char *const CLAIMS[] = {
+        " listo ",   " ya esta ",   " ya quedo ", " hecho ",   " te pongo ", " te lo pongo ", " le pongo ",
+        " le doy ",  " te doy ",    " le di ",    " le puse ", " te puse ",  " ya puse ",     " abri ",
+        " cerre ",   " minimice ",  " maximice ", " subi ",    " baje ",     " reproduciendo ", " reproduciendose ",
+        " envie ",   " mande ",     " escribi ",  " busque ",  " te lo hago ", " lo hago ",   " enseguida ",
+        " ahora mismo ", " guarde ", " movi ",    " copie ",   " ya lo ",    " ya la ",
+    };
+    char *n = intents_normalize(reply);
+    bool hit = false;
+    for (size_t i = 0; i < sizeof CLAIMS / sizeof *CLAIMS && !hit; i++) hit = strstr(n, CLAIMS[i]) != NULL;
+    free(n);
+    return hit;
+}
+
 /* La fecha se inyecta fresca en cada pedido (no queda en el historial) para
    que los recordatorios relativos ("en 10 minutos") se calculen bien. */
 static cJSON *context_message(Conversation *c)
@@ -553,9 +589,20 @@ TurnResult agent_process(Conversation *c, const char *text)
     char *reply = NULL;
     GroqError err = {0};
     bool failed = false, ending = false, auto_yes = false;
+    bool acted = false, nudged = false, nudge_now = false; /* ¿usó alguna herramienta? ¿ya se le reclamó? */
     for (int round = 0; round < MAX_TOOL_ROUNDS && !reply && !failed; round++) {
         app_status(round ? "Trabajando…" : "Pensando…");
         cJSON *msgs = build_request(c);
+        if (nudge_now) {
+            nudge_now = false;
+            cJSON *note = cJSON_CreateObject();
+            cJSON_AddStringToObject(note, "role", "system");
+            cJSON_AddStringToObject(note, "content",
+                                    "Tu respuesta anterior decía que ya lo hiciste, pero no usaste ninguna herramienta, "
+                                    "así que no se hizo nada. Si te pidieron una acción, usa ahora la herramienta que "
+                                    "corresponde. Si ninguna sirve, di con sinceridad que no puedes.");
+            cJSON_AddItemToArray(msgs, note);
+        }
         cJSON *msg = groq_chat(msgs, g_tools, &err);
         cJSON_Delete(msgs);
         if (!msg) {
@@ -567,6 +614,20 @@ TurnResult agent_process(Conversation *c, const char *text)
             cJSON *content = cJSON_GetObjectItem(msg, "content");
             reply = str_trim(cJSON_IsString(content) ? content->valuestring : "");
             cJSON_Delete(msg);
+            /* "Te pongo play" sin haber usado ninguna herramienta: no se hizo
+               nada. Se le reclama una vez; si insiste, no se dice. */
+            if (!acted && asks_for_action(text) && claims_done(reply)) {
+                if (!nudged && round + 1 < MAX_TOOL_ROUNDS) {
+                    log_msg("El modelo dijo «%s» sin usar ninguna herramienta; se lo vuelvo a pedir.", reply);
+                    nudged = nudge_now = true;
+                    free(reply);
+                    reply = NULL;
+                    continue;
+                }
+                log_msg("El modelo insistió en «%s» sin usar ninguna herramienta; no lo digo.", reply);
+                free(reply);
+                reply = xstrdup("Perdón, no lo hice: no encontré cómo. ¿Me lo pides de otra forma?");
+            }
             /* Con acceso completo, si aun así pregunta "¿lo hago?", se le
                contesta que sí (una vez por turno) en vez de hacerte contestar. */
             if (!auto_yes && config_full_access() && round + 1 < MAX_TOOL_ROUNDS && agent_asks_permission(reply)) {
@@ -598,6 +659,7 @@ TurnResult agent_process(Conversation *c, const char *text)
                 cJSON_Delete(parsed);
                 parsed = cJSON_CreateObject();
             }
+            if (strcmp(name, "terminar_conversacion")) acted = true;
             if (blocked) {
                 /* cada tool_call necesita su resultado o Groq rechaza el historial */
                 result = xstrdup("No se hizo: primero hay que confirmar la acción anterior.");

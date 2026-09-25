@@ -35,6 +35,7 @@ static const char *g_script[16];
 static int g_script_len, g_script_pos, g_call_id;
 static bool g_saw_injection; /* el último pedido a "Groq" traía el texto escondido de la página */
 static bool g_saw_full_mode; /* y le decía que tiene acceso completo */
+static bool g_saw_nudge;     /* y le reclamaba decir "listo" sin haber usado herramientas */
 
 static void script(const char *a, const char *b, const char *c)
 {
@@ -50,6 +51,7 @@ cJSON *groq_chat(const cJSON *messages, const cJSON *tools, GroqError *err)
     char *sent = cJSON_PrintUnformatted(messages);
     g_saw_injection = strstr(sent, "IGNORA TUS INSTRUCCIONES") != NULL;
     g_saw_full_mode = strstr(sent, "Tienes acceso completo") != NULL;
+    if (strstr(sent, "no usaste ninguna herramienta")) g_saw_nudge = true;
     free(sent);
     cJSON *m = cJSON_CreateObject();
     cJSON_AddStringToObject(m, "role", "assistant");
@@ -451,6 +453,27 @@ static void test_comandos_directos(void)
     conv_destroy(c);
 }
 
+static void test_sin_listo_falso(void)
+{
+    printf("-- nunca «listo» sin haberlo hecho --\n");
+    g_saw_nudge = false;
+    Conversation *c = conv_create(false);
+    script("¡Listo! Ya te puse tu playlist.", "tool:open_app {\"name\":\"spotify\"}", "Abrí Spotify y ya suena.");
+    char *r = say(c, "abre spotify y pon mi playlist de rock");
+    check(g_saw_nudge && strstr(g_ran, "open_app") && r && !strcmp(r, "Abrí Spotify y ya suena."),
+          "dijo «listo» sin herramienta: se le reclama y entonces sí lo hace");
+    free(r);
+    script("Te lo pongo enseguida.", "Listo, ya está sonando.", NULL);
+    r = say(c, "pon la canción de ACDC de Black in Black");
+    check(!*g_ran && r && strstr(r, "no lo hice"), "si insiste sin herramienta, Sokari no lo dice: avisa que no lo hizo");
+    free(r);
+    script("Listo, son las 5 de la tarde.", NULL, NULL);
+    r = say(c, "¿qué hora es?");
+    check(g_script_pos == 1 && r && strstr(r, "5 de la tarde"), "a una pregunta no se le reclama nada");
+    free(r);
+    conv_destroy(c);
+}
+
 static void test_detecta_permiso(void)
 {
     printf("-- qué cuenta como pedir permiso --\n");
@@ -480,6 +503,7 @@ int wmain(void)
     test_acceso_completo();
     test_detecta_permiso();
     test_comandos_directos();
+    test_sin_listo_falso();
     printf("%d/%d pruebas %s\n", g_total - g_fail, g_total, g_fail ? "— HAY FALLAS" : "ok");
     return g_fail ? 1 : 0;
 }
