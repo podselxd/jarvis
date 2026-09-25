@@ -66,7 +66,7 @@ enum {
 enum {
     A_NONE, A_GROQ_LINK, A_RESET_PW, A_SHOW_API, A_SHOW_STOP, A_TAILSCALE, A_COPY_SECRET, A_OBSIDIAN, A_PICK_SOUND,
     A_CLEAR_SOUND, A_OPEN_FOLDER, A_CHECK_UPDATE, A_SAVE, A_CANCEL, A_START, A_GO_SETTINGS, A_MUTE, A_TEST_AUDIO,
-    A_QUIT, A_MODE_CHANGED, A_OUTPUT_CHANGED, A_TEST_VOICE, A_FIREWALL, A_DETECT, A_FULL_ACCESS,
+    A_QUIT, A_MODE_CHANGED, A_OUTPUT_CHANGED, A_TEST_VOICE, A_FIREWALL, A_DETECT, A_DIAGNOSE, A_FULL_ACCESS,
     /* Por dispositivo de la lista: + su número. */
     A_DEV_PROBE = 200, A_DEV_REMOVE = 300,
 };
@@ -554,9 +554,11 @@ static void layout(void)
             bx += dp(182);
         }
         layout_button(bx, y, dp(220), L"Permitir en el firewall", A_FIREWALL, false);
+        layout_button(bx + dp(232), y, dp(190), L"Revisar la malla", A_DIAGNOSE, false);
         y += dp(52);
         int ey = y + dp(22);
-        y = layout_edit(x, y, w - dp(182), L"Secreto de malla (el mismo en todas tus PCs)", F_MESH, NULL);
+        y = layout_edit(x, y, w - dp(182), L"Secreto (solo si tus PCs usan cuentas distintas de Tailscale)", F_MESH,
+                        NULL);
         layout_button(x + w - dp(170), ey + dp(2), dp(170), L"Copiar secreto", A_COPY_SECRET, false);
         int ly = y;
         y = layout_label(x, y, w - dp(240), L"Tus PCs");
@@ -960,7 +962,8 @@ typedef struct {
 static wchar_t *detect_devices(void)
 {
     MeshDevice *peers, *known;
-    int np = tailscale_windows_peers(&peers), nk = mesh_devices(&known);
+    char *why = NULL;
+    int np = tailscale_windows_peers(&peers, &why), nk = mesh_devices(&known);
     StrBuf added;
     sb_init(&added);
     for (int i = 0; i < np; i++) {
@@ -970,12 +973,12 @@ static wchar_t *detect_devices(void)
         if (!have && mesh_device_set(peers[i].name, peers[i].host))
             sb_appendf(&added, "%s%s", added.len ? ", " : "", peers[i].name);
     }
-    char *msg = np == 0 ? xstrdup("No encontré otras PCs con Windows en tu Tailscale. Revisa que estén prendidas y "
-                                  "conectadas con la misma cuenta.")
+    char *msg = np == 0 ? str_printf("No encontré otras PCs con Windows. %s", why ? why : "")
                 : added.len ? str_printf("Agregué: %s. Dale a Probar para ver si contesta.", added.data)
                             : str_printf("Ya tenías registradas tus PCs de Tailscale (%d).", np);
     wchar_t *w = utf8_to_wide(msg);
     free(msg);
+    free(why);
     sb_free(&added);
     mesh_devices_free(peers, np);
     mesh_devices_free(known, nk);
@@ -996,6 +999,11 @@ static DWORD WINAPI async_worker(LPVOID arg)
                                   : L"El firewall no cambió (¿le dijiste que no al permiso de administrador?).");
     } else if (job->action == A_DETECT) {
         job->result = detect_devices();
+    } else if (job->action == A_DIAGNOSE) {
+        char *rep = mesh_diagnose();
+        log_msg("%s", rep);
+        job->result = utf8_to_wide(rep);
+        free(rep);
     } else if (job->action == A_DEV_PROBE) {
         char *msg = str_printf("%s: %s.", job->name, mesh_probe_text(mesh_probe(job->host)));
         job->result = utf8_to_wide(msg);
@@ -1087,10 +1095,8 @@ static void clear_sound(void)
     layout();
 }
 
-static void copy_secret(void)
+static bool copy_text(const wchar_t *w)
 {
-    char *secret = config_mesh_secret(true);
-    wchar_t *w = utf8_to_wide(secret);
     size_t bytes = (wcslen(w) + 1) * sizeof(wchar_t);
     HGLOBAL g = GlobalAlloc(GMEM_MOVEABLE, bytes);
     bool ok = false;
@@ -1104,6 +1110,14 @@ static void copy_secret(void)
         }
         if (!ok) GlobalFree(g);
     }
+    return ok;
+}
+
+static void copy_secret(void)
+{
+    char *secret = config_mesh_secret(true);
+    wchar_t *w = utf8_to_wide(secret);
+    bool ok = copy_text(w);
     SetWindowTextW(S.edits[F_MESH], w);
     SecureZeroMemory(secret, strlen(secret));
     free(secret);
@@ -1139,6 +1153,9 @@ static void do_action(int action)
         break;
     case A_DETECT:
         run_async(A_DETECT, L"Buscando tus PCs en Tailscale…");
+        break;
+    case A_DIAGNOSE:
+        run_async(A_DIAGNOSE, L"Revisando la malla paso a paso (tarda unos segundos)…");
         break;
     case A_GROQ_LINK:
         ShellExecuteW(NULL, L"open", L"https://console.groq.com/keys", NULL, NULL, SW_SHOWNORMAL);
@@ -1469,7 +1486,14 @@ static LRESULT CALLBACK proc(HWND h, UINT m, WPARAM w, LPARAM l)
         return 0;
     case WM_APP_ASYNC_DONE: {
         AsyncJob *job = (AsyncJob *)l;
-        set_status(job->result);
+        if (job->action == A_DIAGNOSE) {
+            bool copied = copy_text(job->result);
+            MessageBoxW(h, job->result, L"Revisión de la malla", MB_OK | (wcsstr(job->result, L"✗") ? MB_ICONWARNING : MB_ICONINFORMATION));
+            set_status(copied ? L"Copié el reporte: si algo salió con ✗ y no sabes qué hacer, pégamelo."
+                              : L"Revisé la malla (el reporte también quedó en sokari.log).");
+        } else {
+            set_status(job->result);
+        }
         refresh_tailscale_text();
         layout();
         free(job->result);
