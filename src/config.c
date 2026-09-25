@@ -89,6 +89,11 @@ static void defaults(AppConfig *c)
     c->mic_name = xstrdup("");
     c->output_name = xstrdup("");
     c->fw_asked = xstrdup("");
+    c->nvidia_key = xstrdup("");
+    c->deepseek_key = xstrdup("");
+    c->openrouter_key = xstrdup("");
+    c->glm_key = xstrdup("");
+    c->ai_order = xstrdup(DEFAULT_AI_ORDER);
     c->display_mode = DISPLAY_FULLSCREEN;
     c->resolution = 0;
     c->volume = 100;
@@ -115,6 +120,11 @@ static void apply_kv(AppConfig *c, const char *key, const char *value)
     else if (!strcmp(key, "SOKARI_MIC")) set_str(&c->mic_name, value);
     else if (!strcmp(key, "SOKARI_OUTPUT")) set_str(&c->output_name, value);
     else if (!strcmp(key, "SOKARI_FW_ASKED")) set_str(&c->fw_asked, value);
+    else if (!strcmp(key, "NVIDIA_API_KEY")) set_str(&c->nvidia_key, value);
+    else if (!strcmp(key, "DEEPSEEK_API_KEY")) set_str(&c->deepseek_key, value);
+    else if (!strcmp(key, "OPENROUTER_API_KEY")) set_str(&c->openrouter_key, value);
+    else if (!strcmp(key, "GLM_API_KEY")) set_str(&c->glm_key, value);
+    else if (!strcmp(key, "SOKARI_AI_ORDER")) set_str(&c->ai_order, *value ? value : DEFAULT_AI_ORDER);
     else if (!strcmp(key, "SOKARI_DISPLAY_MODE")) {
         for (int i = 0; i < DISPLAY_MODE_COUNT; i++)
             if (!strcmp(value, DISPLAY_KEYS[i])) c->display_mode = i;
@@ -200,6 +210,11 @@ static bool save_locked(void)
     put_kv(&sb, "SOKARI_MIC", g_cfg.mic_name);
     put_kv(&sb, "SOKARI_OUTPUT", g_cfg.output_name);
     put_kv(&sb, "SOKARI_FW_ASKED", g_cfg.fw_asked);
+    put_kv(&sb, "NVIDIA_API_KEY", g_cfg.nvidia_key);
+    put_kv(&sb, "DEEPSEEK_API_KEY", g_cfg.deepseek_key);
+    put_kv(&sb, "OPENROUTER_API_KEY", g_cfg.openrouter_key);
+    put_kv(&sb, "GLM_API_KEY", g_cfg.glm_key);
+    put_kv(&sb, "SOKARI_AI_ORDER", g_cfg.ai_order);
     put_kv(&sb, "SOKARI_DISPLAY_MODE", display_mode_key(g_cfg.display_mode));
     sb_appendf(&sb, "SOKARI_RESOLUTION=%d\n", g_cfg.resolution);
     sb_appendf(&sb, "SOKARI_VOLUME=%d\n", g_cfg.volume);
@@ -241,6 +256,11 @@ static void copy_cfg(AppConfig *dst, const AppConfig *src)
     dst->mic_name = xstrdup(src->mic_name);
     dst->output_name = xstrdup(src->output_name);
     dst->fw_asked = xstrdup(src->fw_asked);
+    dst->nvidia_key = xstrdup(src->nvidia_key);
+    dst->deepseek_key = xstrdup(src->deepseek_key);
+    dst->openrouter_key = xstrdup(src->openrouter_key);
+    dst->glm_key = xstrdup(src->glm_key);
+    dst->ai_order = xstrdup(src->ai_order);
 }
 
 void config_free(AppConfig *c)
@@ -253,6 +273,12 @@ void config_free(AppConfig *c)
     free(c->mic_name);
     free(c->output_name);
     free(c->fw_asked);
+    char *keys[] = {c->nvidia_key, c->deepseek_key, c->openrouter_key, c->glm_key};
+    for (int i = 0; i < 4; i++) {
+        if (keys[i]) SecureZeroMemory(keys[i], strlen(keys[i]));
+        free(keys[i]);
+    }
+    free(c->ai_order);
     memset(c, 0, sizeof *c);
 }
 
@@ -434,6 +460,28 @@ const char *config_secret_problem(const char *s)
     if (strlen(s) < 12)
         return "Ese secreto es muy corto: tiene que tener al menos 12 caracteres (el que Sokari genera tiene 64).";
     return NULL;
+}
+
+char *config_provider_key(const char *provider)
+{
+    AcquireSRWLockShared(&g_lock);
+    const char *k = !strcmp(provider, "nvidia")       ? g_cfg.nvidia_key
+                    : !strcmp(provider, "deepseek")   ? g_cfg.deepseek_key
+                    : !strcmp(provider, "openrouter") ? g_cfg.openrouter_key
+                    : !strcmp(provider, "glm")        ? g_cfg.glm_key
+                    : !strcmp(provider, "groq")       ? g_cfg.groq_api_key
+                                                      : "";
+    char *r = xstrdup(k ? k : "");
+    ReleaseSRWLockShared(&g_lock);
+    return r;
+}
+
+char *config_ai_order(void)
+{
+    AcquireSRWLockShared(&g_lock);
+    char *r = xstrdup(*g_cfg.ai_order ? g_cfg.ai_order : DEFAULT_AI_ORDER);
+    ReleaseSRWLockShared(&g_lock);
+    return r;
 }
 
 char *config_fw_asked(void)

@@ -28,9 +28,20 @@ void groq_error_free(GroqError *e);
 char *groq_transcribe(const int16_t *pcm, size_t samples, int sample_rate, GroqError *err);
 
 /* Devuelve el "message" de choices[0] ya limpio (role/content/tool_calls),
-   o NULL si falló. Prueba con un modelo de respaldo si el principal está
-   sin cupo (cada modelo de Groq tiene su propio límite). */
+   o NULL si falló. Prueba los modelos en orden: los de Groq que sirven para
+   usar herramientas (cada uno tiene su propio cupo) y luego los de las keys
+   de respaldo que tengas (NVIDIA, DeepSeek, OpenRouter, GLM). Si uno no tiene
+   cupo, pasa al siguiente sin esperar. */
 cJSON *groq_chat(const cJSON *messages, const cJSON *tools, GroqError *err);
+
+/* De la lista de modelos de un proveedor ("GET /models"), los que sirven,
+   del mejor al más flojo (heap; *out con n cadenas). Sin efectos: para
+   probarla sin red. */
+int groq_pick_models(const char *provider, const char *models_json, char ***out);
+/* Para las pruebas: otra dirección para un proveedor ("groq", "nvidia"…), y
+   volver a armar la lista de modelos. */
+void groq_set_base_url(const char *provider, const char *url);
+void groq_reset_models(void);
 
 unsigned char *wav_encode(const int16_t *pcm, size_t samples, int sample_rate, size_t *out_len);
 
