@@ -94,6 +94,27 @@ static void test_del_log(void)
     expect("abre spotify", "app:spotify");
     expect("pausa spotify", "pausa");
 
+    printf("-- a la mexicana --\n");
+    expect("púchale play", "play");
+    expect("pícale pausa", "pausa");
+    expect("qué pedo wey, ponle play", "play");
+    expect("no mames, ponle pausa", "pausa");
+    expect("quiubo carnal, púchale a la siguiente", "siguiente");
+    expect("ponme otra rola", "siguiente");
+    expect("órale, cámbiale a la que sigue", "siguiente");
+    expect("súbele un buen", "sube");
+    expect("súbele al máximo", "volumen:100");
+    expect("bájale al mínimo", "volumen:5");
+    expect("más quedito", "baja");
+    expect("quítale el volumen", "mute");
+    expect("grax", "gracias");
+    expect("se agradece carnal", "gracias");
+    expect("súbele dos rayitas", "sube");
+    expect("más suave porfa mi rey", "baja");
+    expect("ponle stop", "pausa");
+    expect("escóndela", "minimiza");
+    expect("eres un crack, vato", "gracias");
+
     printf("-- lo que se le deja al modelo --\n");
     expect("pon la canción de ACDC de Black in Black", "-");
     expect("ponle play al video que te mandé por whatsapp", "-");

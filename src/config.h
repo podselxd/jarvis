@@ -37,6 +37,7 @@ typedef struct {
     bool mic_muted;
     bool show_only_talking; /* la esfera se esconde cuando no le hablas */
     bool full_access;       /* acceso completo: no pide permiso para nada, salvo antes de borrar */
+    bool mexa;              /* habla como mexicano ("háblame como mexa"); entenderlo, siempre */
 } AppConfig;
 
 typedef struct {
@@ -73,6 +74,8 @@ float config_wake_threshold(void);
 bool config_mic_muted(void);
 bool config_show_only_talking(void);
 bool config_full_access(void);
+bool config_mexa(void);
+void config_set_mexa(bool on);
 void config_set_full_access(bool on);
 void config_set_mic_muted(bool muted);
 void config_set_orb_pos(int x, int y);

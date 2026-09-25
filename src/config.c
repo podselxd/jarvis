@@ -137,6 +137,7 @@ static void apply_kv(AppConfig *c, const char *key, const char *value)
     else if (!strcmp(key, "SOKARI_MIC_MUTED")) c->mic_muted = parse_bool(value);
     else if (!strcmp(key, "SOKARI_SHOW_ONLY_TALKING")) c->show_only_talking = parse_bool(value);
     else if (!strcmp(key, "SOKARI_FULL_ACCESS")) c->full_access = parse_bool(value);
+    else if (!strcmp(key, "SOKARI_MEXA")) c->mexa = parse_bool(value);
 }
 
 static bool load_env_file(const wchar_t *path, AppConfig *c)
@@ -202,6 +203,7 @@ static bool save_locked(void)
     sb_appendf(&sb, "SOKARI_MIC_MUTED=%d\n", g_cfg.mic_muted ? 1 : 0);
     sb_appendf(&sb, "SOKARI_SHOW_ONLY_TALKING=%d\n", g_cfg.show_only_talking ? 1 : 0);
     sb_appendf(&sb, "SOKARI_FULL_ACCESS=%d\n", g_cfg.full_access ? 1 : 0);
+    sb_appendf(&sb, "SOKARI_MEXA=%d\n", g_cfg.mexa ? 1 : 0);
     ensure_dir(g_paths.local_dir);
     bool ok = write_file_atomic(g_paths.config_file, sb.data, sb.len);
     sb_free(&sb);
@@ -312,6 +314,22 @@ bool config_full_access(void)
     bool v = g_cfg.full_access;
     ReleaseSRWLockShared(&g_lock);
     return v;
+}
+
+bool config_mexa(void)
+{
+    AcquireSRWLockShared(&g_lock);
+    bool v = g_cfg.mexa;
+    ReleaseSRWLockShared(&g_lock);
+    return v;
+}
+
+void config_set_mexa(bool on)
+{
+    AcquireSRWLockExclusive(&g_lock);
+    g_cfg.mexa = on;
+    save_locked();
+    ReleaseSRWLockExclusive(&g_lock);
 }
 
 void config_set_full_access(bool on)

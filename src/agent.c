@@ -38,11 +38,15 @@ static const char *FAREWELLS[] = {
     "adios", "adiós", "hasta luego", "hasta la proxima", "hasta la próxima", "nos vemos", "me despido", "chao",
     "chau", "bye", "eso es todo", "eso seria todo", "eso sería todo", "ya no necesito nada", "gracias eso es todo",
     "ya vete", "vete ya", "puedes irte", "te puedes ir", "ya nada gracias", "ya es todo", "retirate", "retírate",
+    "ahi nos vidrios", "ahí nos vidrios", "nos vidrios", "ahi nos vemos", "ahí nos vemos", "ahi se ve", "ahí se ve",
+    "ya me voy", "luego te hablo", "al rato te hablo", "bye bye", "ahi la vemos", "ahí la vemos", "ahi te ves",
+    "ahí te ves", "me retiro",
 };
 
 /* Estas solo son despedida si son casi toda la frase: "ya está abierta
    Opera" o "nada más abre Spotify" no lo son. */
-static const char *SHORT_FAREWELLS[] = {"nada mas", "nada más", "ya esta", "ya está"};
+static const char *SHORT_FAREWELLS[] = {"nada mas", "nada más", "ya esta", "ya está", "ya estuvo", "camara",
+                                        "cámara",   "buenas noches", "sale bye"};
 
 /* Cuando Sokari mismo se despide, la conversación también termina (y la
    esfera se esconde si así está configurada). Una pregunta al final no cuenta:
@@ -229,19 +233,27 @@ AgentAnswer agent_classify_answer(const char *text)
     static const char *const YES[] = {"si",       "sí",        "dale",      "hazlo",   "hazle",      "confirmo",
                                       "confirma", "confirmado", "adelante", "claro",   "ok",         "okay",
                                       "okey",     "afirmativo", "correcto", "simón",   "simon",      "ándale",
-                                      "andale",   "órale",      "orale",    "acuerdo", "autorizo",   "permiso"};
+                                      "andale",   "órale",      "orale",    "acuerdo", "autorizo",   "permiso",
+                                      "sale",     "va",         "arre",     "sobres",  "cámara",     "camara",
+                                      "sip",      "sep",        "simona",   "échale",  "echale",     "huevo",
+                                      "fierro",   "jalo",       "listo",    "perfecto", "obvio",      "seguro"};
     static const char *const NO[] = {"no",      "cancela",  "cancelalo", "cancélalo", "olvidalo", "olvídalo",
-                                     "nel",     "negativo", "nop",       "nope",      "tampoco",  "nunca"};
+                                     "nel",     "negativo", "nop",       "nope",      "tampoco",  "nunca",
+                                     "nones",   "nanai",    "nanais"};
     /* Palabras que acompañan al sí sin cambiarlo. */
     static const char *const FILLER[] = {"ah",  "oh",  "eh",  "bueno", "pues", "que", "qué", "te",  "lo",
                                          "le",  "la",  "doy", "de",    "a",    "al",  "ya",  "y",   "por",
-                                         "favor", "porfa", "sokari", "vale", "yo", "tienes", "mi"};
+                                         "favor", "porfa", "sokari", "vale", "yo", "tienes", "mi",
+                                         "wey",   "güey",  "guey",  "carnal", "compa", "bro", "neta", "pos",
+                                         "pus",   "mano",  "we",    "chido",  "chale"};
     static const char *const ALL[] = {"todo", "todos", "toda", "todas"};
     static const char *const REPEAT[] = {"que",         "qué",          "como",        "cómo",       "perdon",
                                          "perdón",      "mande",        "que dijiste", "qué dijiste", "repite",
                                          "repitelo",    "repítelo",     "otra vez",    "no te entendi",
                                          "no te entendí", "no entendi", "no entendí",  "cual",       "cuál",
-                                         "que cosa",    "qué cosa",     "como dices",  "cómo dices"};
+                                         "que cosa",    "qué cosa",     "como dices",  "cómo dices",
+                                         "eh",          "como dijiste", "cómo dijiste", "mande usted",
+                                         "no te escuche", "no te escuché", "no te oi",   "no te oí"};
     char *low = str_lower(text);
     for (unsigned char *p = (unsigned char *)low; *p; p++) {
         if (p[0] == 0xC2 && (p[1] == 0xA1 || p[1] == 0xBF)) p[0] = p[1] = ' '; /* ¡ ¿ */
@@ -269,7 +281,18 @@ AgentAnswer agent_classify_answer(const char *text)
         w = end + 1;
     }
     free(t);
+    /* "Ni madres", "ni de chiste", "para nada": no, aunque ninguna palabra sola lo sea. */
+    char *n2 = intents_normalize(text);
+    if (strstr(n2, " ni madres ") || strstr(n2, " ni de chiste ") || strstr(n2, " ni loco ") ||
+        strstr(n2, " para nada ") || strstr(n2, " ni maiz ") || strstr(n2, " mejor no ") ||
+        strstr(n2, " ni de broma ") || strstr(n2, " dejalo asi ") || strstr(n2, " mejor dejalo "))
+        any_no = true;
+    /* "De una", "va que va", "sale y vale", "por supuesto": sí. */
+    bool yes_phrase = strstr(n2, " de una ") || strstr(n2, " va que va ") || strstr(n2, " sale y vale ") ||
+                      strstr(n2, " por supuesto ") || strstr(n2, " ya estas ") || strstr(n2, " claro que si ");
+    free(n2);
     if (any_no) return ANSWER_NO;
+    if (yes_phrase && words <= 8) return ANSWER_YES;
     if (!words || !only_known || words > 8) return ANSWER_OTHER;
     if (any_all) return ANSWER_ALL; /* "a todo", "sí a todo", "confirma todo", "permiso a todo" */
     return any_yes ? ANSWER_YES : ANSWER_OTHER;
@@ -723,6 +746,9 @@ static cJSON *context_message(Conversation *c)
         sb_appendf(&sb, "%s%s", i ? ", " : "\nDispositivos registrados para gestionar_dispositivo: ", devs[i].name);
     if (nd) sb_append(&sb, ".");
     mesh_devices_free(devs, nd);
+    if (config_mexa())
+        sb_append(&sb, "\nHabla como mexicano de a pie, relajado y cálido: 'órale', 'qué onda', 'chido', 'neta', "
+                       "'sale', 'ahí nos vidrios'. Sin groserías fuertes.");
     /* Va en cada pedido: si cambia el modo, cuenta desde el siguiente. */
     if (config_full_access())
         sb_append(&sb, "\nTienes acceso completo: nunca pidas permiso ni confirmación ('¿lo hago?'); hazlo y di qué "
@@ -820,6 +846,39 @@ static TurnResult process_turn(Conversation *c, const char *text)
     if (is_farewell(text)) {
         memory_persist("user", text);
         r.reply = xstrdup("Hasta luego.");
+        return r;
+    }
+    /* "Háblame como mexa" / "habla normal": cómo habla Sokari. Entender el
+       español de México lo entiende siempre. */
+    static const char *const MEXA_OFF[] = {" habla normal ",    " hablame normal ",  " no hables como ",
+                                           " deja de hablar como ", " habla neutro ", " quita el modo mexa ",
+                                           " sin modo mexa ",   " modo normal ",     " contesta normal "};
+    /* Un verbo de hablar + "como mexa / mexicano / mexica / chilango…" (o
+       "en mexicano", "a la mexicana"), o "ponte mexa" / "modo mexa". */
+    static const char *const MEXA_VERBS[] = {" habla",  " platica", " contesta", " responde", " dime ",
+                                             " hablemos ", " platiquemos ", " expresate "};
+    static const char *const MEXA_HOW[] = {" como mexa",  " como mexicano", " como mexicana", " como mexica",
+                                           " como chilango", " como chilanga", " como raza ", " en mexicano ",
+                                           " a la mexicana ", " como de barrio "};
+    static const char *const MEXA_SHORT[] = {" ponte mexa ", " ponte mexicano ", " modo mexa ", " modo mexicano "};
+    char *nm = intents_normalize(text);
+    int mexa = -1;
+    for (size_t i = 0; i < sizeof MEXA_OFF / sizeof *MEXA_OFF && mexa < 0; i++)
+        if (strstr(nm, MEXA_OFF[i])) mexa = 0;
+    bool verb = false, how = false;
+    for (size_t i = 0; i < sizeof MEXA_VERBS / sizeof *MEXA_VERBS; i++) verb |= strstr(nm, MEXA_VERBS[i]) != NULL;
+    for (size_t i = 0; i < sizeof MEXA_HOW / sizeof *MEXA_HOW; i++) how |= strstr(nm, MEXA_HOW[i]) != NULL;
+    if (mexa < 0 && verb && how) mexa = 1;
+    for (size_t i = 0; i < sizeof MEXA_SHORT / sizeof *MEXA_SHORT && mexa < 0; i++)
+        if (strstr(nm, MEXA_SHORT[i])) mexa = 1;
+    free(nm);
+    if (mexa >= 0) {
+        config_set_mexa(mexa == 1);
+        log_msg(mexa ? "Modo mexa prendido." : "Modo mexa apagado: vuelvo a hablar neutro.");
+        memory_persist("user", text);
+        r.reply = xstrdup(mexa ? "¡Órale, va! Ya te hablo como mexa." : "Listo, vuelvo a hablar normal.");
+        memory_persist("assistant", r.reply);
+        r.keep_going = true;
         return r;
     }
     /* "Ignora todo lo anterior": empezar de cero, sin pasar por el modelo (que
