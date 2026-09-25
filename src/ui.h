@@ -43,6 +43,13 @@ void ui_config_changed(void);
 typedef enum { HUD_SHOW_QUIET = 0, HUD_SHOW_FRONT = 1, HUD_SHOW_STARTED = 3 } HudShow;
 void ui_show_hud(HudShow how);
 void ui_set_display_mode(int mode);
+/* Clic en la esfera: ¿cae en la esfera? (en pantalla completa o ventana, el
+   círculo del centro; la esfera flotante es toda la ventana). Y ¿del botón
+   abajo al botón arriba se movió tan poco que fue un clic y no arrastrar? */
+bool ui_click_on_sphere(int mode, int x, int y, int cw, int ch);
+bool ui_is_click(int dx, int dy);
+/* ¿Un clic en la esfera la calla en este estado? Solo si habla o piensa. */
+bool ui_click_silences(int state);
 HWND ui_message_window(void);
 HICON ui_app_icon(int size);
 

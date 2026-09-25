@@ -362,9 +362,62 @@ static void activate_next_window(void)
     }
 }
 
+bool ui_click_on_sphere(int mode, int x, int y, int cw, int ch)
+{
+    if (mode == DISPLAY_WINDOWED_BORDERLESS) return true; /* la ventana es la esfera */
+    if (cw <= 0 || ch <= 0) return false;
+    double r = 0.45 * (cw < ch ? cw : ch), dx = x - cw / 2.0, dy = y - ch / 2.0;
+    return dx * dx + dy * dy <= r * r;
+}
+
+bool ui_is_click(int dx, int dy)
+{
+    return abs(dx) <= 4 && abs(dy) <= 4;
+}
+
+/* Un clic en la esfera mientras habla o piensa la calla (y no dice lo que
+   tenía pendiente). Quieta, un clic no hace nada: no se activa sin querer. */
+bool ui_click_silences(int state)
+{
+    return state == JV_SPEAKING || state == JV_THINKING;
+}
+
+static void sphere_clicked(void)
+{
+    if (ui_click_silences(app_get_state())) voice_skip();
+}
+
+static POINT g_down; /* dónde se apretó el botón (pantalla) */
+
 static LRESULT CALLBACK hud_proc(HWND h, UINT m, WPARAM w, LPARAM l)
 {
     switch (m) {
+    case WM_LBUTTONDOWN:
+        GetCursorPos(&g_down);
+        break;
+    case WM_LBUTTONUP: {
+        POINT up;
+        GetCursorPos(&up);
+        RECT rc;
+        GetClientRect(h, &rc);
+        if (ui_is_click(up.x - g_down.x, up.y - g_down.y) &&
+            ui_click_on_sphere(U.mode, (short)LOWORD(l), (short)HIWORD(l), rc.right, rc.bottom))
+            sphere_clicked();
+        break;
+    }
+    case WM_NCLBUTTONDOWN:
+        /* La esfera flotante se arrastra desde cualquier parte: Windows se queda
+           en su ciclo de mover hasta que sueltas el botón. Si casi no se movió,
+           fue un clic. */
+        if (U.mode == DISPLAY_WINDOWED_BORDERLESS && w == HTCAPTION) {
+            POINT a, b;
+            GetCursorPos(&a);
+            LRESULT r = DefWindowProcW(h, m, w, l);
+            GetCursorPos(&b);
+            if (ui_is_click(b.x - a.x, b.y - a.y)) sphere_clicked();
+            return r;
+        }
+        break;
     case WM_MOUSEACTIVATE:
         if (!windowed(U.mode)) return MA_NOACTIVATE;
         break;
