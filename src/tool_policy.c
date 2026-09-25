@@ -87,6 +87,9 @@ char *tool_describe_action(const char *name, const cJSON *args)
         char *c = clip(arg_str(args, "comando"));
         r = str_printf("mandarle a %s la orden «%s»", a, c);
         free(c);
+    } else if (!strcmp(name, "borrar_memoria_reciente")) {
+        r = xstrdup(!strcmp(arg_str(args, "periodo"), "todo") ? "borrar todo lo que hemos hablado de mi memoria"
+                                                                : "borrar de mi memoria lo que hablamos hoy");
     } else if (!strcmp(name, "cambiar_permisos")) {
         r = xstrdup(arg_bool(args, "acceso_completo") ? "darme acceso completo (ya no preguntarte nada salvo antes de borrar)"
                                                        : "volver a pedirte permiso");

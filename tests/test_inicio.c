@@ -11,6 +11,7 @@
 
 #include "autostart.h"
 #include "config.h"
+#include "memory.h"
 #include "third_party/cJSON.h"
 #include "tools.h"
 #include "update.h"
@@ -65,6 +66,31 @@ static void test_run_key(void)
               !autostart_value_points_to(L"\"C:\\Sokari\\Sokari.exe.bak\"", j) &&
               !autostart_value_points_to(L"C:\\Sokari\\Sokari.exe2", j) && !autostart_value_points_to(NULL, j),
           "otra copia o una ruta que solo empieza igual no cuentan");
+}
+
+static void test_olvidar(const wchar_t *dir)
+{
+    printf("-- borrar la memoria de hoy --\n");
+    wchar_t *saved = g_paths.memory_dir;
+    g_paths.memory_dir = path_join(dir, L"memoria_prueba");
+    ensure_dir(g_paths.memory_dir);
+    wchar_t *mf = path_join(g_paths.memory_dir, L"memoria.jsonl");
+    const char *lines = "{\"ts\":1000,\"role\":\"user\",\"content\":\"ayer\"}\n"
+                        "{\"ts\":2000,\"role\":\"assistant\",\"content\":\"ayer también\"}\n"
+                        "{\"ts\":5000,\"role\":\"user\",\"content\":\"hoy\"}\n"
+                        "{\"ts\":6000,\"role\":\"assistant\",\"content\":\"hoy también\"}\n";
+    write_file_atomic(mf, lines, strlen(lines));
+    int n = memory_forget_since(3000);
+    char *left = read_file_all(mf, NULL);
+    check(n == 2 && left && strstr(left, "ayer también") && !strstr(left, "\"hoy\""),
+          "borra solo lo de desde ese momento y deja lo de antes");
+    free(left);
+    check(memory_forget_since(0) == 2, "«todo» borra lo que queda");
+    DeleteFileW(mf);
+    RemoveDirectoryW(g_paths.memory_dir);
+    free(mf);
+    free(g_paths.memory_dir);
+    g_paths.memory_dir = saved;
 }
 
 static cJSON *assets(const char *a, const char *b)
@@ -184,6 +210,7 @@ int wmain(void)
     test_launch();
     test_run_key();
     test_config(dir);
+    test_olvidar(dir);
     test_update_asset();
 
     DeleteFileW(g_paths.config_file);

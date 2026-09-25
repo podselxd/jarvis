@@ -28,6 +28,9 @@ typedef enum { ANSWER_OTHER, ANSWER_YES, ANSWER_NO, ANSWER_ALL, ANSWER_REPEAT } 
 AgentAnswer agent_classify_answer(const char *text);
 /* ¿La respuesta del modelo termina pidiendo permiso para hacer algo? */
 bool agent_asks_permission(const char *reply);
+/* Quita el razonamiento en inglés que a veces se cuela y la respuesta repetida
+   ("Listo.Listo."). Devuelve un texto nuevo (heap). */
+char *agent_clean_reply(const char *reply);
 
 /* Pipeline completo para un texto ya transcripto (o llegado por la malla):
    palabra de apagado (chequeo local, nunca llega a Groq) -> despedida ->

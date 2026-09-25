@@ -164,6 +164,36 @@ void memory_persist(const char *role, const char *content)
     free(line);
 }
 
+int memory_forget_since(double since)
+{
+    wchar_t *mf = memory_file(L"memoria.jsonl");
+    char *text = read_file_all(mf, NULL);
+    if (!text) {
+        free(mf);
+        return 0;
+    }
+    StrBuf keep;
+    sb_init(&keep);
+    int removed = 0;
+    char *save = NULL;
+    for (char *line = strtok_r(text, "\n", &save); line; line = strtok_r(NULL, "\n", &save)) {
+        cJSON *e = cJSON_Parse(line);
+        cJSON *ts = e ? cJSON_GetObjectItem(e, "ts") : NULL;
+        if (cJSON_IsNumber(ts) && ts->valuedouble >= since) {
+            removed++;
+        } else {
+            sb_append(&keep, line);
+            sb_append(&keep, "\n");
+        }
+        cJSON_Delete(e);
+    }
+    bool ok = write_file_atomic(mf, keep.data ? keep.data : "", keep.len);
+    sb_free(&keep);
+    free(text);
+    free(mf);
+    return ok ? removed : -1;
+}
+
 cJSON *memory_recent_history(double window_seconds)
 {
     cJSON *arr = cJSON_CreateArray();

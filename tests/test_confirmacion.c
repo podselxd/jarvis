@@ -534,6 +534,60 @@ static void test_menos_cupo(void)
     conv_destroy(c);
 }
 
+static void clean_is(const char *in, const char *want, const char *what)
+{
+    char *got = agent_clean_reply(in);
+    if (strcmp(got, want)) printf("      salió: «%s»\n", got);
+    check(!strcmp(got, want), what);
+    free(got);
+}
+
+static void test_respuestas_limpias(void)
+{
+    printf("-- respuestas limpias (casos de tu log) --\n");
+    clean_is("List.\nIt seems user wants to minimize current tab? They said \"minimizar la pestaña\". We used "
+             "minimize_all which minimizes windows. Might be okay. Probably done.Listo, todo está minimizado.",
+             "Listo, todo está minimizado.", "sin el razonamiento en inglés que se coló");
+    clean_is("Listo……………\nThe conversation is messy but final.Listo, la ventana está minimizada. ¿Necesitas algo más?",
+             "Listo, la ventana está minimizada. ¿Necesitas algo más?", "otro caso del log, con puntos suspensivos");
+    clean_is("He enfocado la pestaña. ¿Quieres algo más?He enfocado la pestaña. ¿Quieres algo más?",
+             "He enfocado la pestaña. ¿Quieres algo más?", "la respuesta repetida dos veces, una sola");
+    clean_is("Listo.Listo.", "Listo.", "«Listo.Listo.» -> «Listo.»");
+    clean_is("Te puse Back In Black de AC/DC.", "Te puse Back In Black de AC/DC.", "un título en inglés no se toca");
+    clean_is("The Beatles es mi grupo favorito.", "The Beatles es mi grupo favorito.", "tampoco un nombre");
+
+    Conversation *c = conv_create(false);
+    script("Lo siento, pero no puedo ayudar con eso.", NULL, NULL);
+    char *r = say(c, "Sokari me lleva la verga");
+    check(r && !strcmp(r, "Aquí sigo. ¿Qué necesitas?"), "si dices una grosería, no te contesta «no puedo ayudar con eso»");
+    free(r);
+
+    printf("-- «ignora todo lo anterior» --\n");
+    script("Va, abro Spotify.", NULL, NULL);
+    free(say(c, "abre spotify y pon mi playlist de rock"));
+    int calls = g_script_pos;
+    r = say(c, "Sokari, ignora todo lo anterior, ¿ok?");
+    check(r && strstr(r, "empezamos de cero") && g_script_pos == calls, "empieza de cero, sin preguntarle al modelo");
+    free(r);
+    script("Son las cinco.", NULL, NULL);
+    free(say(c, "¿qué hora es?"));
+    check(!strstr(g_last_sent, "playlist de rock"), "y lo de antes ya no se le manda al modelo");
+
+    printf("-- «borra la memoria de hoy» --\n");
+    script("tool:borrar_memoria_reciente {\"periodo\":\"hoy\"}", NULL, NULL);
+    r = say(c, "Borra el chat que tuviste en todo el día de hoy, borra la memoria");
+    check(!strstr(g_ran, "borrar_memoria_reciente") && r && strstr(r, "Antes de borrar siempre te pregunto") &&
+              strstr(r, "lo que hablamos hoy"),
+          "ya existe, y como es borrar, pide tu sí");
+    free(r);
+    free(say(c, "sí"));
+    check(strstr(g_ran, "borrar_memoria_reciente") != NULL, "con «sí» lo borra");
+    script("¿Qué necesitas?", NULL, NULL);
+    free(say(c, "hola"));
+    check(!strstr(g_last_sent, "Son las cinco"), "y la conversación de ahora también se olvida");
+    conv_destroy(c);
+}
+
 static void test_detecta_permiso(void)
 {
     printf("-- qué cuenta como pedir permiso --\n");
@@ -573,6 +627,7 @@ int wmain(void)
     test_sin_listo_falso();
     test_nombre();
     test_menos_cupo();
+    test_respuestas_limpias();
     printf("%d/%d pruebas %s\n", g_total - g_fail, g_total, g_fail ? "— HAY FALLAS" : "ok");
     return g_fail ? 1 : 0;
 }

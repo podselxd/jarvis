@@ -145,6 +145,15 @@ static void forget_outside_text(cJSON *history, int until)
     }
 }
 
+/* Empezar de cero: la conversación actual se olvida (el prompt se queda). */
+static void conv_forget(Conversation *c)
+{
+    while (cJSON_GetArraySize(c->history) > 1) cJSON_DeleteItemFromArray(c->history, 1);
+    c->session_start = 1;
+    c->trust_all = false;
+    clear_pending(c);
+}
+
 void conv_new_session(Conversation *c)
 {
     c->announce_pending = true;
@@ -293,7 +302,15 @@ static TurnResult run_pending(Conversation *c, const char *text)
     TurnResult r = {0};
     log_msg("[confirmada] %s(%s)", c->pending_tool, c->pending_args);
     char *result = run_tool(c->pending_tool, c->pending_args);
+    bool forget = !strcmp(c->pending_tool, "borrar_memoria_reciente");
     clear_pending(c);
+    if (forget) {
+        /* Lo borrado tampoco se queda en la conversación de ahora. */
+        conv_forget(c);
+        r.reply = result;
+        r.keep_going = true;
+        return r;
+    }
     add_message(c->history, "user", text);
     memory_persist("user", text);
     add_message(c->history, "assistant", result);
@@ -365,7 +382,7 @@ static bool reply_is_garbage(const char *text)
 /* Borrar siempre pide un sí de voz, con o sin acceso completo. */
 static bool tool_is_delete(const char *name)
 {
-    return !strcmp(name, "borrar_archivo");
+    return !strcmp(name, "borrar_archivo") || !strcmp(name, "borrar_memoria_reciente");
 }
 
 /* Con acceso completo solo se pregunta antes de borrar. Sin él, como antes:
@@ -473,6 +490,7 @@ static const ToolGroup TOOL_GROUPS[] = {
     {"create_macro", " comando comandos macro rutina cuando diga crea "},
     {"info_sistema", " cpu ram memoria bateria disco sistema computadora compu estas andas "},
     {"calcular", " cuanto calcula calculadora mas menos por entre raiz porciento dividido multiplica suma resta "},
+    {"borrar_memoria_reciente", " memoria chat conversacion historial olvida olvidalo borra borrar "},
     {"registrar_dispositivo gestionar_dispositivo",
      " laptop pc compu computadora dispositivo dispositivos tele celular dile registra otra malla tailscale "},
 };
@@ -535,6 +553,133 @@ static cJSON *select_tools(const Conversation *c, const char *text, bool all, bo
     }
     free(norm);
     return out;
+}
+
+/* El "Lo siento, pero no puedo ayudar con eso." de cuando le dicen una
+   grosería: no es una negativa de verdad, solo corta la plática. */
+static bool is_generic_refusal(const char *reply)
+{
+    char *n = intents_normalize(reply);
+    int words = 0;
+    for (const char *p = n; *p; p++)
+        if (*p != ' ' && p[-1] == ' ') words++;
+    bool hit = words <= 10 && (strstr(n, " no puedo ayudar con eso ") || strstr(n, " no puedo ayudarte con eso ") ||
+                               strstr(n, " no puedo ayudar con esto ") || strstr(n, " no puedo ayudar en eso "));
+    free(n);
+    return hit;
+}
+
+static bool word_in_list(const char *list, const char *w)
+{
+    char pat[48];
+    snprintf(pat, sizeof pat, " %s ", w);
+    return strstr(list, pat) != NULL;
+}
+
+/* ¿Esta oración es el razonamiento del modelo en inglés ("It seems user
+   wants…")? Lo entrecomillado no cuenta: ahí puede venir tu frase. */
+static bool is_english_note(const char *sentence)
+{
+    static const char *const EN = " it its seems the user users we they said says used use which might maybe probably "
+                                  "should would will is are was were be been okay done final conversation lets let "
+                                  "need needs want wants so but this that to of and not can answer respond reply tool "
+                                  "called call messy current now then also just our output assistant think check ";
+    static const char *const ES = " el la los las de del que y en un una es lo te se por con para al ya no si mi tu le "
+                                  "me esta estan pero como mas muy todo listo hecho abri puse ventana pestana ";
+    StrBuf sb;
+    sb_init(&sb);
+    bool quoted = false;
+    for (const char *p = sentence; *p; p++) {
+        if (*p == '"') quoted = !quoted;
+        else if (!quoted) sb_append_n(&sb, p, 1);
+    }
+    char *n = intents_normalize(sb.data ? sb.data : "");
+    sb_free(&sb);
+    int en = 0, es = 0;
+    for (const char *p = n + 1; *p;) {
+        const char *e = strchr(p, ' ');
+        char w[40];
+        size_t len = (size_t)(e - p);
+        if (len < sizeof w) {
+            memcpy(w, p, len);
+            w[len] = 0;
+            en += word_in_list(EN, w);
+            es += word_in_list(ES, w);
+        }
+        p = e + 1;
+    }
+    free(n);
+    return en >= 2 && en > es;
+}
+
+static int letters_in(const char *s)
+{
+    int n = 0;
+    for (const unsigned char *p = (const unsigned char *)s; *p; p++) n += isalpha(*p) || *p == 0xC3; /* á é ñ… */
+    return n;
+}
+
+char *agent_clean_reply(const char *reply)
+{
+    char *t = str_trim(reply);
+    size_t n = strlen(t);
+    /* La misma respuesta dos veces ("Listo.Listo."). */
+    for (size_t k = n / 2 > 2 ? n / 2 - 2 : 0; k <= n / 2 + 2 && k < n; k++) {
+        char *a = xstrndup(t, k), *b = xstrdup(t + k);
+        char *ta = str_trim(a), *tb = str_trim(b);
+        bool same = *ta && !strcmp(ta, tb);
+        free(a);
+        free(b);
+        free(tb);
+        if (same) {
+            free(t);
+            t = ta;
+            n = strlen(t);
+            break;
+        }
+        free(ta);
+    }
+    /* Oraciones: se corta después de . ! ? … o un salto de renglón. */
+    char *parts[64];
+    int np = 0;
+    const char *s = t;
+    for (const char *p = t; *p && np < 63;) {
+        bool end = *p == '.' || *p == '!' || *p == '?' || *p == '\n' || !strncmp(p, "…", 3);
+        if (!end) {
+            p++;
+            continue;
+        }
+        while (*p == '.' || *p == '!' || *p == '?' || *p == '\n' || !strncmp(p, "…", 3)) p += strncmp(p, "…", 3) ? 1 : 3;
+        parts[np++] = xstrndup(s, (size_t)(p - s));
+        s = p;
+    }
+    if (*s) parts[np++] = xstrdup(s);
+    int first_en = -1;
+    for (int i = 0; i < np && first_en < 0; i++)
+        if (is_english_note(parts[i])) first_en = i;
+    if (first_en < 0) {
+        for (int i = 0; i < np; i++) free(parts[i]);
+        return t;
+    }
+    StrBuf out;
+    sb_init(&out);
+    for (int i = 0; i < np; i++) {
+        /* Antes del inglés suele quedar un pedazo cortado ("List.", "Listo……"). */
+        bool stub = i < first_en && letters_in(parts[i]) <= 8;
+        if (!stub && !is_english_note(parts[i])) {
+            char *p = str_trim(parts[i]);
+            if (*p) sb_appendf(&out, "%s%s", out.len ? " " : "", p);
+            free(p);
+        }
+        free(parts[i]);
+    }
+    if (!out.len) {
+        sb_free(&out);
+        return t;
+    }
+    log_msg("Quité razonamiento en inglés de la respuesta: «%s» -> «%s».", t, out.data);
+    free(t);
+    return out.data;
 }
 
 /* ¿Contestó que no puede? (A lo mejor le faltaba una herramienta.) */
@@ -670,6 +815,25 @@ static TurnResult process_turn(Conversation *c, const char *text)
         r.reply = xstrdup("Hasta luego.");
         return r;
     }
+    /* "Ignora todo lo anterior": empezar de cero, sin pasar por el modelo (que
+       a veces lo tomaba como un intento de engañarlo y se negaba). */
+    static const char *const FRESH[] = {" ignora todo lo anterior ", " ignora lo anterior ", " ignora todo lo que te dije ",
+                                        " olvida todo lo anterior ", " olvida lo anterior ", " olvida lo que te dije ",
+                                        " olvidalo todo ", " empecemos de nuevo ", " empecemos de cero ",
+                                        " empieza de cero ", " borron y cuenta nueva "};
+    char *norm = intents_normalize(text);
+    bool fresh = false;
+    for (size_t i = 0; i < sizeof FRESH / sizeof *FRESH && !fresh; i++) fresh = strstr(norm, FRESH[i]) != NULL;
+    free(norm);
+    if (fresh) {
+        conv_forget(c);
+        log_msg("Empezamos de cero: olvidé la conversación de ahora.");
+        memory_persist("user", text);
+        r.reply = xstrdup("Listo, empezamos de cero. ¿Qué necesitas?");
+        memory_persist("assistant", r.reply);
+        r.keep_going = true;
+        return r;
+    }
     /* Play, pausa, volumen, la ventana de enfrente, abrir una app o una
        carpeta, "gracias": se hacen aquí, sin gastar cupo ni arriesgarse a
        que el modelo diga "listo" sin hacerlo. */
@@ -704,6 +868,7 @@ static TurnResult process_turn(Conversation *c, const char *text)
     bool failed = false, ending = false, auto_yes = false;
     bool acted = false, nudged = false, nudge_now = false; /* ¿usó alguna herramienta? ¿ya se le reclamó? */
     bool all_tools = false, filtered = false;              /* ¿se mandaron todas las herramientas? */
+    bool forget_after = false;                             /* se borró la memoria: olvidar también esto */
     for (int round = 0; round < MAX_TOOL_ROUNDS && !reply && !failed; round++) {
         app_status(round ? "Trabajando…" : "Pensando…");
         cJSON *msgs = build_request(c);
@@ -731,7 +896,8 @@ static TurnResult process_turn(Conversation *c, const char *text)
             reply = str_trim(cJSON_IsString(content) ? content->valuestring : "");
             cJSON_Delete(msg);
             /* "No puedo" cuando faltaba alguna herramienta: otra vez, con todas. */
-            if (filtered && !all_tools && round + 1 < MAX_TOOL_ROUNDS && says_cannot(reply)) {
+            if (filtered && !all_tools && round + 1 < MAX_TOOL_ROUNDS && says_cannot(reply) &&
+                !is_generic_refusal(reply)) {
                 log_msg("El modelo dijo «%s» sin tener todas las herramientas; le mando todas.", reply);
                 all_tools = true;
                 free(reply);
@@ -811,6 +977,7 @@ static TurnResult process_turn(Conversation *c, const char *text)
                 free(desc);
             } else {
                 result = run_tool(name, args);
+                if (!strcmp(name, "borrar_memoria_reciente")) forget_after = true;
             }
             cJSON_Delete(parsed);
             char *shown = xstrndup(result, utf8_truncate_len(result, 300));
@@ -842,6 +1009,15 @@ static TurnResult process_turn(Conversation *c, const char *text)
         free(reply);
         reply = xstrdup("Listo.");
     }
+    char *clean = agent_clean_reply(reply);
+    free(reply);
+    reply = clean;
+    if (is_generic_refusal(reply)) {
+        /* Casi siempre es por una grosería: nada que negar, se sigue la plática. */
+        log_msg("El modelo contestó «%s»; lo cambio por seguir la plática.", reply);
+        free(reply);
+        reply = xstrdup("Aquí sigo. ¿Qué necesitas?");
+    }
     if (reply_is_garbage(reply)) {
         log_msg("El modelo respondió algo sin sentido (casi sin letras); lo descarto.");
         free(reply);
@@ -854,6 +1030,7 @@ static TurnResult process_turn(Conversation *c, const char *text)
     shrink_tool_results(c->history, turn_start);
     memory_persist("assistant", reply);
     trim_history(c);
+    if (forget_after) conv_forget(c);
     r.reply = reply;
     /* Si quedó una pregunta de confirmación, la conversación sigue aunque la
        respuesta suene a despedida: hay que poder contestarla. */

@@ -20,6 +20,7 @@ static const ToolEntry TOOLS[] = {
     {"run_macro", tool_run_macro},
     {"guardar_dato", tool_guardar_dato},
     {"recordar", tool_recordar},
+    {"borrar_memoria_reciente", tool_borrar_memoria_reciente},
     {"identificarse", tool_identificarse},
     {"proteger_perfil", tool_proteger_perfil},
     {"exportar_a_obsidian", tool_exportar_a_obsidian},
