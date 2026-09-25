@@ -5,7 +5,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "compat_jarvis.h"
 #include "config.h"
 #include "log.h"
 #include "util.h"
@@ -35,12 +34,17 @@ static wchar_t *known_folder(REFKNOWNFOLDERID id)
     return r;
 }
 
+/* Carpetas de la versión anterior. Se quedaron como respaldo con copia de tu
+   API key y tu memoria: solo sirven para que las herramientas de archivos
+   tampoco las toquen. */
+#define OLD_DIR_NAME L"Jarvis"
+
 void paths_init(void)
 {
     wchar_t *local = known_folder(&FOLDERID_LocalAppData);
     if (!local) local = expand_env(L"%USERPROFILE%\\AppData\\Local");
     g_paths.local_dir = path_join(local, L"Sokari");
-    g_paths.legacy_local_dir = compat_jarvis_dir(local);
+    g_paths.legacy_local_dir = path_join(local, OLD_DIR_NAME);
     free(local);
 
     /* Misma regla que desde la versión en Python: %OneDrive%\Desktop\Sokari,
@@ -52,7 +56,7 @@ void paths_init(void)
     if (!root) root = expand_env(L"%USERPROFILE%");
     wchar_t *desk = path_join(root, L"Desktop");
     g_paths.memory_dir = path_join(desk, L"Sokari");
-    g_paths.legacy_memory_dir = compat_jarvis_dir(desk);
+    g_paths.legacy_memory_dir = path_join(desk, OLD_DIR_NAME);
     free(desk);
     free(root);
 
@@ -147,8 +151,7 @@ static bool load_env_file(const wchar_t *path, AppConfig *c)
         if (*t && *t != '#' && eq) {
             *eq = 0;
             char *k = str_trim(t), *v = str_trim(eq + 1);
-            char buf[64];
-            apply_kv(c, compat_jarvis_config_key(k, buf, sizeof buf), v);
+            apply_kv(c, k, v);
             free(k);
             free(v);
         }

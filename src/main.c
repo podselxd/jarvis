@@ -8,7 +8,6 @@
 #include "app.h"
 #include "audio.h"
 #include "autostart.h"
-#include "compat_jarvis.h"
 #include "config.h"
 #include "http.h"
 #include "log.h"
@@ -111,18 +110,10 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmdline, int show)
             CloseHandle(mutex);
             return 0;
         }
-        /* Nunca junto con la versión anterior: ofrece cerrarla. */
-        if (!compat_jarvis_take_over(from_autostart)) {
-            CloseHandle(mutex);
-            return 0;
-        }
     }
 
     log_msg("Sokari %s arrancando.", SOKARI_VERSION);
-    bool migrated = !simulate && compat_jarvis_migrate_data();
     config_load();
-    /* Lo copiado se reescribe ya con las claves de ahora. */
-    if (migrated) config_save();
     config_migrate_legacy();
     memory_init();
     http_init();
@@ -130,7 +121,6 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmdline, int show)
 
     if (simulate) return run_simulation(simulate);
 
-    compat_jarvis_migrate_autostart(migrated);
     autostart_refresh();
     enable_dark_menus();
     AppConfig cfg = config_snapshot();
@@ -144,12 +134,9 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmdline, int show)
         MessageBoxW(NULL, L"No pude abrir la interfaz de Sokari.", L"Sokari", MB_ICONERROR);
         return 1;
     }
-    if (migrated)
-        app_notify("Sokari", "Traje tu configuración y tu memoria de la versión anterior. Sus carpetas se quedan "
-                             "como respaldo.");
     if (kind == LAUNCH_DIRECT) {
         on_settings_saved(false);
-        if (updated && !migrated) app_notify("Sokari", "Me actualicé a la versión " SOKARI_VERSION ".");
+        if (updated) app_notify("Sokari", "Me actualicé a la versión " SOKARI_VERSION ".");
     } else if (kind == LAUNCH_HOME) {
         home_open(inst, true, on_settings_saved);
     } else {

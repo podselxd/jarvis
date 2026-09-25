@@ -13,7 +13,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "compat_jarvis.h"
 #include "config.h"
 #include "http.h"
 #include "log.h"
@@ -191,7 +190,6 @@ static void handle_client(SOCKET c, const char *origin)
     }
     size_t vlen = 0;
     const char *secret = find_header(buf, "X-Sokari-Secret", &vlen);
-    if (!secret) secret = find_header(buf, COMPAT_JARVIS_MESH_HEADER, &vlen);
     char *expected = config_mesh_secret(false);
     char *given = secret ? xstrndup(secret, vlen) : xstrdup("");
     bool authorized = *expected && secure_equal(given, expected);
@@ -447,10 +445,7 @@ static HttpResponse post_command(const char *ip, const char *comando, int timeou
     char *payload = cJSON_PrintUnformatted(body);
     cJSON_Delete(body);
     char *secret = config_mesh_secret(true);
-    /* También con el encabezado de antes, para tus PCs que todavía no se actualizan. */
-    char *headers = str_printf("Content-Type: application/json\r\nX-Sokari-Secret: %s\r\n"
-                               COMPAT_JARVIS_MESH_HEADER ": %s\r\n",
-                               secret, secret);
+    char *headers = str_printf("Content-Type: application/json\r\nX-Sokari-Secret: %s\r\n", secret);
     SecureZeroMemory(secret, strlen(secret));
     free(secret);
     /* Conectar tarda poco si la otra PC está; esperar su respuesta puede tardar

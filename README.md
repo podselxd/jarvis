@@ -14,13 +14,6 @@ Cuando lo abres a mano después de la primera vez, sale la **ventana de Inicio**
 
 Se actualiza solo. Revisa GitHub al arrancar y cada 6 horas, y solo instala la versión nueva cuando no le estás hablando. Antes de reemplazarse comprueba la huella SHA-256 del archivo.
 
-### Si tenías la versión anterior
-
-Baja `Sokari.exe` y ábrelo; la versión anterior no se actualiza sola a esta.
-- Si la anterior está abierta, Sokari te pregunta si la cierra. Nunca corren las dos a la vez.
-- La primera vez se trae tu configuración y tu memoria a sus carpetas nuevas. No borra nada: las carpetas anteriores se quedan como respaldo, y puedes borrarlas cuando veas que todo está bien.
-- Si tenías el inicio con Windows prendido, ahora arranca Sokari.
-
 ## Uso
 
 - Di **"Hey Sokari"** y habla. Puedes decirlo todo de corrido ("Hey Sokari, abre Spotify") o hacer una pausa y esperar el tono. Deja de escuchar cuando te callas.
@@ -120,7 +113,7 @@ Sokari empieza a recibir órdenes solo en cuanto Tailscale se conecta, sin reini
 
 - `%LOCALAPPDATA%\Sokari\`: configuración (`config.env`), registro (`sokari.log`), sonidos y dispositivos.
 - `Escritorio\Sokari\`: tu memoria (datos, conversación reciente, perfiles, recordatorios y comandos propios).
-- Las carpetas de la versión anterior, si la tenías: el respaldo de lo de antes. Sokari ya no las usa y, como tienen copia de tu API key y tu memoria, sus herramientas de archivos no las pueden leer.
+- Las carpetas de la versión anterior, si la tenías: el respaldo de lo de antes. Sokari ya no las usa y puedes borrarlas; mientras existan, como tienen copia de tu API key y tu memoria, sus herramientas de archivos no las pueden leer.
 
 Para usar sonidos propios, elige tu sonido de activación en Configuración → General. Suena completo (hasta 10 s) mientras Sokari ya te escucha: con audífonos no hay problema; con bocinas, mejor uno corto, porque el micrófono lo puede oír. También puedes poner un `busqueda.mp3` en `%LOCALAPPDATA%\Sokari\sounds\`, que suena mientras busca.
 
@@ -181,7 +174,6 @@ Si editas `tools.json` o `system_prompt.txt`, el siguiente `mingw32-make` los me
 | `main.c` | Arranque, una sola instancia y actualización |
 | `voice.c` | Ciclo de voz: escuchar, grabar, hablar e interrupciones |
 | `wakeword.c`, `nn_*.c` | Detector de "Hey Sokari" (red neuronal con AVX2 si tu CPU lo tiene) |
-| `compat_jarvis.c` | Paso desde la versión anterior (carpetas, configuración, inicio con Windows). Temporal |
 | `groq.c`, `http.c` | Groq (Whisper y chat) con rotación de modelos y control de cupo |
 | `agent.c`, `tools*.c`, `calc.c` | Conversación y herramientas |
 | `tts.c`, `audio.c`, `sounds.c` | Voces de Windows, micrófono, bocinas y tonos |
