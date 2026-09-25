@@ -82,6 +82,7 @@ Sokari empieza a recibir órdenes solo en cuanto Tailscale se conecta, sin reini
 ## Qué puede hacer
 
 - **Comandos al instante, sin IA:** "ponle play", "pausa", "la siguiente", "sube el volumen", "volumen al 30", "minimiza la pestaña", "maximízala", "cierra la pestaña", "abre archivos", "abre mis descargas", "abre Opera" y "gracias" se hacen en tu PC, aunque vengan con saludo ("¿cómo andas? oye, ponle play"). Son inmediatos, no gastan cupo de Groq y no dependen de que el modelo entienda. Lo que trae algo más ("pon la canción de AC/DC") va al modelo.
+- **Nunca "listo" sin hacerlo:** si el modelo dice que ya hizo algo ("te pongo play", "abrí Opera") sin haber usado ninguna herramienta, Sokari se lo reclama una vez. Si insiste, en lugar de repetirte el "listo" te dice que no lo hizo.
 - Platicar y responder preguntas. Usa los modelos gratis de Groq y rota entre GPT-OSS 120B, Qwen 3 y GPT-OSS 20B para no quedarse sin cupo.
 - Abrir apps (incluidas las del menú Inicio, como Discord, Steam, Spotify u Opera; si ya está abierta, la trae al frente), el Explorador, tu navegador predeterminado, carpetas, archivos y páginas. No abre programas ni scripts sueltos (.exe, .bat, accesos directos).
 - Buscar en internet y leer páginas completas.
