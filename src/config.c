@@ -94,6 +94,8 @@ static void defaults(AppConfig *c)
     c->subtitles = true;
     c->autostart = false;
     c->mic_muted = false;
+    c->show_only_talking = true;
+    c->confirm_never = false;
 }
 
 static void apply_kv(AppConfig *c, const char *key, const char *value)
@@ -129,6 +131,8 @@ static void apply_kv(AppConfig *c, const char *key, const char *value)
     } else if (!strcmp(key, "SOKARI_SUBTITLES")) c->subtitles = parse_bool(value);
     else if (!strcmp(key, "SOKARI_AUTOSTART")) c->autostart = parse_bool(value);
     else if (!strcmp(key, "SOKARI_MIC_MUTED")) c->mic_muted = parse_bool(value);
+    else if (!strcmp(key, "SOKARI_SHOW_ONLY_TALKING")) c->show_only_talking = parse_bool(value);
+    else if (!strcmp(key, "SOKARI_CONFIRM_NEVER")) c->confirm_never = parse_bool(value);
 }
 
 static bool load_env_file(const wchar_t *path, AppConfig *c)
@@ -193,6 +197,8 @@ static bool save_locked(void)
     sb_appendf(&sb, "SOKARI_SUBTITLES=%d\n", g_cfg.subtitles ? 1 : 0);
     sb_appendf(&sb, "SOKARI_AUTOSTART=%d\n", g_cfg.autostart ? 1 : 0);
     sb_appendf(&sb, "SOKARI_MIC_MUTED=%d\n", g_cfg.mic_muted ? 1 : 0);
+    sb_appendf(&sb, "SOKARI_SHOW_ONLY_TALKING=%d\n", g_cfg.show_only_talking ? 1 : 0);
+    sb_appendf(&sb, "SOKARI_CONFIRM_NEVER=%d\n", g_cfg.confirm_never ? 1 : 0);
     ensure_dir(g_paths.local_dir);
     bool ok = write_file_atomic(g_paths.config_file, sb.data, sb.len);
     sb_free(&sb);
@@ -287,6 +293,22 @@ bool config_mic_muted(void)
     bool m = g_cfg.mic_muted;
     ReleaseSRWLockShared(&g_lock);
     return m;
+}
+
+bool config_show_only_talking(void)
+{
+    AcquireSRWLockShared(&g_lock);
+    bool v = g_cfg.show_only_talking;
+    ReleaseSRWLockShared(&g_lock);
+    return v;
+}
+
+bool config_confirm_never(void)
+{
+    AcquireSRWLockShared(&g_lock);
+    bool v = g_cfg.confirm_never;
+    ReleaseSRWLockShared(&g_lock);
+    return v;
 }
 
 void config_set_mic_muted(bool muted)
