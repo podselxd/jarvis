@@ -47,10 +47,33 @@ MeshProbe mesh_probe(const char *host);
 const char *mesh_probe_text(MeshProbe p);
 
 /* Las otras PCs con Windows de tu red de Tailscale (nombre y IP), leídas de
-   "tailscale status --json". */
-int tailscale_windows_peers(MeshDevice **out);
+   "tailscale status --json". Si no encuentra ninguna, *why (heap, si no es
+   NULL) dice por qué, en palabras para el usuario. */
+int tailscale_windows_peers(MeshDevice **out, char **why);
 /* La parte que lee ese JSON (aparte para poder probarla sin Tailscale). */
 int tailscale_parse_peers(const char *json, MeshDevice **out);
+
+/* Lo que "tailscale status --json" dice de esta PC. */
+typedef struct {
+    char *state;   /* "Running" si está conectado */
+    char *account; /* la cuenta con la que entraste (LoginName), o NULL */
+    int peers;     /* otros dispositivos que ve tu red */
+} TailscaleStatus;
+bool tailscale_parse_status(const char *out, TailscaleStatus *st);
+void tailscale_status_free(TailscaleStatus *st);
+/* De "tailscale whois --json <ip>": la cuenta dueña de esa IP (heap) o NULL. */
+char *tailscale_parse_whois_account(const char *out);
+
+/* Revisa la malla paso a paso (Tailscale, tu cuenta, el servidor, el
+   firewall, lo que ve tu red y cada PC registrada) y devuelve el reporte
+   (heap), con ✓ o ✗ en cada renglón. Tarda unos segundos. */
+char *mesh_diagnose(void);
+
+/* Para las pruebas: escuchar en una IP cualquiera sin esperar a Tailscale, y
+   mandar una orden a una IP ya revisada (*reply con la respuesta si hubo). */
+bool mesh_listen_at(const char *ip, MeshHandler handler);
+void mesh_listen_stop(void);
+MeshProbe mesh_send_ip(const char *ip, const char *comando, int timeout_ms, char **reply);
 /* Permite el puerto de la malla en el firewall de Windows solo para tu red de
    Tailscale (pide permiso de administrador). */
 bool mesh_allow_firewall(void);

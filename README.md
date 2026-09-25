@@ -49,7 +49,7 @@ Sale al abrir `Sokari.exe` a mano, o desde **Ventana de inicio…** en la bandej
 | Pantalla | Modo de pantalla, resolución de la esfera, estilo (halo de puntos o líneas), subtítulos y "Aparecer solo cuando le hablas" |
 | Voz y audio | Volumen, voz de Windows (Raúl de México por defecto, con botón **Probar**), micrófono, salida de audio y sensibilidad de "Hey Sokari" |
 | General | Iniciar con Windows, sonido de activación, Obsidian y pedir un "sí" antes de acciones delicadas |
-| Dispositivos | Tailscale, secreto de malla, tus otras PCs (Detectar, Probar, Quitar) y permiso en el firewall. Ver [Tus otras PCs](#tus-otras-pcs) |
+| Dispositivos | Tailscale, tus otras PCs (Detectar, Probar, Quitar), permiso en el firewall, Revisar la malla y el secreto para cuentas distintas. Ver [Tus otras PCs](#tus-otras-pcs) |
 
 Modos de pantalla:
 
@@ -67,13 +67,15 @@ La salida de audio elegida vale para la voz de Sokari y su tono. Si pusiste un s
 
 Para decirle desde una PC "dile a mi laptop que abra Spotify":
 
-1. Instala Tailscale en cada PC (Configuración → Dispositivos → **Instalar Tailscale**) y entra **con la misma cuenta** en todas.
-2. En una PC dale **Copiar secreto** y pégalo en ese mismo campo en las demás. Dale **Guardar**.
+1. Instala Tailscale en cada PC (Configuración → Dispositivos → **Instalar Tailscale**) y entra **con la misma cuenta** en todas. Con la misma cuenta, tus PCs se reconocen solas: no hace falta copiar el secreto.
+2. En cada PC dale **Permitir en el firewall** (pide permiso de administrador y abre el puerto solo para tu red de Tailscale).
 3. Dale **Detectar mis PCs**: agrega tus otras PCs con Windows que estén en tu Tailscale. También puedes decirle a Sokari "registra mi laptop en 100.x.y.z".
 4. Dale **Probar** a cada una. Te dice qué falta:
-   - "el secreto no coincide": repite el paso 2.
+   - "no te reconoce": las PCs están en cuentas distintas de Tailscale. Entra con la misma, o dale **Copiar secreto** en una y pégalo en ese campo en la otra.
    - "Sokari no le contesta": ábrelo en esa PC.
-   - "no contesta": que esté prendida, con Tailscale conectado y sin otra VPN. Si todo eso está bien, en **esa** PC dale **Permitir en el firewall** (pide permiso de administrador y abre el puerto solo para tu red de Tailscale).
+   - "no contesta": que esté prendida, con Tailscale conectado y sin otra VPN, y con el paso 2 hecho en **esa** PC.
+
+Si algo no funciona, dale **Revisar la malla**. Revisa paso a paso Tailscale, tu cuenta, si esta PC recibe órdenes, el firewall, qué dispositivos ve tu red y cada PC registrada, y marca con ✗ lo que falla. El reporte se copia solo, para que lo pegues donde pidas ayuda.
 
 Sokari empieza a recibir órdenes solo en cuanto Tailscale se conecta, sin reiniciarlo. La PC que recibe una orden avisa con una notificación, y la respuesta se oye en la PC donde hablaste.
 
@@ -107,7 +109,7 @@ Sokari empieza a recibir órdenes solo en cuanto Tailscale se conecta, sin reini
   - En Configuración → General puedes apagar la pregunta. Es bajo tu riesgo: un texto con instrucciones escondidas podría hacerlo actuar sin avisarte.
 - No lee páginas de tu red local (router, otras PCs, localhost), ni siquiera si una página pública redirige ahí.
 - La palabra de apagado se revisa en tu PC. Nunca se le manda al modelo ni se guarda en la memoria, y las herramientas de archivos no pueden leer la carpeta donde está guardada.
-- El servidor para tus otras PCs escucha solo en tu IP de Tailscale, nunca en internet, y pide un secreto que se genera solo. Sokari solo manda ese secreto a direcciones de Tailscale.
+- El servidor para tus otras PCs escucha solo en tu IP de Tailscale, nunca en internet. Solo acepta órdenes de dispositivos de tu misma cuenta de Tailscale (Tailscale comprueba con criptografía quién manda cada paquete) o que traigan el secreto de malla, que se genera solo. Sokari solo manda ese secreto a direcciones de Tailscale.
 
 ## Dónde guarda las cosas
 
