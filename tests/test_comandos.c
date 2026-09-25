@@ -90,6 +90,8 @@ static void test_del_log(void)
     expect("abre el navegador", "app:navegador");
     expect("oye abre discord y ponle pausa", "app:discord+pausa");
     expect("abre opera y maximízala", "app:opera+maximiza");
+    expect("abre spotify", "app:spotify");
+    expect("pausa spotify", "pausa");
 
     printf("-- lo que se le deja al modelo --\n");
     expect("pon la canción de ACDC de Black in Black", "-");

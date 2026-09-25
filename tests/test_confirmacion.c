@@ -287,9 +287,10 @@ static void test_respuesta_basura(void)
     char *r = say(c, "escribe hola en claude");
     check(r && strstr(r, "Me trabé"), "no se dice: pide que lo repitas");
     free(r);
-    script("Listo, abrí Spotify.", NULL, NULL);
-    r = say(c, "abre spotify");
-    check(r && !strcmp(r, "Listo, abrí Spotify."), "una respuesta normal pasa igual");
+    script("Es una región del espacio donde la gravedad no deja escapar ni la luz.", NULL, NULL);
+    r = say(c, "¿qué es un agujero negro?");
+    check(r && !strcmp(r, "Es una región del espacio donde la gravedad no deja escapar ni la luz."),
+          "una respuesta normal pasa igual");
     free(r);
     conv_destroy(c);
 }

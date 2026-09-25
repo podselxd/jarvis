@@ -330,7 +330,9 @@ bool intents_parse(const char *text, IntentList *out)
             while (p && p[1] && taken < 2) {
                 char w[32];
                 if (sscanf(p + 1, "%31s", w) != 1) break;
-                bool skip = in_list(FILLER, w) || in_any_vocab(w) || intents_is_name_word(w);
+                /* "spotify" o "youtube" también son palabras de música, pero aquí son la app. */
+                bool app_name = in_list(" spotify youtube ", w);
+                bool skip = in_list(FILLER, w) || (in_any_vocab(w) && !app_name) || intents_is_name_word(w);
                 if (skip && taken) break;
                 if (!skip) {
                     size_t len = strlen(app);
