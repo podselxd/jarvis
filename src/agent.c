@@ -36,10 +36,13 @@ static char *g_system_prompt;
 
 static const char *FAREWELLS[] = {
     "adios", "adiós", "hasta luego", "hasta la proxima", "hasta la próxima", "nos vemos", "me despido", "chao",
-    "chau", "bye", "eso es todo", "eso seria todo", "eso sería todo", "nada mas", "nada más", "ya esta", "ya está",
-    "ya no necesito nada", "gracias eso es todo", "ya vete", "vete ya", "puedes irte", "te puedes ir",
-    "ya nada gracias", "ya es todo", "retirate", "retírate",
+    "chau", "bye", "eso es todo", "eso seria todo", "eso sería todo", "ya no necesito nada", "gracias eso es todo",
+    "ya vete", "vete ya", "puedes irte", "te puedes ir", "ya nada gracias", "ya es todo", "retirate", "retírate",
 };
+
+/* Estas solo son despedida si son casi toda la frase: "ya está abierta
+   Opera" o "nada más abre Spotify" no lo son. */
+static const char *SHORT_FAREWELLS[] = {"nada mas", "nada más", "ya esta", "ya está"};
 
 /* Cuando Sokari mismo se despide, la conversación también termina (y la
    esfera se esconde si así está configurada). Una pregunta al final no cuenta:
@@ -343,7 +346,11 @@ static bool contains_any(const char *text, const char *const *list, size_t n)
 
 static bool is_farewell(const char *text)
 {
-    return contains_any(text, FAREWELLS, sizeof FAREWELLS / sizeof *FAREWELLS);
+    if (contains_any(text, FAREWELLS, sizeof FAREWELLS / sizeof *FAREWELLS)) return true;
+    int words = 0;
+    for (const char *p = text; *p; p++)
+        if (!isspace((unsigned char)*p) && (p == text || isspace((unsigned char)p[-1]))) words++;
+    return words <= 4 && contains_any(text, SHORT_FAREWELLS, sizeof SHORT_FAREWELLS / sizeof *SHORT_FAREWELLS);
 }
 
 static bool sokari_says_goodbye(const char *reply)

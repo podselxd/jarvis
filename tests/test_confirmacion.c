@@ -600,6 +600,106 @@ static void test_youtube(void)
     conv_destroy(c);
 }
 
+/* Las 43 frases con una acción de tu log de la 2.4.0, tal cual. "local:x":
+   se hace al momento con la herramienta x, sin el modelo. "modelo:x": va al
+   modelo y la herramienta x va entre las que se le mandan. "adios": termina. */
+static const struct {
+    const char *text, *want;
+} LOG_PHRASES[] = {
+    {"no puedo detenerte abre chrome", "modelo:open_app"},
+    {"Cierrate Socarí", "modelo:terminar_conversacion"},
+    {"puedes abrir el navegador de Opera y poner YouTube", "modelo:open_app"},
+    {"pon la canción de ACDC de Black in Black", "modelo:poner_en_youtube"},
+    {"¿Cómo andas? Oye, ¿puedes ponerle play al vídeo?", "local:control_media"},
+    {"y zocari quiero puedes minimizar la pestaña de ahora voy yo creo", "local:control_desktop"},
+    {"Oye, Sokari, ¿puedes cerrar la pestaña? No, minimizarla, perdón. El pedo es que está con el micrófono acá. Y "
+     "está intentando... A ver qué.",
+     "modelo:control_desktop"},
+    {"Y abre la pestaña que está abierta del Opera", "local:open_app"},
+    {"Ey, Sokari, puedes buscar en el navegador... Nada, no, mejor...", "modelo:web_search"},
+    {"¿Cómo andas? Oye, pues dale play al video.", "local:control_media"},
+    {"¿Qué onda Sakari? ¿Cómo andas? Oye, ¿puedes poner el play al video?", "local:control_media"},
+    {"¿Cómo andas? Oye, ¿puedes poner play al video?", "local:control_media"},
+    {"¿Qué onda Sokari? Oye, ¿puedes ponerle play a mi video?", "local:control_media"},
+    {"¿Qué onda? ¿Cómo andas, Okari? Oye, ¿ya ves la pestaña de ópera? ¿Puedes poner el play al video?",
+     "local:control_media"},
+    {"No lo estás haciendo. No lo estás haciendo. Ponle play.", "local:control_media"},
+    {"Ponle pausa a este video Ey Sokari Pues", "local:control_media"},
+    {"Eh, ¿cómo andas, Akari? Oye, ¿detectas el video que está ahí? ¿Podrías ponerle play, porfa?",
+     "local:control_media"},
+    {"Sokari, este video está en negro, es un video, ponle play.", "local:control_media"},
+    {"eso que le puedes poner play ahí", "local:control_media"},
+    {"¿Cómo andas? Oye, ¿puedes poner el play al video? ¡Chinga! ¡Vamos, Akari!", "local:control_media"},
+    {"Gracias. Muy bien. Hey, Zachary. Puedes abrir la pestaña de ópera.", "local:open_app"},
+    {"Sokary, puedes ponerle play al video, porfa ¿Cómo andas? Por cierto ¿Cómo andas?", "local:control_media"},
+    {"socar y no mames o cariño le pusiste play socar y salte a la verga socar y", "modelo:control_media"},
+    {"se mueve que onda sacaria como andas oye puedes ponerle play al video", "local:control_media"},
+    {"¿Ves el video de ahí en fondo? Puedes ponerle play, porfa.", "local:control_media"},
+    {"Oye, ponle pausa porfa Sokary ponle pausa Pobre Sokary esta petoteando camionando", "local:control_media"},
+    {"porfa se hace el mamón cada que entra hey zockery puedes ponerle play porfa", "modelo:control_media"},
+    {"Oh, ahí está. Sotori. Puedes minimizar la pestaña, porfa. Pobre Sotori, estás sufriendo. Chingue de ruido. "
+     "Sotori, minimiza la pantalla.",
+     "modelo:control_desktop"},
+    {"oye Sokary puedes ponerle play al vídeo", "local:control_media"},
+    {"Ya te puedes ir, Sokari, gracias ¡Ay, minimiza la pestaña! Me va a costar porque hay ruido ¡Sokari! ¡Minimiza "
+     "la pestaña! ¡Ya te puedes ir! No me va a escuchar el poder ¡Sokari, minimiza!",
+     "adios"},
+    {"y puedes ponerle play al vídeo", "local:control_media"},
+    {"Ya te puedes ir, Sokari. Y minimiza la pestaña, porfa. No, no voy a escuchar por el río. Ya te puedes ir. No, no "
+     "voy a escuchar por el río. Fíjate. Ey, Sokari, ¿me escuchas? No, no, no.",
+     "adios"},
+    {"Bueno, está bien, minimiza la pestaña y abre archivos.", "local:open_app"},
+    {"abre opera por favor", "local:open_app"},
+    {"Bueno, perdóname, maximiza la pestaña de ópera, por favor, que está abierta. Ya está abierta ópera, es verdad. "
+     "¿Me dejo yo? ¿Abre el pestaña de ópera?",
+     "modelo:control_desktop"},
+    {"Abre por favor Bueno, maximiza la pestaña de Opera O sea, ábrela me refiero", "local:control_desktop"},
+    {"Abre la pestaña de Opera.", "local:open_app"},
+    {"Ay, Dios. Ya, ya. Mira. Zocari, ¿ves YouTube? Yo puedo pedirle que lo abre y lo cierre. Literalmente aquí tengo "
+     "un video. Lo mío está en beta, güey. Ya se me vas a confundir. Zocari, ¿me escuchas?",
+     "modelo:open_app"},
+    {"y eso cari puedes escribir en la barra del buscador de youtube hola", "modelo:type_text"},
+    {"Por favor enfócate en la barra de Windows y abre en primera pestaña Opera. Oprime Windows y Opera.",
+     "modelo:open_app"},
+    {"abrir y puedes abrir disco por favor y escribir hola en el primer chat", "modelo:type_text"},
+    {"bien oye zocari puedes abrir discord y mandar un mensaje diciendo hola en el primer chat", "modelo:type_text"},
+    {"no zocari puedes abrir discord y en el primer chat mandar un hola son las 24 horas", "modelo:open_app"},
+};
+
+static void test_frases_del_log(void)
+{
+    printf("-- las 43 frases con una acción de tu log de la 2.4.0 --\n");
+    int ok = 0, local = 0;
+    for (size_t i = 0; i < sizeof LOG_PHRASES / sizeof *LOG_PHRASES; i++) {
+        Conversation *c = conv_create(false);
+        script("Ok.", NULL, NULL);
+        g_last_tools[0] = 0;
+        g_ran[0] = 0;
+        TurnResult t = agent_process(c, LOG_PHRASES[i].text);
+        const char *want = LOG_PHRASES[i].want;
+        char pat[64];
+        bool good;
+        if (!strcmp(want, "adios")) {
+            good = !t.keep_going && g_script_pos == 0;
+        } else if (!strncmp(want, "local:", 6)) {
+            good = g_script_pos == 0 && strstr(g_ran, want + 6);
+            local += good;
+        } else {
+            snprintf(pat, sizeof pat, " %s ", want + 7);
+            good = g_script_pos >= 1 && strstr(g_last_tools, pat);
+        }
+        if (!good)
+            printf("      FALLA «%s»: se esperaba %s (modelo: %d llamadas, se ejecutó: %s)\n", LOG_PHRASES[i].text, want,
+                   g_script_pos, *g_ran ? g_ran : "nada");
+        ok += good;
+        free(t.reply);
+        conv_destroy(c);
+    }
+    printf("      %d de %zu como se esperaba; %d se hacen al momento, sin el modelo\n", ok,
+           sizeof LOG_PHRASES / sizeof *LOG_PHRASES, local);
+    check(ok == (int)(sizeof LOG_PHRASES / sizeof *LOG_PHRASES), "cada frase del log va a donde debe, con su herramienta");
+}
+
 static void test_detecta_permiso(void)
 {
     printf("-- qué cuenta como pedir permiso --\n");
@@ -641,6 +741,7 @@ int wmain(void)
     test_menos_cupo();
     test_respuestas_limpias();
     test_youtube();
+    test_frases_del_log();
     printf("%d/%d pruebas %s\n", g_total - g_fail, g_total, g_fail ? "— HAY FALLAS" : "ok");
     return g_fail ? 1 : 0;
 }

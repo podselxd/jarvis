@@ -141,7 +141,8 @@ static const char *const FILLER =
     "hey ey eh ah oh uh hola que onda como andas estas esta tal va bien bueno pues ya ahora ahorita puedes podrias "
     "puedas pudieras quiero quisiera necesito haz hazme dale andale orale vamos ok okey sale si ahi aqui alla eso "
     "esto ese esa este un una poco poquito tantito nuevo otra vez amigo amiga carnal compa bro wey guey chido "
-    "rapido rapidito tambien porfavor sokari es se ves ve mira no muy cierto entonces asi porfis ";
+    "rapido rapidito tambien porfavor sokari es se ves ve mira no muy cierto entonces asi porfis yo creo voy "
+    "pobre sea refiero digo ";
 
 typedef struct {
     const char *pattern; /* palabras completas, con espacios alrededor */
@@ -221,7 +222,8 @@ static const char *vocab(IntentKind k)
         return " abre abreme abrir explorador archivos equipo pc computadora descargas documentos escritorio imagenes "
                "fotos carpeta carpetas ";
     case IN_OPEN_APP:
-        return " abre abreme abrir pestana ventana app aplicacion programa navegador abierta abierto abiertas ";
+        return " abre abreme abrir abrela abrelo pestana ventana app aplicacion programa navegador abierta abierto "
+               "abiertas ";
     case IN_THANKS:
         return " gracias muchas mil muy perfecto excelente buenisimo genial ";
     }
@@ -412,7 +414,7 @@ bool intents_parse(const char *text, IntentList *out)
         if (!known && unknown < 8) memcpy(seen[unknown++], w, sizeof seen[0]);
         p = e + 1;
     }
-    ok = unknown <= (words > 12 ? 2 : 1);
+    ok = unknown <= (words >= 10 ? 2 : 1);
 done:
     if (!ok) memset(out, 0, sizeof *out);
     free(norm);
