@@ -342,11 +342,10 @@ static char *bring_open_app(const char *name)
     EnumWindows(find_open_window, (LPARAM)&f);
     if (!f.found) return NULL;
     app_yield_focus();
-    wchar_t title[256];
-    GetWindowTextW(f.found, title, 256);
-    char *t = wide_to_utf8(title);
-    char *r = force_foreground(f.found) ? str_printf("Ya estaba abierto: traje al frente «%s».", t) : NULL;
-    free(t);
+    /* Sin repetir el título: lo pone cada página (ver window_app_name). */
+    char *app = window_app_name(f.found);
+    char *r = force_foreground(f.found) ? str_printf("Ya estaba abierto: traje al frente %s.", app ? app : name) : NULL;
+    free(app);
     return r;
 }
 
@@ -538,22 +537,21 @@ static char *window_action(const char *action)
 {
     HWND h = front_user_window();
     if (!h) return xstrdup("No encontré ninguna ventana tuya enfrente.");
-    wchar_t title[160];
-    GetWindowTextW(h, title, 160);
-    char *t = wide_to_utf8(title);
+    char *app = window_app_name(h);
+    const char *t = app ? app : "la ventana de enfrente";
     char *r;
     if (!strcmp(action, "minimize")) {
         ShowWindowAsync(h, SW_MINIMIZE);
-        r = str_printf("Minimicé «%s».", t);
+        r = str_printf("Minimicé %s.", t);
     } else if (!strcmp(action, "maximize")) {
         ShowWindowAsync(h, SW_MAXIMIZE);
-        r = str_printf("Maximicé «%s».", t);
+        r = str_printf("Maximicé %s.", t);
     } else {
         /* Como darle a la X: si tiene algo sin guardar, la app misma pregunta. */
         PostMessageW(h, WM_CLOSE, 0, 0);
-        r = str_printf("Cerré «%s».", t);
+        r = str_printf("Cerré %s.", t);
     }
-    free(t);
+    free(app);
     return r;
 }
 
@@ -664,14 +662,22 @@ char *focus_window_by_title(const char *needle, bool *ok)
         r = str_printf("No encontré ninguna ventana con '%s' abierta.", n);
     } else {
         app_yield_focus();
-        wchar_t title[512];
-        GetWindowTextW(c.found, title, 512);
-        char *t = wide_to_utf8(title);
-        if (force_foreground(c.found)) {
+        char *app = window_app_name(c.found);
+        char *t = app && str_contains_ci(app, n) ? xstrdup(app)
+                  : app                          ? str_printf("«%s» en %s", n, app)
+                                                 : str_printf("«%s»", n);
+        free(app);
+        bool front = force_foreground(c.found);
+        /* A veces Windows la trae al frente un momento después. */
+        for (int i = 0; i < 15 && !front; i++) {
+            Sleep(100);
+            front = GetForegroundWindow() == c.found;
+        }
+        if (front) {
             *ok = true;
-            r = str_printf("Enfoqué: %s", t);
+            r = str_printf("Enfoqué %s.", t);
         } else {
-            r = str_printf("Encontré %s pero Windows no me dejó traerla al frente.", t);
+            r = str_printf("Encontré %s, pero Windows no me dejó traerla al frente.", t);
         }
         free(t);
     }
@@ -721,20 +727,72 @@ bool is_terminal_window_info(const wchar_t *cls, const wchar_t *exe)
     return false;
 }
 
+/* El programa de una ventana (ruta completa); "" si no se sabe. */
+static void window_exe(HWND h, wchar_t exe[MAX_PATH])
+{
+    exe[0] = 0;
+    DWORD pid = 0;
+    if (!h || !GetWindowThreadProcessId(h, &pid)) return;
+    HANDLE p = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!p) return;
+    DWORD n = MAX_PATH;
+    if (!QueryFullProcessImageNameW(p, 0, exe, &n)) exe[0] = 0;
+    CloseHandle(p);
+}
+
 static bool window_is_terminal(HWND h)
 {
     if (!h) return false;
-    wchar_t cls[128] = L"", exe[MAX_PATH] = L"";
+    wchar_t cls[128] = L"", exe[MAX_PATH];
     GetClassNameW(h, cls, 128);
-    DWORD pid = 0;
-    GetWindowThreadProcessId(h, &pid);
-    HANDLE p = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
-    if (p) {
-        DWORD n = MAX_PATH;
-        if (!QueryFullProcessImageNameW(p, 0, exe, &n)) exe[0] = 0;
-        CloseHandle(p);
-    }
+    window_exe(h, exe);
     return is_terminal_window_info(cls, exe);
+}
+
+bool foreground_is_terminal(void)
+{
+    return window_is_terminal(GetForegroundWindow());
+}
+
+char *window_app_name(void *hwnd)
+{
+    static const struct {
+        const wchar_t *exe;
+        const char *name;
+    } KNOWN[] = {{L"chrome", "Chrome"},       {L"msedge", "Edge"},       {L"opera", "Opera"},
+                 {L"firefox", "Firefox"},     {L"brave", "Brave"},       {L"explorer", "el Explorador"},
+                 {L"discord", "Discord"},     {L"whatsapp", "WhatsApp"}, {L"telegram", "Telegram"},
+                 {L"spotify", "Spotify"},     {L"winword", "Word"},      {L"excel", "Excel"},
+                 {L"powerpnt", "PowerPoint"}, {L"notepad", "el Bloc de notas"}, {L"code", "VS Code"},
+                 {L"taskmgr", "el Administrador de tareas"}};
+    wchar_t exe[MAX_PATH];
+    window_exe(hwnd, exe);
+    if (!*exe) return NULL;
+    wchar_t *base = xwcsdup(path_basename(exe));
+    wchar_t *dot = wcsrchr(base, L'.');
+    if (dot) *dot = 0;
+    char *r = NULL;
+    for (size_t i = 0; i < sizeof KNOWN / sizeof *KNOWN && !r; i++)
+        if (!_wcsicmp(base, KNOWN[i].exe)) r = xstrdup(KNOWN[i].name);
+    /* Las apps de la Tienda viven dentro de ApplicationFrameHost: ese nombre
+       no le dice nada a nadie. */
+    if (!r && *base && _wcsicmp(base, L"ApplicationFrameHost")) r = wide_to_utf8(base);
+    free(base);
+    return r;
+}
+
+bool window_runs_commands(void *hwnd)
+{
+    static const wchar_t *EXES[] = {L"explorer.exe",       L"StartMenuExperienceHost.exe", L"SearchHost.exe",
+                                    L"SearchApp.exe",      L"SearchUI.exe",                L"ShellExperienceHost.exe",
+                                    L"Taskmgr.exe",        L"regedit.exe",                 L"mmc.exe"};
+    if (window_is_terminal(hwnd)) return true;
+    wchar_t exe[MAX_PATH];
+    window_exe(hwnd, exe);
+    const wchar_t *base = *exe ? path_basename(exe) : NULL;
+    for (size_t i = 0; base && i < sizeof EXES / sizeof *EXES; i++)
+        if (!_wcsicmp(base, EXES[i])) return true;
+    return false;
 }
 
 static void type_unicode(const wchar_t *text)
@@ -773,6 +831,9 @@ char *tool_type_text(const cJSON *a)
     const char *ventana = arg_str(a, "ventana");
     bool enviar = arg_bool(a, "enviar");
     if (str_is_blank(texto)) return xstrdup("No me dijiste qué escribir.");
+    if (str_contains_ci(texto, "javascript:"))
+        return xstrdup("Por seguridad no escribo «javascript:»: en la barra de direcciones correría código dentro de "
+                       "la página.");
     if (!str_is_blank(ventana)) {
         bool ok;
         char *r = focus_window_by_title(ventana, &ok);
@@ -789,19 +850,25 @@ char *tool_type_text(const cJSON *a)
     free(w);
     /* Sokari escribe a ciegas: dice dónde lo escribió, pero no puede saber si
        ahí había un chat abierto, así que no afirma que se envió. */
-    wchar_t title[128] = L"";
-    GetWindowTextW(GetForegroundWindow(), title, 128);
-    char *where = wide_to_utf8(*title ? title : L"la ventana de enfrente");
+    HWND fg = GetForegroundWindow();
+    char *app = window_app_name(fg);
+    char *where = app ? app : xstrdup("la ventana de enfrente");
     char *r;
-    if (enviar) {
+    if (enviar && window_runs_commands(fg)) {
+        /* En el Explorador, «Ejecutar» o Inicio, Enter abre lo seleccionado o
+           corre lo escrito: eso solo si tú lo pides con tu voz. */
+        r = str_printf("Escribí el texto en %s, pero no le di Enter: ahí Enter abre o ejecuta cosas. Si eso quieres, "
+                       "dime «dale enter».",
+                       where);
+    } else if (enviar) {
         Sleep(40);
         WORD enter = VK_RETURN;
         send_keys(&enter, 1);
-        r = str_printf("Escribí el texto en «%s» y le di Enter. No veo la pantalla: si ahí no había un chat o un "
+        r = str_printf("Escribí el texto en %s y le di Enter. No veo la pantalla: si ahí no había un chat o un "
                        "cuadro de texto abierto, no se envió.",
                        where);
     } else {
-        r = str_printf("Escribí el texto en «%s», sin enviarlo. No veo la pantalla: que revise que quedó donde "
+        r = str_printf("Escribí el texto en %s, sin enviarlo. No veo la pantalla: que revise que quedó donde "
                        "quería.",
                        where);
     }
@@ -809,7 +876,7 @@ char *tool_type_text(const cJSON *a)
     return r;
 }
 
-static bool open_clipboard(void)
+bool open_clipboard(void)
 {
     for (int i = 0; i < 10; i++) {
         if (OpenClipboard(NULL)) return true;

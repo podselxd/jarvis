@@ -8,6 +8,7 @@
 #include "config.h"
 #include "groq.h"
 #include "intents.h"
+#include "keys.h"
 #include "log.h"
 #include "memory.h"
 #include "mesh.h"
@@ -410,9 +411,14 @@ static bool reply_is_garbage(const char *text)
     return lines > 40 || (letters + other >= 20 && letters * 2 < letters + other);
 }
 
-/* Borrar siempre pide un sí de voz, con o sin acceso completo. */
-static bool tool_is_delete(const char *name)
+/* Borrar siempre pide un sí de voz, con o sin acceso completo. Supr (y
+   Ctrl+D) también: en el Explorador borran lo que tengas seleccionado. */
+static bool tool_is_delete(const char *name, const cJSON *args)
 {
+    if (!strcmp(name, "presionar_teclas")) {
+        KeyCombo k;
+        return keys_parse(arg_str(args, "teclas"), &k) && k.has_delete;
+    }
     return !strcmp(name, "borrar_archivo") || !strcmp(name, "borrar_memoria_reciente");
 }
 
@@ -421,7 +427,12 @@ static bool tool_is_delete(const char *name)
 static bool must_confirm(const Conversation *c, const char *name, const cJSON *args)
 {
     if (c->trust_all) return false;
-    if (tool_is_delete(name)) return true;
+    if (tool_is_delete(name, args)) return true;
+    /* Con teclas se puede hacer casi todo (hasta abrir «Ejecutar» y correr un
+       comando): si en la conversación hay algo de afuera, cada tecla que pida
+       el modelo espera tu sí, aunque tengas acceso completo. Las que pides tú
+       ("dale enter") no pasan por aquí. */
+    if (!strcmp(name, "presionar_teclas") && history_has_outside_text(c)) return true;
     return !config_full_access() && tool_needs_confirmation(name, args) && history_has_outside_text(c);
 }
 
@@ -532,6 +543,14 @@ static const ToolGroup TOOL_GROUPS[] = {
     {"borrar_memoria_reciente", " memoria chat conversacion historial olvida olvidalo borra borrar "},
     {"registrar_dispositivo gestionar_dispositivo",
      " laptop pc compu computadora dispositivo dispositivos tele celular dile registra otra malla tailscale "},
+    {"presionar_teclas atajos_de_app",
+     " tecla teclas oprime oprimele oprimelo presiona presionale presionalo aprieta aprietale pulsa pulsale teclea "
+     "atajo atajos control ctrl alt shift windows enter intro escape esc tab tabulador suprimir supr retroceso "
+     "flecha flechas f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12 efe "},
+    {"ir_a_pestana", " pestana pestanas "},
+    {"subir_archivo",
+     " sube subir subelo subela subeme adjunta adjuntale adjuntalo adjuntala adjuntar archivo archivos documento "
+     "pdf foto fotos imagen video "},
 };
 
 static bool history_used_tool(const Conversation *c, const char *name)
@@ -604,7 +623,7 @@ static bool is_action_tool(const char *name)
                                       "crear_recordatorio", "run_macro",   "focus_window",     "type_text",
                                       "gestionar_dispositivo", "cambiar_permisos", "mover_archivo", "copiar_portapapeles",
                                       "guardar_dato",   "registrar_dispositivo", "create_macro", "exportar_a_obsidian",
-                                      "borrar_memoria_reciente"};
+                                      "borrar_memoria_reciente", "presionar_teclas", "ir_a_pestana", "subir_archivo"};
     for (size_t i = 0; i < sizeof ACT / sizeof *ACT; i++)
         if (!strcmp(name, ACT[i])) return true;
     return false;
@@ -1167,7 +1186,7 @@ static TurnResult process_turn(Conversation *c, const char *text)
                     c->pending_args = xstrdup(args);
                     result = xstrdup("Pendiente: se le pidió confirmación de voz a quien habla.");
                     reply = str_printf("%s: %s. ¿Lo hago? Di sí o no.",
-                                       tool_is_delete(name) ? "Antes de borrar siempre te pregunto"
+                                       tool_is_delete(name, parsed) ? "Antes de borrar siempre te pregunto"
                                                             : "Como en esta conversación leí algo de afuera, "
                                                               "confirma primero",
                                        desc);

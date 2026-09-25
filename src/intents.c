@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "intents.h"
+#include "keys.h"
 #include "log.h"
 #include "tools.h"
 #include "util.h"
@@ -151,7 +152,8 @@ static const char *const FILLER =
     " y e o a al el la lo los las le les me mi mis tu te de del en con por favor porfa porfis plis please oye oiga "
     "hey ey eh ah oh uh hola que onda como andas estas esta tal va bien bueno pues ya ahora ahorita puedes podrias "
     "puedas pudieras quiero quisiera necesito haz hazme dale andale orale vamos ok okey sale si ahi aqui alla eso "
-    "esto ese esa este un una poco poquito tantito nuevo otra vez amigo amiga carnal compa bro wey guey chido "
+    "esto ese esa este un una poco poquito tantito nuevo nueva nuevos nuevas otra vez amigo amiga carnal compa bro "
+    "wey guey chido "
     "rapido rapidito tambien porfavor sokari es se ves ve mira no muy cierto entonces asi porfis yo creo voy "
     "pobre sea refiero digo "
     /* Relleno mexicano: saludos, apodos y muletillas. */
@@ -253,6 +255,7 @@ static const char *vocab(IntentKind k)
     case IN_THANKS:
         return " gracias muchas mil muy perfecto excelente buenisimo genial grax agradece rifaste te la se eres un "
                "crack ";
+    case IN_KEYS: return " "; /* se entiende aparte: ver parse_keys */
     }
     return " ";
 }
@@ -317,6 +320,77 @@ static bool in_any_vocab(const char *w)
     return false;
 }
 
+/* ------------------------------------------------------------- teclas --- */
+
+/* "Oprime windows", "dale enter", "presiona escape tres veces", "control
+   zeta": una tecla o un atajo, dicho solo. Sin verbo tiene que ser una
+   combinación (un "abajo" suelto puede ser otra cosa). Lo que borra (Supr,
+   Ctrl+D) no se hace aquí: eso siempre se confirma. */
+static const char *const KEY_VERBS =
+    " oprime oprimele presiona presionale aprieta aprietale pulsa pulsale dale picale puchale pushale teclea ";
+static const char *const KEY_TAIL = " por favor porfa porfis plis please ya ahora ahorita gracias ";
+
+static int times_word(const char *w)
+{
+    static const char *const N[] = {"una", "dos", "tres", "cuatro", "cinco", "seis", "siete", "ocho", "nueve", "diez"};
+    for (int i = 0; i < 10; i++)
+        if (!strcmp(w, N[i])) return i + 1;
+    if (!strcmp(w, "un") || !strcmp(w, "uno") || !strcmp(w, "otra")) return 1;
+    return is_number(w) ? atoi(w) : 0;
+}
+
+static bool parse_keys(const char *norm, IntentList *out)
+{
+    char *copy = xstrdup(norm), *w[16];
+    int n = 0;
+    bool ok = false;
+    for (char *t = strtok(copy, " "); t; t = strtok(NULL, " ")) {
+        if (n == 16) goto done;
+        w[n++] = t;
+    }
+    int i = 0;
+    bool verb = false;
+    for (; i < n; i++) {
+        if (!strcmp(w[i], "no") || !strcmp(w[i], "nunca") || !strcmp(w[i], "tampoco")) goto done;
+        if (in_list(KEY_VERBS, w[i])) {
+            verb = true;
+            i++;
+            break;
+        }
+        if (!in_list(FILLER, w[i]) && !intents_is_name_word(w[i])) break;
+    }
+    int end = n, times = 1;
+    bool counted = false;
+    for (;;) {
+        while (end > i && (in_list(KEY_TAIL, w[end - 1]) || intents_is_name_word(w[end - 1]))) end--;
+        if (!counted && end - i >= 3 && (!strcmp(w[end - 1], "veces") || !strcmp(w[end - 1], "vez"))) {
+            times = times_word(w[end - 2]);
+            if (times < 1 || times > 20) goto done;
+            end -= 2;
+            counted = true;
+            continue;
+        }
+        break;
+    }
+    if (end <= i) goto done;
+    char spec[sizeof out->items[0].arg];
+    spec[0] = 0;
+    for (int k = i; k < end; k++) {
+        size_t len = strlen(spec);
+        if (len + strlen(w[k]) + 2 > sizeof spec) goto done;
+        snprintf(spec + len, sizeof spec - len, "%s%s", len ? " " : "", w[k]);
+    }
+    KeyCombo kc;
+    if (!keys_parse(spec, &kc) || kc.has_delete || keys_does_nothing(&kc)) goto done;
+    if (!verb && !keys_is_combo(&kc)) goto done;
+    add_item(out, IN_KEYS, spec, 0);
+    out->items[0].times = times;
+    ok = true;
+done:
+    free(copy);
+    return ok;
+}
+
 static const char *const OPEN_WORDS[] = {" abre ", " abreme ", " abrir ", " abrirme "};
 static const char *const FOLDER_WORDS[] = {"descargas", "documentos", "escritorio", "imagenes", "fotos"};
 
@@ -340,6 +414,10 @@ bool intents_parse(const char *text, IntentList *out)
 
     out->greeting = has(norm, " como andas ") || has(norm, " como estas ") || has(norm, " que onda ") ||
                     has(norm, " que tal ") || has(norm, " como te va ") || has(norm, " como va ");
+    if (parse_keys(norm, out)) {
+        ok = true;
+        goto done;
+    }
 
     for (size_t i = 0; i < sizeof TRIGGERS / sizeof *TRIGGERS; i++) {
         if (!has(norm, TRIGGERS[i].pattern)) continue;
@@ -514,6 +592,11 @@ char *intents_run(const IntentList *l, bool *handled)
                 *handled = false;
             break;
         case IN_THANKS: say = l->greeting ? "Gracias a ti." : "De nada."; break;
+        case IN_KEYS:
+            /* arg: solo letras, números y espacios (ver parse_keys) */
+            snprintf(args, sizeof args, "{\"teclas\":\"%s\",\"veces\":%d}", it->arg, it->times > 1 ? it->times : 1);
+            r = tool("presionar_teclas", args);
+            break;
         }
         /* Si la herramienta no contestó "Listo.", se dice lo que contestó. */
         const char *text = say && (!r || !*r || str_starts_with(r, "Listo")) ? say : r;

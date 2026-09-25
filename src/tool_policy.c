@@ -1,9 +1,13 @@
 /* Qué herramientas meten a la conversación texto que no dijo quien habla, y
    qué acciones, mientras ese texto siga en la conversación, solo se hacen con
    un "sí" de voz. Va aparte de tools.c para poder probarlo sin Groq. */
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "keys.h"
 #include "tools.h"
 #include "util.h"
 
@@ -30,11 +34,14 @@ bool tool_needs_confirmation(const char *name, const cJSON *args)
     if (!name) return false;
     if (!strcmp(name, "open_app")) return open_app_targets_file(args);
     if (!strcmp(name, "type_text")) return arg_bool(args, "enviar");
+    /* Cualquier tecla: con ellas se puede abrir «Ejecutar» y correr un comando. */
+    if (!strcmp(name, "presionar_teclas")) return true;
     /* Darse permiso para todo es delicado; quitárselo, nunca. */
     if (!strcmp(name, "cambiar_permisos")) return arg_bool(args, "acceso_completo");
     /* run_macro también: un comando guardado puede traer type_text con enviar. */
-    static const char *const ALWAYS[] = {"mover_archivo", "borrar_archivo",        "create_macro",
-                                         "run_macro",     "registrar_dispositivo", "gestionar_dispositivo"};
+    static const char *const ALWAYS[] = {"mover_archivo",         "borrar_archivo",        "create_macro",
+                                         "run_macro",             "registrar_dispositivo", "gestionar_dispositivo",
+                                         "subir_archivo"};
     return in_list(name, ALWAYS, sizeof ALWAYS / sizeof *ALWAYS);
 }
 
@@ -87,6 +94,32 @@ char *tool_describe_action(const char *name, const cJSON *args)
         char *c = clip(arg_str(args, "comando"));
         r = str_printf("mandarle a %s la orden «%s»", a, c);
         free(c);
+    } else if (!strcmp(name, "presionar_teclas")) {
+        KeyCombo k;
+        char *keys = keys_parse(arg_str(args, "teclas"), &k) ? keys_describe(&k) : clip(arg_str(args, "teclas"));
+        char *v = clip(arg_str(args, "ventana"));
+        int times = arg_int(args, "veces", 1);
+        char t[24] = "";
+        if (times > 1) snprintf(t, sizeof t, " %d veces", times > 20 ? 20 : times);
+        bool win = k.n == 2 && k.vk[0] == VK_LWIN;
+        const char *note = "";
+        if (k.has_delete) note = " (en el Explorador borra lo que tengas seleccionado)";
+        else if (k.has_enter) note = " (manda o ejecuta lo que esté escrito)";
+        else if (win && k.vk[1] == 'R') note = " (abre «Ejecutar», donde se corren comandos)";
+        else if (win && k.vk[1] == 'X') note = " (abre el menú de administrador de Windows)";
+        r = str_printf("oprimir %s%s%s%s%s", keys, t, *v ? " en " : "", v, note);
+        free(v);
+        free(keys);
+    } else if (!strcmp(name, "subir_archivo")) {
+        char *f = clip(arg_str(args, "ruta"));
+        wchar_t *w = utf8_to_wide(f);
+        char *base = wide_to_utf8(path_basename(w));
+        char *v = clip(arg_str(args, "ventana"));
+        r = str_printf("subir %s a %s%s", base, v, arg_bool(args, "enviar") ? " y mandarlo" : "");
+        free(v);
+        free(base);
+        free(w);
+        free(f);
     } else if (!strcmp(name, "borrar_memoria_reciente")) {
         r = xstrdup(!strcmp(arg_str(args, "periodo"), "todo") ? "borrar todo lo que hemos hablado de mi memoria"
                                                                 : "borrar de mi memoria lo que hablamos hoy");

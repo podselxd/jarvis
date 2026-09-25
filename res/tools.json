@@ -357,6 +357,94 @@
   {
     "type": "function",
     "function": {
+      "name": "presionar_teclas",
+      "description": "Oprime una tecla o combinación en la ventana de enfrente (o en 'ventana', enfocándola antes): 'control t', 'alt tab', 'windows d', 'f5', 'flecha abajo', 'enter'. veces: 1-20. Si no sabes el atajo de una app, usa atajos_de_app.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "teclas": {
+            "type": "string"
+          },
+          "veces": {
+            "type": "integer"
+          },
+          "ventana": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "teclas"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "atajos_de_app",
+      "description": "Los atajos de teclado de una app (navegador, YouTube, Explorador, Discord, Spotify, Word) o de Windows.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "app": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "app"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "ir_a_pestana",
+      "description": "Cambia a la pestaña cuyo título diga 'titulo' (pasa con Ctrl+Tab hasta encontrarla) en la ventana de enfrente o en 'ventana' (el navegador).",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "titulo": {
+            "type": "string"
+          },
+          "ventana": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "titulo"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "subir_archivo",
+      "description": "Adjunta un archivo a un chat: lo copia como archivo, va a 'ventana' (Discord, WhatsApp…; la abre si hace falta) y lo pega con Ctrl+V. enviar=true da Enter. 'ruta' completa: búscala antes con buscar_archivo.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "ruta": {
+            "type": "string"
+          },
+          "ventana": {
+            "type": "string"
+          },
+          "enviar": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ruta",
+          "ventana"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
       "name": "list_files",
       "description": "Lista una carpeta ('descargas', 'escritorio', 'documentos' o una ruta).",
       "parameters": {

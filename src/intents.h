@@ -5,7 +5,8 @@
 
 /* Comandos simples que se resuelven en tu PC, sin preguntarle al modelo:
    play/pausa, canción siguiente/anterior, volumen, la ventana de enfrente,
-   abrir una app, el Explorador o tus carpetas, y "gracias". Son instantáneos,
+   abrir una app, el Explorador o tus carpetas, oprimir una tecla o un atajo
+   ("oprime windows", "dale enter", "control zeta") y "gracias". Son instantáneos,
    no gastan cupo de Groq y no se equivocan. Lo que no sea claramente uno de
    estos (o traiga algo más, como "pon la canción de AC/DC") va al modelo. */
 
@@ -28,12 +29,14 @@ typedef enum {
     IN_FOLDER,   /* arg: "descargas", "documentos"... */
     IN_OPEN_APP, /* arg: el nombre de la app */
     IN_THANKS,
+    IN_KEYS, /* arg: la tecla o combinación ("control zeta"); times: cuántas veces */
 } IntentKind;
 
 typedef struct {
     IntentKind kind;
     char arg[48];
     int pos; /* dónde lo dijiste: se hacen en ese orden */
+    int times;
 } IntentItem;
 
 typedef struct {

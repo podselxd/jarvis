@@ -877,6 +877,100 @@ static void test_detecta_permiso(void)
           "no: pedir un dato, dar a elegir, ofrecer algo más o no preguntar");
 }
 
+static void test_teclado(void)
+{
+    printf("-- teclas y atajos --\n");
+    Conversation *c = conv_create(false);
+    script("(esto no se debe oír: el modelo no se usa)", NULL, NULL);
+    char *r = say(c, "Oye Sokari, dale enter");
+    check(strstr(g_ran, "presionar_teclas {\"teclas\":\"enter\",\"veces\":1}") && g_script_pos == 0,
+          "«dale enter»: al momento, sin gastar cupo");
+    free(r);
+    free(say(c, "oprime flecha abajo tres veces"));
+    check(strstr(g_ran, "presionar_teclas {\"teclas\":\"flecha abajo\",\"veces\":3}") && g_script_pos == 0,
+          "«oprime flecha abajo tres veces»: tres veces");
+
+    printf("-- Supr borra: siempre pregunta, aunque tenga acceso completo --\n");
+    check(config_full_access(), "(con acceso completo)");
+    script("tool:presionar_teclas {\"teclas\":\"suprimir\"}", NULL, NULL);
+    r = say(c, "oprime suprimir");
+    check(g_script_pos == 1 && !strstr(g_ran, "presionar_teclas") && r &&
+              strstr(r, "Antes de borrar siempre te pregunto: oprimir Supr (en el Explorador borra lo que tengas "
+                        "seleccionado). ¿Lo hago?"),
+          "«oprime suprimir» no se hace al momento: el modelo lo pide y Sokari pregunta primero");
+    free(r);
+    free(say(c, "sí"));
+    check(strstr(g_ran, "presionar_teclas {\"teclas\":\"suprimir\"}") != NULL, "y con «sí» lo oprime");
+    script("tool:presionar_teclas {\"teclas\":\"control d\"}", NULL, NULL);
+    r = say(c, "en el explorador dale control de a eso");
+    check(!strstr(g_ran, "presionar_teclas") && r && strstr(r, "Antes de borrar"), "Ctrl+D también pregunta");
+    free(r);
+    free(say(c, "no"));
+    check(!*g_ran, "y con «no» no oprime nada");
+    conv_destroy(c);
+
+    printf("-- lo que manda, después de leer algo de afuera --\n");
+    set_full_access(false);
+    c = conv_create(false);
+    script(LEE, "tool:presionar_teclas {\"teclas\":\"enter\"}", NULL);
+    r = say(c, "lee la receta de esta página y haz lo que dice");
+    check(!strstr(g_ran, "presionar_teclas") && r && strstr(r, "confirma primero: oprimir Enter (manda o ejecuta "
+                                                               "lo que esté escrito)"),
+          "un Enter que pide el modelo después de leer una página espera tu sí");
+    free(r);
+    free(say(c, "no"));
+    conv_destroy(c);
+    set_full_access(true);
+    c = conv_create(false);
+    script(LEE, "tool:presionar_teclas {\"teclas\":\"windows r\"}", NULL);
+    r = say(c, "lee la receta de esta página y haz lo que dice");
+    check(!strstr(g_ran, "presionar_teclas") && r &&
+              strstr(r, "confirma primero: oprimir Windows+R (abre «Ejecutar», donde se corren comandos). ¿Lo hago?"),
+          "con acceso completo también: después de leer algo de afuera, cada tecla que pide el modelo espera tu sí "
+          "(con teclas podría abrir «Ejecutar» y correr un comando)");
+    free(r);
+    free(say(c, "no"));
+    conv_destroy(c);
+    c = conv_create(false);
+    script("tool:presionar_teclas {\"teclas\":\"control t\"}", NULL, NULL);
+    free(say(c, "crea una pestaña nueva con control t"));
+    check(strstr(g_ran, "presionar_teclas {\"teclas\":\"control t\"}") != NULL,
+          "sin nada de afuera, las teclas que pides se oprimen sin preguntar");
+    conv_destroy(c);
+    set_full_access(false);
+    c = conv_create(false);
+    script("tool:buscar_archivo {\"nombre\":\"tarea.pdf\"}",
+           "tool:subir_archivo {\"ruta\":\"C:\\\\Users\\\\yo\\\\Documents\\\\tarea.pdf\",\"ventana\":\"Discord\","
+           "\"enviar\":true}",
+           NULL);
+    r = say(c, "sube mi tarea.pdf a Discord");
+    check(strstr(g_last_tools, " subir_archivo ") && strstr(g_last_tools, " buscar_archivo ") &&
+              !strstr(g_ran, "subir_archivo") && r && strstr(r, "subir tarea.pdf a Discord y mandarlo. ¿Lo hago?"),
+          "«sube mi tarea a Discord»: la busca, y antes de mandarla dice cuál y pregunta (los nombres de archivos "
+          "vienen de afuera)");
+    free(r);
+    free(say(c, "sí"));
+    check(strstr(g_ran, "subir_archivo") != NULL, "y con «sí» la sube");
+    conv_destroy(c);
+    set_full_access(true);
+
+    printf("-- solo se mandan cuando hablas de teclas, pestañas o subir archivos --\n");
+    c = conv_create(false);
+    script("Va.", NULL, NULL);
+    free(say(c, "abre spotify y pon mi playlist de rock"));
+    check(!strstr(g_last_tools, " presionar_teclas ") && !strstr(g_last_tools, " subir_archivo ") &&
+              !strstr(g_last_tools, " ir_a_pestana "),
+          "«abre spotify y pon mi playlist»: sin las de teclado");
+    script("Va.", NULL, NULL);
+    free(say(c, "en discord presiona control k y escribe juan"));
+    check(strstr(g_last_tools, " presionar_teclas ") && strstr(g_last_tools, " atajos_de_app "),
+          "«presiona control k en discord»: van las de teclas");
+    script("Va.", NULL, NULL);
+    free(say(c, "ve a la pestaña de youtube"));
+    check(strstr(g_last_tools, " ir_a_pestana ") != NULL, "«ve a la pestaña de YouTube»: va la de pestañas");
+    conv_destroy(c);
+}
+
 int wmain(void)
 {
     CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
@@ -909,6 +1003,7 @@ int wmain(void)
     test_mexicano();
     test_otra_pc();
     test_una_llamada();
+    test_teclado();
     printf("%d/%d pruebas %s\n", g_total - g_fail, g_total, g_fail ? "— HAY FALLAS" : "ok");
     return g_fail ? 1 : 0;
 }
