@@ -26,6 +26,9 @@ typedef struct {
     char *mic_name;
     char *output_name; /* salida de audio; "" = la predeterminada de Windows */
     char *fw_asked;    /* el exe para el que ya se pidió abrir el firewall de la malla */
+    /* IA de respaldo (opcionales) y en qué orden se usan: "groq,nvidia,deepseek,openrouter,glm". */
+    char *nvidia_key, *deepseek_key, *openrouter_key, *glm_key;
+    char *ai_order;
     int display_mode;
     int resolution; /* 0 = automática, si no el alto en píxeles (720, 1080, 1440, 2160) */
     int volume;     /* 0-100, volumen de la voz de Sokari (no el del sistema) */
@@ -69,6 +72,10 @@ void config_free(AppConfig *c);
 void config_apply(const AppConfig *c);
 
 char *config_api_key(void);
+/* La key de una IA de respaldo ("nvidia", "deepseek", "openrouter", "glm"); "" si no hay. */
+char *config_provider_key(const char *provider);
+char *config_ai_order(void);
+#define DEFAULT_AI_ORDER "groq,nvidia,deepseek,openrouter,glm"
 char *config_stop_word(void);
 char *config_user_name(void);
 char *config_mesh_secret(bool create);

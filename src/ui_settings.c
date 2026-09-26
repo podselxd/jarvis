@@ -42,9 +42,9 @@
 #define C_NAV_SEL RGB(0x28, 0x26, 0x3a)
 #define C_LINK RGB(0x9d, 0x92, 0xff)
 
-enum { SEC_HOME, SEC_ACCOUNT, SEC_DISPLAY, SEC_AUDIO, SEC_GENERAL, SEC_DEVICES, SEC_COUNT };
+enum { SEC_HOME, SEC_ACCOUNT, SEC_DISPLAY, SEC_AUDIO, SEC_GENERAL, SEC_DEVICES, SEC_AI, SEC_COUNT };
 static const wchar_t *SECTION_NAMES[SEC_COUNT] = {L"Inicio", L"Cuenta", L"Pantalla", L"Voz y audio", L"General",
-                                                  L"Dispositivos"};
+                                                  L"Dispositivos", L"IA de respaldo"};
 
 typedef enum {
     W_LABEL,
@@ -60,7 +60,7 @@ typedef enum {
 } WType;
 
 enum {
-    F_API, F_NAME, F_PROFILE_PW, F_STOP, F_MESH, F_EDIT_COUNT,
+    F_API, F_NAME, F_PROFILE_PW, F_STOP, F_MESH, F_NVIDIA, F_DEEPSEEK, F_OPENROUTER, F_GLM, F_AI_ORDER, F_EDIT_COUNT,
 };
 
 enum {
@@ -70,6 +70,8 @@ enum {
     A_SHOW_MESH,
     /* Por dispositivo de la lista: + su número. */
     A_DEV_PROBE = 200, A_DEV_REMOVE = 300,
+    /* Por IA de respaldo (0 NVIDIA, 1 DeepSeek, 2 OpenRouter, 3 GLM): ver la key y dónde sacarla. */
+    A_SHOW_KEY = 400, A_KEY_LINK = 450,
 };
 #define MAX_DEVICE_ROWS 5
 
@@ -121,7 +123,7 @@ static struct {
     int volume, sensitivity;
     int end_silence, duck; /* cuánto espera cuando te callas; bajar el volumen mientras te escucha */
     wchar_t *status_line;
-    bool api_visible, stop_visible, mesh_visible;
+    bool api_visible, stop_visible, mesh_visible, key_visible[4];
     MeshDevice *devs; /* tus dispositivos, releídos cada vez que se arma la sección */
     int ndevs;
     wchar_t dev_text[MAX_DEVICE_ROWS][200];
@@ -264,12 +266,19 @@ static int layout_edit(int x, int y, int w, const wchar_t *label, int field, con
     y += dp(22);
     Widget *e = add(W_EDIT, (RECT){x, y, x + w, y + dp(40)});
     e->edit = field;
-    bool has_eye = field == F_API || field == F_STOP || field == F_MESH;
+    bool backup_key = field >= F_NVIDIA && field <= F_GLM;
+    bool has_eye = field == F_API || field == F_STOP || field == F_MESH || backup_key;
     if (has_eye) {
-        bool visible = field == F_API ? S.api_visible : field == F_STOP ? S.stop_visible : S.mesh_visible;
+        bool visible = field == F_API    ? S.api_visible
+                       : field == F_STOP ? S.stop_visible
+                       : field == F_MESH ? S.mesh_visible
+                                         : S.key_visible[field - F_NVIDIA];
         Widget *eye = add(W_LINK, (RECT){x + w - dp(64), y, x + w - dp(8), y + dp(40)});
         eye->text = visible ? L"Ocultar" : L"Ver";
-        eye->action = field == F_API ? A_SHOW_API : field == F_STOP ? A_SHOW_STOP : A_SHOW_MESH;
+        eye->action = field == F_API    ? A_SHOW_API
+                      : field == F_STOP ? A_SHOW_STOP
+                      : field == F_MESH ? A_SHOW_MESH
+                                        : A_SHOW_KEY + (field - F_NVIDIA);
     }
     HWND ed = S.edits[field];
     int right_pad = has_eye ? dp(70) : dp(12);
@@ -553,6 +562,25 @@ static void layout(void)
                         L"instrucciones escondidas, podría obedecerlas sin avisarte. Apagado, pregunta antes de "
                         L"acciones delicadas cuando leyó algo de afuera.");
         break;
+    case SEC_AI: {
+        y = layout_help(x, y - dp(6), w,
+                        L"Cuando se te acaba el cupo gratis de Groq, Sokari sigue con estas, en orden. Todas son "
+                        L"opcionales: pega solo las que tengas. Tu voz se sigue pasando a texto con Groq.") +
+            dp(4);
+        static const wchar_t *const NAMES[] = {L"NVIDIA (build.nvidia.com, gratis con límite)",
+                                               L"DeepSeek (de pago, muy barata)",
+                                               L"OpenRouter (modelos «:free»)", L"GLM de Z.ai (tiene uno gratis)"};
+        for (int i = 0; i < 4; i++) {
+            layout_link(x + w - dp(92), y, L"Sacar key →", A_KEY_LINK + i);
+            y = layout_edit(x, y, w - dp(100), NAMES[i], F_NVIDIA + i, NULL) - dp(8);
+        }
+        y = layout_edit(x, y + dp(4), w, L"Orden (de izquierda a derecha)", F_AI_ORDER, NULL) - dp(8);
+        y = layout_help(x, y, w,
+                        L"Ojo: en OpenRouter, muchos modelos gratis solo funcionan si permites que usen tus mensajes "
+                        L"para entrenar; DeepSeek guarda los datos en China. Sokari les manda tus frases y lo que "
+                        L"recuerda de ti.");
+        break;
+    }
     case SEC_DEVICES: {
         y = layout_help(x, y - dp(6), w, g_tailscale_text) + dp(2);
         int bx = x;
@@ -848,6 +876,13 @@ static void load_values(void)
     w = utf8_to_wide(S.cfg.mesh_secret);
     SetWindowTextW(S.edits[F_MESH], w);
     free(w);
+    const char *backup[] = {S.cfg.nvidia_key, S.cfg.deepseek_key, S.cfg.openrouter_key, S.cfg.glm_key, S.cfg.ai_order};
+    for (int k = 0; k < 5; k++) {
+        w = utf8_to_wide(backup[k]);
+        SetWindowTextW(S.edits[F_NVIDIA + k], w);
+        SecureZeroMemory(w, wcslen(w) * sizeof *w);
+        free(w);
+    }
     S.display_mode = S.cfg.display_mode;
     S.resolution_index = 0;
     for (int i = 0; i < 5; i++)
@@ -881,6 +916,32 @@ static void load_values(void)
     build_labels();
     refresh_tailscale_text();
     refresh_sound_text();
+}
+
+/* "NVIDIA, groq" -> "nvidia,groq"; lo que no sea un proveedor conocido se
+   quita, y si no queda nada, el de fábrica. Toma t (heap). */
+static char *clean_ai_order(char *t)
+{
+    static const char *const KNOWN[] = {"groq", "nvidia", "deepseek", "openrouter", "glm"};
+    StrBuf sb;
+    sb_init(&sb);
+    char *low = str_lower(t), *ctx = NULL;
+    free(t);
+    for (char *tok = strtok_s(low, ", ;", &ctx); tok; tok = strtok_s(NULL, ", ;", &ctx)) {
+        for (size_t i = 0; i < sizeof KNOWN / sizeof *KNOWN; i++) {
+            char pat[24];
+            snprintf(pat, sizeof pat, ",%s,", KNOWN[i]);
+            char *have = str_printf(",%s,", sb.data ? sb.data : "");
+            if (!strcmp(tok, KNOWN[i]) && !strstr(have, pat)) sb_appendf(&sb, "%s%s", sb.len ? "," : "", KNOWN[i]);
+            free(have);
+        }
+    }
+    free(low);
+    if (!sb.len) {
+        sb_free(&sb);
+        return xstrdup(DEFAULT_AI_ORDER);
+    }
+    return sb.data;
 }
 
 static void save(void)
@@ -923,6 +984,14 @@ static void save(void)
     } else {
         free(mesh);
     }
+    char **backup[] = {&c.nvidia_key, &c.deepseek_key, &c.openrouter_key, &c.glm_key};
+    for (int k = 0; k < 4; k++) {
+        SecureZeroMemory(*backup[k], strlen(*backup[k]));
+        free(*backup[k]);
+        *backup[k] = edit_text(F_NVIDIA + k);
+    }
+    free(c.ai_order);
+    c.ai_order = clean_ai_order(edit_text(F_AI_ORDER));
     c.display_mode = S.display_mode;
     c.resolution = RESOLUTIONS[S.resolution_index];
     c.sphere_style = S.style;
@@ -1205,6 +1274,26 @@ static void do_action(int action)
         InvalidateRect(S.edits[F_STOP], NULL, TRUE);
         layout();
         break;
+    case A_SHOW_KEY:
+    case A_SHOW_KEY + 1:
+    case A_SHOW_KEY + 2:
+    case A_SHOW_KEY + 3: {
+        int k = action - A_SHOW_KEY;
+        S.key_visible[k] = !S.key_visible[k];
+        SendMessageW(S.edits[F_NVIDIA + k], EM_SETPASSWORDCHAR, S.key_visible[k] ? 0 : 0x25CF, 0);
+        InvalidateRect(S.edits[F_NVIDIA + k], NULL, TRUE);
+        layout();
+        break;
+    }
+    case A_KEY_LINK:
+    case A_KEY_LINK + 1:
+    case A_KEY_LINK + 2:
+    case A_KEY_LINK + 3: {
+        static const wchar_t *const URLS[] = {L"https://build.nvidia.com", L"https://platform.deepseek.com/api_keys",
+                                              L"https://openrouter.ai/keys", L"https://z.ai"};
+        ShellExecuteW(NULL, L"open", URLS[action - A_KEY_LINK], NULL, NULL, SW_SHOWNORMAL);
+        break;
+    }
     case A_SHOW_MESH:
         S.mesh_visible = !S.mesh_visible;
         SendMessageW(S.edits[F_MESH], EM_SETPASSWORDCHAR, S.mesh_visible ? 0 : 0x25CF, 0);
@@ -1416,8 +1505,8 @@ static LRESULT CALLBACK proc(HWND h, UINT m, WPARAM w, LPARAM l)
         DwmSetWindowAttribute(h, 35 /* DWMWA_CAPTION_COLOR */, &cap, sizeof cap);
         S.surface_brush = CreateSolidBrush(C_SURFACE);
         for (int i = 0; i < F_EDIT_COUNT; i++) {
-            DWORD style = WS_CHILD | WS_TABSTOP | ES_AUTOHSCROLL |
-                          (i == F_API || i == F_PROFILE_PW || i == F_STOP || i == F_MESH ? ES_PASSWORD : 0);
+            bool secret = i == F_API || i == F_PROFILE_PW || i == F_STOP || i == F_MESH || (i >= F_NVIDIA && i <= F_GLM);
+            DWORD style = WS_CHILD | WS_TABSTOP | ES_AUTOHSCROLL | (secret ? ES_PASSWORD : 0);
             S.edits[i] = CreateWindowExW(0, L"EDIT", L"", style, 0, 0, 10, 10, h, (HMENU)(INT_PTR)(100 + i), S.inst, NULL);
             SetWindowTheme(S.edits[i], L"DarkMode_CFD", NULL);
             SetWindowSubclass(S.edits[i], edit_subclass, 1, 0);
@@ -1430,6 +1519,10 @@ static LRESULT CALLBACK proc(HWND h, UINT m, WPARAM w, LPARAM l)
         SendMessageW(S.edits[F_PROFILE_PW], EM_SETPASSWORDCHAR, 0x25CF, 0);
         SendMessageW(S.edits[F_STOP], EM_SETPASSWORDCHAR, 0x25CF, 0);
         SendMessageW(S.edits[F_MESH], EM_SETPASSWORDCHAR, 0x25CF, 0);
+        for (int k = F_NVIDIA; k <= F_GLM; k++) {
+            SendMessageW(S.edits[k], EM_SETPASSWORDCHAR, 0x25CF, 0);
+            SendMessageW(S.edits[k], EM_SETCUEBANNER, TRUE, (LPARAM)L"Opcional");
+        }
         SendMessageW(S.edits[F_MESH], EM_SETCUEBANNER, TRUE, (LPARAM)L"Se genera solo; pega aquí el de tu otra PC");
         make_fonts();
         load_values();
@@ -1620,6 +1713,7 @@ static void open_window(HINSTANCE inst, bool first_run, bool home, bool starting
     S.on_saved = on_saved;
     S.section = home ? SEC_HOME : SEC_ACCOUNT;
     S.api_visible = S.stop_visible = S.mesh_visible = false;
+    memset(S.key_visible, 0, sizeof S.key_visible);
     UINT dpi = GetDpiForSystem();
     int cw = MulDiv(900, (int)dpi, 96), ch = MulDiv(740, (int)dpi, 96);
     RECT wa;
