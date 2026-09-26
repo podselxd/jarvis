@@ -52,12 +52,8 @@ static void test_tailscale_json(void)
 
     MeshDevice *peers;
     int n = tailscale_parse_peers(status, &peers);
-    bool win = false, lin = false;
-    for (int i = 0; i < n; i++) {
-        win |= !strcmp(peers[i].name, "laptop-ismael") && !strcmp(peers[i].host, "100.121.139.36");
-        lin |= !strcmp(peers[i].name, "laptop-ubuntu") && !strcmp(peers[i].host, "100.77.8.9");
-    }
-    check(n == 2 && win && lin, "Detectar también lee ese JSON: las PCs con Windows y con Linux, no el celular");
+    check(n == 1 && !strcmp(peers[0].name, "laptop-ismael") && !strcmp(peers[0].host, "100.121.139.36"),
+          "Detectar también lee ese JSON: la PC con Windows (las de Linux, solo si Sokari les contesta)");
     mesh_devices_free(peers, n);
 
     ok = tailscale_parse_status("{\"BackendState\":\"NeedsLogin\",\"Self\":{},\"User\":null}", &st);
@@ -289,8 +285,10 @@ static void test_tailscale_linux(void)
     MeshDevice *list;
     char *why = NULL;
     int n = tailscale_windows_peers(&list, &why);
-    check(n == 1 && !strcmp(list[0].name, "mi-laptop") && !strcmp(list[0].host, "100.64.1.2") && !why,
-          "Detectar: lee su JSON aunque se queje por la salida de errores, y encuentra la laptop con Linux");
+    check(n == 0 && why && strstr(why, "Tailscale ve 2 dispositivos") && strstr(why, "Sokari abierto"),
+          "Detectar lee su JSON aunque se queje por la salida de errores; una PC con Linux donde Sokari no contesta "
+          "no se registra (podría ser un servidor), y lo dice");
+    if (why && !strstr(why, "Sokari abierto")) printf("      dijo: %s\n", why);
     mesh_devices_free(list, n);
     free(why);
     setenv("PATH", saved, 1);

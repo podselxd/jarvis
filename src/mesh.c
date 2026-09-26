@@ -795,7 +795,8 @@ static char *device_name_from(const char *host_name)
     return sb.data;
 }
 
-int tailscale_parse_peers(const char *json, MeshDevice **out)
+/* Los dispositivos con ese sistema ("windows", "linux") de ese JSON. */
+static int parse_peers_os(const char *json, const char *os_want, MeshDevice **out)
 {
     cJSON *j = cJSON_Parse(json_start(json));
     cJSON *peers = cJSON_GetObjectItem(j, "Peer");
@@ -806,8 +807,7 @@ int tailscale_parse_peers(const char *json, MeshDevice **out)
     {
         const char *os = cJSON_GetStringValue(cJSON_GetObjectItem(p, "OS"));
         const char *hn = cJSON_GetStringValue(cJSON_GetObjectItem(p, "HostName"));
-        /* Sokari escucha en Windows y en Linux (no en celulares ni tabletas). */
-        if (!os || !hn || (_stricmp(os, "windows") && _stricmp(os, "linux"))) continue;
+        if (!os || !hn || _stricmp(os, os_want)) continue;
         const cJSON *addr;
         const char *ip4 = NULL;
         cJSON_ArrayForEach(addr, cJSON_GetObjectItem(p, "TailscaleIPs"))
@@ -827,6 +827,11 @@ int tailscale_parse_peers(const char *json, MeshDevice **out)
     cJSON_Delete(j);
     *out = list;
     return n;
+}
+
+int tailscale_parse_peers(const char *json, MeshDevice **out)
+{
+    return parse_peers_os(json, "windows", out);
 }
 
 /* Por qué Detectar no encontró ninguna PC, en palabras para el usuario. */
@@ -850,8 +855,8 @@ static char *peers_problem(const char *out, long code, const char *err)
                        "misma cuenta.",
                        st.account ? st.account : "sin nombre");
     else
-        r = str_printf("Tailscale ve %d dispositivo%s, pero ninguno con Windows ni Linux. " DIAGNOSE_MESH
-                       " para ver cuáles son.",
+        r = str_printf("Tailscale ve %d dispositivo%s, pero ninguna PC con Windows (ni con Linux y Sokari abierto). "
+                       DIAGNOSE_MESH " para ver cuáles son.",
                        st.peers, st.peers == 1 ? "" : "s");
     tailscale_status_free(&st);
     return r;
@@ -864,6 +869,23 @@ int tailscale_windows_peers(MeshDevice **out, char **why)
     static const char *const STATUS[] = {"status", "--json", NULL};
     char *json = mesh_run_tailscale(STATUS, 8000, &code, &err);
     int n = tailscale_parse_peers(json, out);
+    /* Las de Linux, solo si Sokari ya les contesta: un servidor o una
+       Raspberry con Linux también salen en Tailscale y no son PCs donde se le
+       hable a Sokari. */
+    MeshDevice *lin;
+    int nl = parse_peers_os(json, "linux", &lin);
+    for (int i = 0; i < nl; i++) {
+        MeshProbe p = mesh_send_ip(lin[i].host, "", 2500, NULL);
+        if (p == MESH_OK || p == MESH_BUSY || p == MESH_BAD_SECRET) {
+            *out = xrealloc(*out, sizeof **out * (size_t)(n + 2));
+            (*out)[n++] = lin[i];
+            memset(&(*out)[n], 0, sizeof **out);
+        } else {
+            free(lin[i].name);
+            free(lin[i].host);
+        }
+    }
+    free(lin);
     if (why) *why = n ? NULL : peers_problem(json, code, err);
     free(json);
     free(err);
