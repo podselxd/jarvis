@@ -9,6 +9,10 @@
 #include <windows.h>
 #include <objbase.h>
 #include <stdio.h>
+#ifndef _WIN32
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
 #include <stdlib.h>
 #include <string.h>
 
@@ -36,19 +40,24 @@ static void test_tailscale_json(void)
         "\"TailscaleIPs\":[\"100.124.55.72\"]},"
         "\"Peer\":{\"nodekey:a\":{\"HostName\":\"LAPTOP-Ismael\",\"OS\":\"windows\",\"UserID\":7102938475611234,"
         "\"Online\":true,\"TailscaleIPs\":[\"100.121.139.36\"]},"
-        "\"nodekey:b\":{\"HostName\":\"Pixel 8\",\"OS\":\"android\",\"Online\":false,\"TailscaleIPs\":[\"100.90.1.2\"]}},"
+        "\"nodekey:b\":{\"HostName\":\"Pixel 8\",\"OS\":\"android\",\"Online\":false,\"TailscaleIPs\":[\"100.90.1.2\"]},"
+        "\"nodekey:c\":{\"HostName\":\"laptop-ubuntu\",\"OS\":\"linux\",\"Online\":true,\"TailscaleIPs\":[\"100.77.8.9\"]}},"
         "\"User\":{\"99\":{\"ID\":99,\"LoginName\":\"otra@gmail.com\"},"
         "\"7102938475611234\":{\"ID\":7102938475611234,\"LoginName\":\"ismael@gmail.com\",\"DisplayName\":\"Ismael\"}}}";
     TailscaleStatus st;
     bool ok = tailscale_parse_status(status, &st);
-    check(ok && !strcmp(st.state, "Running") && st.account && !strcmp(st.account, "ismael@gmail.com") && st.peers == 2,
+    check(ok && !strcmp(st.state, "Running") && st.account && !strcmp(st.account, "ismael@gmail.com") && st.peers == 3,
           "con una advertencia antes del JSON: conectado, tu cuenta y cuántos dispositivos ve");
     tailscale_status_free(&st);
 
     MeshDevice *peers;
     int n = tailscale_parse_peers(status, &peers);
-    check(n == 1 && !strcmp(peers[0].name, "laptop-ismael") && !strcmp(peers[0].host, "100.121.139.36"),
-          "Detectar también lee ese JSON: solo la PC con Windows");
+    bool win = false, lin = false;
+    for (int i = 0; i < n; i++) {
+        win |= !strcmp(peers[i].name, "laptop-ismael") && !strcmp(peers[i].host, "100.121.139.36");
+        lin |= !strcmp(peers[i].name, "laptop-ubuntu") && !strcmp(peers[i].host, "100.77.8.9");
+    }
+    check(n == 2 && win && lin, "Detectar también lee ese JSON: las PCs con Windows y con Linux, no el celular");
     mesh_devices_free(peers, n);
 
     ok = tailscale_parse_status("{\"BackendState\":\"NeedsLogin\",\"Self\":{},\"User\":null}", &st);
@@ -239,11 +248,59 @@ static void test_servidor(void)
 
 static void test_firewall(void)
 {
-    printf("-- el firewall de Windows --\n");
+    printf("-- el firewall --\n");
     int fw = mesh_firewall_check();
     printf("      (esta máquina: %s)\n", fw == 1 ? "deja pasar" : fw == 0 ? "no deja pasar" : "no se pudo leer");
     check(fw >= -1 && fw <= 1 && mesh_firewall_ok() == fw, "se lee el firewall sin trabarse ni pedir permisos");
 }
+
+
+#ifndef _WIN32
+/* En Linux: un tailscale de mentira en el PATH, que además se queja por su
+   salida de errores (como cuando las versiones no coinciden). */
+static void test_tailscale_linux(void)
+{
+    printf("-- tailscale en Linux (uno de mentira en el PATH) --\n");
+    char dir[] = "/tmp/sokari-ts-XXXXXX";
+    if (!mkdtemp(dir)) return;
+    char *script = str_printf("%s/tailscale", dir);
+    FILE *f = fopen(script, "w");
+    if (f) {
+        fputs("#!/bin/sh\n"
+              "if [ \"$1 $2\" = \"status --json\" ]; then\n"
+              "  echo 'Warning: client version \"1.90.1\" != tailscaled server version \"1.90.2\"' >&2\n"
+              "  echo '{\"BackendState\":\"Running\",\"Self\":{\"UserID\":5},\"User\":{\"5\":{\"ID\":5,"
+              "\"LoginName\":\"yo@example.com\"}},\"Peer\":{\"a\":{\"HostName\":\"Mi Laptop\",\"OS\":\"linux\","
+              "\"TailscaleIPs\":[\"100.64.1.2\"]},\"b\":{\"HostName\":\"tele\",\"OS\":\"android\","
+              "\"TailscaleIPs\":[\"100.64.1.3\"]}}}'\n"
+              "  exit 0\n"
+              "fi\n"
+              "echo 'no sé hacer eso' >&2\n"
+              "exit 1\n",
+              f);
+        fclose(f);
+    }
+    chmod(script, 0755);
+    const char *old = getenv("PATH");
+    char *saved = xstrdup(old ? old : "/usr/bin:/bin");
+    char *path = str_printf("%s:%s", dir, saved);
+    setenv("PATH", path, 1);
+    check(tailscale_installed(), "encuentra tailscale en el PATH");
+    MeshDevice *list;
+    char *why = NULL;
+    int n = tailscale_windows_peers(&list, &why);
+    check(n == 1 && !strcmp(list[0].name, "mi-laptop") && !strcmp(list[0].host, "100.64.1.2") && !why,
+          "Detectar: lee su JSON aunque se queje por la salida de errores, y encuentra la laptop con Linux");
+    mesh_devices_free(list, n);
+    free(why);
+    setenv("PATH", saved, 1);
+    unlink(script);
+    rmdir(dir);
+    free(script);
+    free(path);
+    free(saved);
+}
+#endif
 
 int wmain(void)
 {
@@ -265,6 +322,9 @@ int wmain(void)
     http_init();
 
     test_tailscale_json();
+#ifndef _WIN32
+    test_tailscale_linux();
+#endif
     test_tailscale_diagnostico();
     test_nombres();
     test_secreto();

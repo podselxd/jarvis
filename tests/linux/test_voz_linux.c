@@ -206,9 +206,15 @@ static void test_audio(void)
 
     check(mic_start(""), "abre el micrófono predeterminado");
     int16_t frame[MIC_FRAME];
+    /* El ritmo se cuenta desde el primer pedazo: lo que tarda el servidor de
+       sonido en arrancar el micrófono (el de prueba, a veces más de un
+       segundo) no es lo que se mide aquí. */
+    t0 = now_ms();
+    bool first = false;
+    while (!first && now_ms() - t0 < 3000) first = mic_read(frame, 200);
     t0 = now_ms();
     int frames = 0;
-    while (now_ms() - t0 < 2000)
+    while (first && now_ms() - t0 < 2000)
         if (mic_read(frame, 200)) frames++;
     snprintf(what, sizeof what, "llega audio del micrófono a su ritmo (%d pedazos de 80 ms en 2 s)", frames);
     check(frames >= 10 && frames <= 27, what);
