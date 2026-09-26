@@ -68,16 +68,18 @@ La salida de audio elegida vale para la voz de Sokari y su tono. Si pusiste un s
 Para decirle desde una PC "dile a mi laptop que abra Spotify":
 
 1. Instala Tailscale en cada PC (Configuración → Dispositivos → **Instalar Tailscale**) y entra **con la misma cuenta** en todas. Con la misma cuenta, tus PCs se reconocen solas: no hace falta copiar el secreto.
-2. En cada PC dale **Permitir en el firewall** (pide permiso de administrador y abre el puerto solo para tu red de Tailscale).
+2. Abre Sokari en cada PC. Desde ese momento ya recibe órdenes, aunque no le hayas dado **Iniciar**. La primera vez pide permiso de administrador para abrir el firewall, solo para tu red de Tailscale. Si le dijiste que no, está el botón **Permitir en el firewall**.
 3. Dale **Detectar mis PCs**: agrega tus otras PCs con Windows que estén en tu Tailscale. También puedes decirle a Sokari "registra mi laptop en 100.x.y.z".
 4. Dale **Probar** a cada una. Te dice qué falta:
-   - "no te reconoce": las PCs están en cuentas distintas de Tailscale. Entra con la misma, o dale **Copiar secreto** en una y pégalo en ese campo en la otra.
+   - "no te reconoce": las PCs están en cuentas distintas de Tailscale. Entra con la misma, o dale **Copiar secreto** en una y pégalo en ese campo en la otra (con **Ver** revisas lo que pegaste; una IP ahí no se guarda).
    - "Sokari no le contesta": ábrelo en esa PC.
-   - "no contesta": que esté prendida, con Tailscale conectado y sin otra VPN, y con el paso 2 hecho en **esa** PC.
+   - "no contesta": Sokari prueba si Tailscale llega a esa PC y te dice en cuál está el problema. Si Tailscale no llega, está apagada o sin Tailscale. Si llega, el bloqueo está en **esa** PC: ábrele Sokari, dale **Permitir en el firewall** allá, revisa si tiene otro antivirus con firewall y que Tailscale tenga prendido «Allow incoming connections».
 
-Si algo no funciona, dale **Revisar la malla**. Revisa paso a paso Tailscale, tu cuenta, si esta PC recibe órdenes, el firewall, qué dispositivos ve tu red y cada PC registrada, y marca con ✗ lo que falla. El reporte se copia solo, para que lo pegues donde pidas ayuda.
+Si algo no funciona, dale **Revisar la malla**. Revisa paso a paso Tailscale, tu cuenta, si esta PC recibe órdenes, el firewall de Windows (una regla que bloquee a Sokari o «bloquear todas las conexiones entrantes»), si hay otro firewall de antivirus, si Tailscale acepta conexiones entrantes, qué dispositivos ve tu red y cada PC registrada, y marca con ✗ lo que falla. El reporte se copia solo, para que lo pegues donde pidas ayuda.
 
-Sokari empieza a recibir órdenes solo en cuanto Tailscale se conecta, sin reiniciarlo. La PC que recibe una orden avisa con una notificación, y la respuesta se oye en la PC donde hablaste.
+Sokari empieza a recibir órdenes solo en cuanto Tailscale se conecta, sin reiniciarlo. La PC que recibe una orden avisa con una notificación, y la respuesta se oye en la PC donde hablaste. Si la orden tarda más de 5 segundos allá, contesta «recibido» y la termina sola.
+
+Entiende de qué PC hablas aunque no digas su nombre exacto: "Chloe" es "cloe", y "mi laptop" o "la otra compu" es la única que tengas registrada. Lo que pides para otra PC se hace allá, nunca en la que te escucha.
 
 ## Qué puede hacer
 

@@ -88,6 +88,7 @@ static void defaults(AppConfig *c)
     c->voice = xstrdup("");
     c->mic_name = xstrdup("");
     c->output_name = xstrdup("");
+    c->fw_asked = xstrdup("");
     c->display_mode = DISPLAY_FULLSCREEN;
     c->resolution = 0;
     c->volume = 100;
@@ -111,6 +112,7 @@ static void apply_kv(AppConfig *c, const char *key, const char *value)
     else if (!strcmp(key, "SOKARI_VOICE")) set_str(&c->voice, value);
     else if (!strcmp(key, "SOKARI_MIC")) set_str(&c->mic_name, value);
     else if (!strcmp(key, "SOKARI_OUTPUT")) set_str(&c->output_name, value);
+    else if (!strcmp(key, "SOKARI_FW_ASKED")) set_str(&c->fw_asked, value);
     else if (!strcmp(key, "SOKARI_DISPLAY_MODE")) {
         for (int i = 0; i < DISPLAY_MODE_COUNT; i++)
             if (!strcmp(value, DISPLAY_KEYS[i])) c->display_mode = i;
@@ -191,6 +193,7 @@ static bool save_locked(void)
     put_kv(&sb, "SOKARI_VOICE", g_cfg.voice);
     put_kv(&sb, "SOKARI_MIC", g_cfg.mic_name);
     put_kv(&sb, "SOKARI_OUTPUT", g_cfg.output_name);
+    put_kv(&sb, "SOKARI_FW_ASKED", g_cfg.fw_asked);
     put_kv(&sb, "SOKARI_DISPLAY_MODE", display_mode_key(g_cfg.display_mode));
     sb_appendf(&sb, "SOKARI_RESOLUTION=%d\n", g_cfg.resolution);
     sb_appendf(&sb, "SOKARI_VOLUME=%d\n", g_cfg.volume);
@@ -229,6 +232,7 @@ static void copy_cfg(AppConfig *dst, const AppConfig *src)
     dst->voice = xstrdup(src->voice);
     dst->mic_name = xstrdup(src->mic_name);
     dst->output_name = xstrdup(src->output_name);
+    dst->fw_asked = xstrdup(src->fw_asked);
 }
 
 void config_free(AppConfig *c)
@@ -240,6 +244,7 @@ void config_free(AppConfig *c)
     free(c->voice);
     free(c->mic_name);
     free(c->output_name);
+    free(c->fw_asked);
     memset(c, 0, sizeof *c);
 }
 
@@ -385,18 +390,60 @@ void config_set_output(const char *name)
     ReleaseSRWLockExclusive(&g_lock);
 }
 
+static bool is_address(const char *s)
+{
+    unsigned a, b, c, d;
+    char extra;
+    if (sscanf(s, "%u.%u.%u.%u%c", &a, &b, &c, &d, &extra) == 4) return true;
+    char *low = str_lower(s);
+    bool ts = strstr(low, ".ts.net") != NULL;
+    free(low);
+    return ts;
+}
+
+const char *config_secret_problem(const char *s)
+{
+    if (is_address(s))
+        return "Eso es la dirección de una PC, no el secreto. El secreto es una clave larga que Sokari genera solo: "
+               "cópiala de tu otra PC con «Copiar secreto» (si tus PCs usan la misma cuenta de Tailscale, ni hace "
+               "falta).";
+    if (strlen(s) < 12)
+        return "Ese secreto es muy corto: tiene que tener al menos 12 caracteres (el que Sokari genera tiene 64).";
+    return NULL;
+}
+
+char *config_fw_asked(void)
+{
+    AcquireSRWLockShared(&g_lock);
+    char *r = xstrdup(g_cfg.fw_asked);
+    ReleaseSRWLockShared(&g_lock);
+    return r;
+}
+
+void config_set_fw_asked(const char *exe)
+{
+    AcquireSRWLockExclusive(&g_lock);
+    set_str(&g_cfg.fw_asked, exe);
+    save_locked();
+    ReleaseSRWLockExclusive(&g_lock);
+}
+
 /* Se genera una sola vez (32 bytes aleatorios) y nunca lo elige ni lo dice
-   el usuario en voz alta: es lo que autentica a tus otros dispositivos. */
+   el usuario en voz alta: es lo que autentica a tus otros dispositivos. Si
+   quedó guardada una dirección en su lugar (una IP pegada en ese campo), se
+   cambia por uno de verdad. */
 char *config_mesh_secret(bool create)
 {
     AcquireSRWLockExclusive(&g_lock);
-    if (create && !*g_cfg.mesh_secret) {
+    bool address = *g_cfg.mesh_secret && is_address(g_cfg.mesh_secret);
+    if (create && (!*g_cfg.mesh_secret || address)) {
         unsigned char raw[32];
         random_bytes(raw, sizeof raw);
         free(g_cfg.mesh_secret);
         g_cfg.mesh_secret = hex_encode(raw, sizeof raw);
         save_locked();
-        log_msg("Secreto de malla nuevo generado (Configuración > Dispositivos para copiarlo a tus otras PCs).");
+        log_msg(address ? "El secreto de malla era una dirección (una IP), no un secreto: generé uno de verdad."
+                        : "Secreto de malla nuevo generado (Configuración > Dispositivos para copiarlo a tus otras PCs).");
     }
     char *r = xstrdup(g_cfg.mesh_secret);
     ReleaseSRWLockExclusive(&g_lock);

@@ -4,8 +4,8 @@
 #include <stdbool.h>
 #include <wchar.h>
 
-#define SOKARI_VERSION "2.4.2"
-#define SOKARI_VERSION_W L"2.4.2"
+#define SOKARI_VERSION "2.5.0"
+#define SOKARI_VERSION_W L"2.5.0"
 #define GITHUB_REPO "podselxd/sokari"
 
 typedef enum {
@@ -25,6 +25,7 @@ typedef struct {
     char *voice;
     char *mic_name;
     char *output_name; /* salida de audio; "" = la predeterminada de Windows */
+    char *fw_asked;    /* el exe para el que ya se pidió abrir el firewall de la malla */
     int display_mode;
     int resolution; /* 0 = automática, si no el alto en píxeles (720, 1080, 1440, 2160) */
     int volume;     /* 0-100, volumen de la voz de Sokari (no el del sistema) */
@@ -69,6 +70,11 @@ char *config_api_key(void);
 char *config_stop_word(void);
 char *config_user_name(void);
 char *config_mesh_secret(bool create);
+/* Por qué ese texto no sirve como secreto de malla (una IP, el nombre de una
+   PC, muy corto), en palabras para el usuario; NULL si sirve. */
+const char *config_secret_problem(const char *s);
+char *config_fw_asked(void);
+void config_set_fw_asked(const char *exe);
 int config_volume(void);
 float config_wake_threshold(void);
 bool config_mic_muted(void);

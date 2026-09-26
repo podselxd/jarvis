@@ -134,6 +134,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmdline, int show)
         MessageBoxW(NULL, L"No pude abrir la interfaz de Sokari.", L"Sokari", MB_ICONERROR);
         return 1;
     }
+    voice_mesh_start();
     if (kind == LAUNCH_DIRECT) {
         on_settings_saved(false);
         if (updated) app_notify("Sokari", "Me actualicé a la versión " SOKARI_VERSION ".");
@@ -144,6 +145,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmdline, int show)
     }
 
     int rc = ui_run();
+    voice_mesh_stop();
     log_msg("Sokari cerrado.");
     if (mutex) {
         ReleaseMutex(mutex);

@@ -6,6 +6,10 @@
 
 #include "tts.h"
 
+/* La malla (órdenes de tus otras PCs): se prende al abrir Sokari, aunque la
+   voz todavía no arranque, y se apaga al cerrarlo. */
+void voice_mesh_start(void);
+void voice_mesh_stop(void);
 bool voice_start(void);
 void voice_stop(void);
 void voice_trigger(void);

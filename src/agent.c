@@ -60,6 +60,7 @@ static const char *SOKARI_FAREWELLS[] = {
 
 void agent_init(void)
 {
+    if (g_tools || g_system_prompt) return; /* la malla y la voz lo piden; basta una vez */
     g_tools = cJSON_Parse(res_string(IDR_TOOLS_JSON));
     g_system_prompt = res_string(IDR_SYSTEM_PROMPT);
     if (!g_tools) log_msg("No pude leer la definición de herramientas.");
@@ -585,6 +586,78 @@ static cJSON *select_tools(const Conversation *c, const char *text, bool all, bo
     return out;
 }
 
+/* ¿Además de la otra PC, habla de esta? ("ábrelo aquí y en cloe") */
+static bool also_here(const char *text)
+{
+    static const char *const W[] = {" aqui ",        " aca ",         " esta pc ",   " esta compu ",
+                                    " esta computadora ", " en las dos ", " en ambas ", " tambien aqui "};
+    char *norm = intents_normalize(text);
+    bool here = false;
+    for (size_t i = 0; i < sizeof W / sizeof *W && !here; i++) here = strstr(norm, W[i]) != NULL;
+    free(norm);
+    return here;
+}
+
+static bool tools_have(const cJSON *tools, const char *name)
+{
+    const cJSON *t;
+    cJSON_ArrayForEach(t, tools)
+    {
+        const char *n = cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetObjectItem(t, "function"), "name"));
+        if (n && !strcmp(n, name)) return true;
+    }
+    return false;
+}
+
+/* Lo pedido es para otra PC: que esté gestionar_dispositivo y, si no habló
+   también de esta, que no haya herramientas que hagan cosas aquí. */
+static void route_to_device(cJSON *tools, bool only_remote)
+{
+    static const char *const NEED[] = {"gestionar_dispositivo", "registrar_dispositivo"};
+    static const char *const KEEP[] = {"gestionar_dispositivo", "registrar_dispositivo", "recordar",
+                                       "guardar_dato", "terminar_conversacion"};
+    for (size_t i = 0; i < sizeof NEED / sizeof *NEED; i++) {
+        if (tools_have(tools, NEED[i])) continue;
+        const cJSON *t;
+        cJSON_ArrayForEach(t, g_tools)
+        {
+            const char *n = cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetObjectItem(t, "function"), "name"));
+            if (n && !strcmp(n, NEED[i])) cJSON_AddItemToArray(tools, cJSON_Duplicate(t, 1));
+        }
+    }
+    if (!only_remote) return;
+    for (int i = cJSON_GetArraySize(tools) - 1; i >= 0; i--) {
+        const char *n =
+            cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetObjectItem(cJSON_GetArrayItem(tools, i), "function"), "name"));
+        bool keep = false;
+        for (size_t k = 0; k < sizeof KEEP / sizeof *KEEP && !keep; k++) keep = n && !strcmp(n, KEEP[k]);
+        if (!keep) cJSON_DeleteItemFromArray(tools, i);
+    }
+}
+
+/* Lo que se le dice al modelo cuando el pedido es para otra PC. */
+static char *device_note(const char *device, bool here)
+{
+    if (*device)
+        return str_printf("El usuario pidió esto para su PC «%s»: mándaselo con gestionar_dispositivo (nombre «%s», "
+                          "comando = lo que pidió, en sus palabras).%s",
+                          device, device,
+                          here ? " Lo que pidió para esta PC sí hazlo aquí." : " No lo hagas en esta PC.");
+    MeshDevice *devs;
+    int nd = mesh_devices(&devs);
+    StrBuf names;
+    sb_init(&names);
+    for (int i = 0; i < nd; i++) sb_appendf(&names, "%s%s", i ? ", " : "", devs[i].name);
+    char *r = nd ? str_printf("El usuario habla de otra de sus PCs, pero no se sabe cuál (tiene registradas: %s). "
+                              "Pregúntale cuál; no lo hagas en esta PC.",
+                              names.data)
+                 : xstrdup("El usuario habla de otra de sus PCs, pero no tiene ninguna registrada. Dile que la registre "
+                           "(Configuración → Dispositivos → Detectar mis PCs) y no lo hagas en esta PC.");
+    sb_free(&names);
+    mesh_devices_free(devs, nd);
+    return r;
+}
+
 /* El "Lo siento, pero no puedo ayudar con eso." de cuando le dicen una
    grosería: no es una negativa de verdad, solo corta la plática. */
 static bool is_generic_refusal(const char *reply)
@@ -900,11 +973,17 @@ static TurnResult process_turn(Conversation *c, const char *text)
         r.keep_going = true;
         return r;
     }
+    /* "Abre el navegador de mi laptop / de Chloe": eso va a esa PC con
+       gestionar_dispositivo, nunca aquí (una vez abrió el navegador en esta PC
+       y dijo «en tu laptop»). Lo que llega por la malla nunca se reenvía. */
+    char *other = c->remote ? NULL : mesh_device_mentioned(text);
+    bool here = other && also_here(text);
+    if (other) log_msg("Pedido para otra PC: %s.", *other ? other : "(no dijo cuál)");
     /* Play, pausa, volumen, la ventana de enfrente, abrir una app o una
        carpeta, "gracias": se hacen aquí, sin gastar cupo ni arriesgarse a
        que el modelo diga "listo" sin hacerlo. */
     IntentList il;
-    if (intents_parse(text, &il)) {
+    if (!other && intents_parse(text, &il)) {
         bool handled = false;
         char *done = intents_run(&il, &handled);
         if (handled) {
@@ -949,6 +1028,15 @@ static TurnResult process_turn(Conversation *c, const char *text)
             cJSON_AddItemToArray(msgs, note);
         }
         cJSON *tools = select_tools(c, text, all_tools, &filtered);
+        if (other) {
+            route_to_device(tools, !here);
+            char *note = device_note(other, here);
+            cJSON *nm_ = cJSON_CreateObject();
+            cJSON_AddStringToObject(nm_, "role", "system");
+            cJSON_AddStringToObject(nm_, "content", note);
+            cJSON_AddItemToArray(msgs, nm_);
+            free(note);
+        }
         cJSON *msg = groq_chat(msgs, tools, &err);
         cJSON_Delete(tools);
         cJSON_Delete(msgs);
@@ -1062,6 +1150,7 @@ static TurnResult process_turn(Conversation *c, const char *text)
     }
     app_status("");
 
+    free(other);
     if (failed) {
         while (cJSON_GetArraySize(c->history) > turn_start) cJSON_DeleteItemFromArray(c->history, turn_start);
         r.reply = error_reply(&err);
