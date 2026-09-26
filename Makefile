@@ -11,7 +11,10 @@ CFLAGS := -std=gnu11 -O2 -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-
 LIBS := -lwinhttp -lole32 -loleaut32 -luuid -lwinmm -lgdi32 -luser32 -lshell32 -lshlwapi \
         -lcomctl32 -ldwmapi -lws2_32 -liphlpapi -lbcrypt -ladvapi32 -lcomdlg32 -luxtheme -lpowrprof -lm
 
-SRC := $(filter-out src/main.c,$(wildcard src/*.c)) src/third_party/cJSON.c
+# Detector de voz de WebRTC (C puro, licencia BSD): ver src/third_party/webrtc_vad.
+VAD_SRC := $(wildcard src/third_party/webrtc_vad/webrtc/common_audio/vad/*.c) \
+           $(wildcard src/third_party/webrtc_vad/webrtc/common_audio/signal_processing/*.c)
+SRC := $(filter-out src/main.c,$(wildcard src/*.c)) src/third_party/cJSON.c $(VAD_SRC)
 OBJ := $(patsubst src/%.c,build/obj/%.o,$(SRC))
 MAIN_OBJ := build/obj/main.o
 RES_OBJ := build/obj/sokari_res.o
@@ -46,6 +49,10 @@ $(NOMANIFEST):
 build/obj/%.o: src/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
+
+# Código de terceros tal cual: sus avisos no son nuestros (y la CI falla con cualquiera).
+build/obj/third_party/webrtc_vad/%.o: CFLAGS += -Isrc/third_party/webrtc_vad -w
+build/obj/vad.o: CFLAGS += -Isrc/third_party/webrtc_vad
 
 # Kernels de la red del wake word: una copia con AVX2+FMA y otra genérica;
 # wakeword.c elige cuál usar según el CPU al arrancar.

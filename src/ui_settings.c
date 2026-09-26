@@ -119,6 +119,7 @@ static struct {
     int home_display, home_output, home_full; /* lo que está en uso ahora (Inicio lo aplica al momento) */
     int display_mode, resolution_index, style;
     int volume, sensitivity;
+    int end_silence, duck; /* cuánto espera cuando te callas; bajar el volumen mientras te escucha */
     wchar_t *status_line;
     bool api_visible, stop_visible, mesh_visible;
     MeshDevice *devs; /* tus dispositivos, releídos cada vez que se arma la sección */
@@ -145,6 +146,7 @@ static const wchar_t *const MODE_DESCS[DISPLAY_MODE_COUNT] = {
 #define CARD_H 56
 #define CARD_GAP 6
 static const wchar_t *STYLE_LABELS[] = {L"Halo de puntos", L"Líneas"};
+static const wchar_t *END_LABELS[] = {L"Poco", L"Normal", L"Más"};
 
 static int dp(int v)
 {
@@ -520,6 +522,10 @@ static void layout(void)
         y = layout_slider(x, y, w, &S.sensitivity);
         y = layout_help(x, y - dp(8), w,
                         L"Más alta: te escucha aunque lo digas bajito o lejos, pero puede activarse solo con ruido.");
+        /* En un solo renglón: con 1366×768 todo tiene que caber arriba de Guardar. */
+        layout_label(x, y + dp(9), w * 2 / 5, L"Cuánto espero cuando te callas");
+        y = layout_segment(x + w * 2 / 5, y, w - w * 2 / 5, &S.end_silence, END_LABELS, 3) - dp(4);
+        y = layout_toggle(x, y, w, &S.duck, L"Bajar el volumen de la PC mientras te escucho");
         break;
     case SEC_GENERAL:
         y = layout_toggle(x, y, w, &S.autostart, L"Iniciar Sokari con Windows");
@@ -847,6 +853,8 @@ static void load_values(void)
     for (int i = 0; i < 5; i++)
         if (RESOLUTIONS[i] == S.cfg.resolution) S.resolution_index = i;
     S.style = S.cfg.sphere_style;
+    S.end_silence = S.cfg.end_silence;
+    S.duck = S.cfg.duck;
     S.subtitles = S.cfg.subtitles;
     S.show_only_talking = S.cfg.show_only_talking;
     S.full_access = S.cfg.full_access;
@@ -918,6 +926,8 @@ static void save(void)
     c.display_mode = S.display_mode;
     c.resolution = RESOLUTIONS[S.resolution_index];
     c.sphere_style = S.style;
+    c.end_silence = S.end_silence;
+    c.duck = S.duck != 0;
     c.subtitles = S.subtitles != 0;
     c.show_only_talking = S.show_only_talking != 0;
     c.full_access = S.full_access != 0;

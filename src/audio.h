@@ -32,6 +32,15 @@ void speaker_set_device(const char *name);
 int speaker_list_devices(char ***names_out);
 
 float frame_energy(const int16_t *pcm, size_t n);
+
+/* Mientras te escucha, baja el volumen de Windows (un video o música de la
+   PC ya no tapan tu voz) y luego lo regresa, salvo que tú le hayas movido.
+   Necesita COM iniciado en ese hilo. Sin salida de audio, no hace nada. */
+typedef struct {
+    float before, ducked; /* before < 0: no se tocó */
+} DuckState;
+DuckState system_duck(float factor);
+void system_unduck(DuckState d);
 float volume_to_gain(int volume);
 
 #endif

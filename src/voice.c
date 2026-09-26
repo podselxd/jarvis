@@ -23,13 +23,10 @@
 #include "sounds.h"
 #include "tts.h"
 #include "util.h"
+#include "vad.h"
 #include "voice.h"
 #include "wakeword.h"
 
-#define SILENCE_FRAMES_TO_STOP 22 /* ~1.75 s de silencio: tolera pausas naturales */
-#define MAX_COMMAND_FRAMES (20 * MIC_RATE / MIC_FRAME)
-#define LISTEN_TIMEOUT_FRAMES (5 * MIC_RATE / MIC_FRAME)
-#define PREROLL_FRAMES 4 /* 320 ms antes de que la voz supere el umbral: no se come el inicio */
 #define LOOKAHEAD_FRAMES 4 /* 320 ms después de "Hey Sokari" para ver si sigues hablando */
 /* 400 ms hasta el cuadro donde se detectó el nombre: el detector avisa hasta
    ~1/3 s después de que terminas de decir "Sokari", y para entonces la orden
@@ -66,6 +63,9 @@ static SRWLOCK g_preview_lock = SRWLOCK_INIT;
 static char *g_preview_voice;
 static WakeWord *g_ww;
 static int g_silence = 300;
+/* Qué es voz y qué es ruido: aprende el ruido de tu cuarto con todo lo que
+   oye mientras espera "Hey Sokari" (solo lo usa el hilo de voz). */
+static Listener *g_listener;
 static Conversation *g_conv;
 static Conversation *g_mesh_conv;
 static char *g_mic_name;
@@ -380,48 +380,31 @@ static void calibrate(void)
 
 /* seed: audio que ya se sabe que es el principio de la orden (lo que dijiste
    de corrido después de "Hey Sokari"); con él ya no se espera a que hables. */
+/* Tu orden: empieza cuando hablas, termina cuando te callas (aunque siga el
+   ruido de fondo) o a los 30 s, y regresa solo tu voz. Sin voz, NULL: no se
+   manda nada a transcribir. Mientras escucha, baja el volumen de la PC. */
 static int16_t *record_command(const int16_t *seed, int nseed, size_t *out_n)
 {
-    size_t cap = (size_t)MAX_COMMAND_FRAMES * MIC_FRAME;
-    int16_t *buf = xmalloc(sizeof(int16_t) * cap);
-    int16_t pre[PREROLL_FRAMES][MIC_FRAME];
-    int npre = 0, pre_start = 0;
-    size_t n = (size_t)nseed * MIC_FRAME;
-    if (nseed) memcpy(buf, seed, sizeof(int16_t) * n);
-    bool heard = nseed > 0;
-    int silence_run = 0, waited = 0;
+    Recording rec;
+    rec_begin(&rec, end_silence_frames((EndSilence)config_end_silence()));
+    rec_seed(&rec, seed, nseed);
+    DuckState duck = {-1, -1};
+    if (!g_sim_mode && config_duck()) duck = system_duck(0.3f);
     int16_t f[MIC_FRAME];
-    for (int i = nseed; i < MAX_COMMAND_FRAMES; i++) {
+    for (;;) {
         if (WaitForSingleObject(g_quit, 0) == WAIT_OBJECT_0 || !input_read(f, 2000)) break;
-        float e = frame_energy(f, MIC_FRAME);
-        float lvl = e / 3000.0f;
+        float lvl = frame_energy(f, MIC_FRAME) / 3000.0f;
         app_set_level(lvl > 1 ? 1 : lvl);
-        if (e > (float)g_silence) {
-            if (!heard) {
-                for (int k = 0; k < npre; k++) {
-                    memcpy(buf + n, pre[(pre_start + k) % PREROLL_FRAMES], sizeof(int16_t) * MIC_FRAME);
-                    n += MIC_FRAME;
-                }
-                heard = true;
-            }
-            silence_run = 0;
-        } else if (heard) {
-            silence_run++;
-        } else {
-            memcpy(pre[(pre_start + npre) % PREROLL_FRAMES], f, sizeof f);
-            if (npre < PREROLL_FRAMES) npre++;
-            else pre_start = (pre_start + 1) % PREROLL_FRAMES;
-            if (++waited >= LISTEN_TIMEOUT_FRAMES) break;
-            continue;
-        }
-        if (n + MIC_FRAME <= cap) {
-            memcpy(buf + n, f, sizeof f);
-            n += MIC_FRAME;
-        }
-        if (silence_run >= SILENCE_FRAMES_TO_STOP) break;
+        if (rec_feed(&rec, f, listener_feed(g_listener, f, (float)g_silence))) break;
     }
+    system_unduck(duck);
     app_set_level(0);
-    *out_n = n;
+    float voice_s = 0;
+    int16_t *buf = rec_take(&rec, out_n, &voice_s);
+    float heard_s = (float)rec.frames * MIC_FRAME / MIC_RATE;
+    if (!buf && rec.heard) log_msg("Oí %.1f s, pero casi nada era voz (ruido): no lo mando a transcribir.", heard_s);
+    else if (buf) log_msg("Te escuché %.1f s (voz: %.1f s; mando %.1f s).", heard_s, voice_s, (double)*out_n / MIC_RATE);
+    rec_free(&rec);
     return buf;
 }
 
@@ -430,7 +413,6 @@ static int16_t *record_command(const int16_t *seed, int nseed, size_t *out_n)
 static bool handle_turn(const int16_t *audio, size_t n)
 {
     if (n < (size_t)(MIC_RATE * 3 / 10)) return true;
-    log_msg("Grabé %.1f s de audio.", (double)n / MIC_RATE);
     app_set_state(JV_THINKING);
     app_status("Escuchando lo que dijiste…");
     GroqError err = {0};
@@ -476,7 +458,8 @@ static int continued_speech(const int16_t *history, int nhist, int16_t seed[][MI
     for (int i = 0; i < LOOKAHEAD_FRAMES; i++) {
         if (!input_read(seed[n], 1000)) break;
         /* El primero no cuenta: puede ser la cola de "Sokari" o el eco del cuarto. */
-        if (i > 0 && frame_energy(seed[n], MIC_FRAME) > (float)g_silence) loud++;
+        bool voice = listener_feed(g_listener, seed[n], (float)g_silence);
+        if (i > 0 && voice) loud++;
         n++;
     }
     return loud >= 2 ? n : 0;
@@ -500,7 +483,7 @@ static void conversation(const int16_t *history, int nhist)
         app_set_state(JV_LISTENING);
         size_t n;
         int16_t *audio = first && nseed ? record_command(seed[0], nseed, &n) : record_command(NULL, 0, &n);
-        bool cont = n >= (size_t)(MIC_RATE * 3 / 10) && handle_turn(audio, n);
+        bool cont = audio && n >= (size_t)(MIC_RATE * 3 / 10) && handle_turn(audio, n);
         free(audio);
         if (!cont || WaitForSingleObject(g_quit, 0) == WAIT_OBJECT_0) break;
     }
@@ -610,6 +593,7 @@ static DWORD WINAPI voice_main(LPVOID arg)
     state_unlock();
     config_free(&cfg);
 
+    g_listener = listener_create();
     log_msg("Calibrando nivel de silencio, no hace falta que digas nada...");
     calibrate();
 
@@ -656,6 +640,7 @@ static DWORD WINAPI voice_main(LPVOID arg)
             if (!triggered) continue;
         } else {
             last_data = GetTickCount64();
+            listener_feed(g_listener, f, (float)g_silence); /* aprende el ruido de tu cuarto */
             if (nhist == WAKE_HISTORY_FRAMES) {
                 memmove(hist[0], hist[1], sizeof hist[0] * (WAKE_HISTORY_FRAMES - 1));
                 nhist--;
@@ -687,6 +672,8 @@ static DWORD WINAPI voice_main(LPVOID arg)
     WaitForSingleObject(S.thread, 3000);
     if (!g_sim_mode) mic_stop();
     ww_destroy(ww);
+    listener_destroy(g_listener);
+    g_listener = NULL;
     CoUninitialize();
     return 0;
 }

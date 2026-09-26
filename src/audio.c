@@ -1,6 +1,8 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <mmsystem.h>
+#include <mmdeviceapi.h>
+#include <endpointvolume.h>
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -359,4 +361,53 @@ bool speaker_play(const int16_t *pcm, size_t samples, int rate, float gain, Play
     CloseHandle(ev);
     if (cb) cb(0, ctx);
     return !stopped;
+}
+
+/* ------------------------------------------- volumen de Windows (bajar) --- */
+
+static const GUID AU_CLSID_MMDeviceEnumerator = {0xBCDE0395, 0xE52F, 0x467C, {0x8E, 0x3D, 0xC4, 0x57, 0x92, 0x91, 0x69, 0x2E}};
+static const GUID AU_IID_IMMDeviceEnumerator = {0xA95664D2, 0x9614, 0x4F35, {0xA7, 0x46, 0xDE, 0x8D, 0xB6, 0x36, 0x17, 0xE6}};
+static const GUID AU_IID_IAudioEndpointVolume = {0x5CDF2C82, 0x841E, 0x4546, {0x97, 0x22, 0x0C, 0xF7, 0x40, 0x78, 0x22, 0x9A}};
+
+static IAudioEndpointVolume *default_volume(void)
+{
+    IMMDeviceEnumerator *en = NULL;
+    IMMDevice *dev = NULL;
+    IAudioEndpointVolume *vol = NULL;
+    if (SUCCEEDED(CoCreateInstance(&AU_CLSID_MMDeviceEnumerator, NULL, CLSCTX_ALL, &AU_IID_IMMDeviceEnumerator,
+                                   (void **)&en)) &&
+        SUCCEEDED(IMMDeviceEnumerator_GetDefaultAudioEndpoint(en, eRender, eMultimedia, &dev)))
+        IMMDevice_Activate(dev, &AU_IID_IAudioEndpointVolume, CLSCTX_ALL, NULL, (void **)&vol);
+    if (dev) IMMDevice_Release(dev);
+    if (en) IMMDeviceEnumerator_Release(en);
+    return vol;
+}
+
+DuckState system_duck(float factor)
+{
+    DuckState d = {-1, -1};
+    IAudioEndpointVolume *vol = default_volume();
+    if (!vol) return d;
+    float cur = 0;
+    BOOL muted = FALSE;
+    IAudioEndpointVolume_GetMute(vol, &muted);
+    if (!muted && SUCCEEDED(IAudioEndpointVolume_GetMasterVolumeLevelScalar(vol, &cur)) && cur > 0.05f &&
+        SUCCEEDED(IAudioEndpointVolume_SetMasterVolumeLevelScalar(vol, cur * factor, NULL))) {
+        d.before = cur;
+        IAudioEndpointVolume_GetMasterVolumeLevelScalar(vol, &d.ducked);
+    }
+    IAudioEndpointVolume_Release(vol);
+    return d;
+}
+
+void system_unduck(DuckState d)
+{
+    if (d.before < 0) return;
+    IAudioEndpointVolume *vol = default_volume();
+    if (!vol) return;
+    float now = 0;
+    /* Si mientras tanto le moviste al volumen, se queda como lo dejaste. */
+    if (SUCCEEDED(IAudioEndpointVolume_GetMasterVolumeLevelScalar(vol, &now)) && fabsf(now - d.ducked) < 0.02f)
+        IAudioEndpointVolume_SetMasterVolumeLevelScalar(vol, d.before, NULL);
+    IAudioEndpointVolume_Release(vol);
 }
