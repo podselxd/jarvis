@@ -57,6 +57,9 @@ static struct {
 static HANDLE g_thread;
 static HANDLE g_quit;
 static HANDLE g_trigger;
+/* Clic en la esfera: callarla. Se limpia al empezar cada turno para que un
+   clic viejo no corte la siguiente respuesta. */
+static HANDLE g_skip;
 static volatile LONG g_settings_dirty;
 static volatile LONG g_test_audio;
 static SRWLOCK g_preview_lock = SRWLOCK_INIT;
@@ -209,15 +212,19 @@ typedef struct {
 
 static bool input_read_nowait(int16_t *f);
 
-/* Mientras habla, solo lo calla "Hey Sokari" (o el atajo). Antes bastaba
-   cualquier ruido un poco más fuerte que el silencio del cuarto, y se cortaba
-   a media frase casi siempre. */
+/* Mientras habla, la callan "Hey Sokari", el atajo o un clic en la esfera.
+   Antes bastaba cualquier ruido un poco más fuerte que el silencio del
+   cuarto, y se cortaba a media frase casi siempre. */
 static bool play_cb(float level, void *ctx)
 {
     PlayCtx *pc = ctx;
     app_set_level(level);
     if (WaitForSingleObject(g_quit, 0) == WAIT_OBJECT_0) return false;
     if (!pc->allow_interrupt) return true;
+    if (WaitForSingleObject(g_skip, 0) == WAIT_OBJECT_0) {
+        log_msg("Callada con un clic en la esfera.");
+        return false;
+    }
     if (WaitForSingleObject(g_trigger, 0) == WAIT_OBJECT_0) {
         log_msg("Interrumpido con el atajo.");
         return false;
@@ -235,9 +242,16 @@ static bool play_cb(float level, void *ctx)
 
 static void input_flush(void);
 
-static void speak(const char *text, bool allow_interrupt)
+/* Todo lo que dice se puede saltar (también «Sokari en línea», la prueba de
+   audio y la muestra de voz). */
+static void speak(const char *text)
 {
+    const bool allow_interrupt = true;
     if (str_is_blank(text)) return;
+    if (app_get_state() == JV_THINKING && WaitForSingleObject(g_skip, 0) == WAIT_OBJECT_0) {
+        log_msg("No lo digo: le diste clic a la esfera mientras pensaba («%s»).", text);
+        return;
+    }
     if (!g_sim_mode) sound_activation_stop();
     if (g_ww) ww_reset(g_ww);
     log_msg("Sokari: %s", text);
@@ -416,6 +430,10 @@ static int16_t *record_command(const int16_t *seed, int nseed, size_t *out_n)
 static bool handle_turn(const int16_t *audio, size_t n)
 {
     if (n < (size_t)(MIC_RATE * 3 / 10)) return true;
+    /* Un clic o un Ctrl+Alt+J de mientras te escuchaba no cuentan: callar es
+       para lo que diga desde aquí. */
+    ResetEvent(g_skip);
+    ResetEvent(g_trigger);
     uint64_t t_quiet = GetTickCount64(); /* te acabas de callar */
     app_set_state(JV_THINKING);
     app_status("Escuchando lo que dijiste…");
@@ -425,8 +443,7 @@ static bool handle_turn(const int16_t *audio, size_t n)
     if (!text) {
         log_msg("Error transcribiendo: %s", err.detail ? err.detail : "?");
         speak(err.status == GROQ_AUTH_ERROR ? "Tu API key de Groq no es válida. Revísala en Configuración."
-                                            : "No pude transcribir el audio.",
-              true);
+                                            : "No pude transcribir el audio.");
         groq_error_free(&err);
         return true;
     }
@@ -447,7 +464,7 @@ static bool handle_turn(const int16_t *audio, size_t n)
     uint64_t t_reply = GetTickCount64();
     TurnStats ts = turn_stats_get();
     g_first_audio_at = 0;
-    if (r.reply) speak(r.reply, true);
+    if (r.reply) speak(r.reply);
     free(r.reply);
     /* Dónde se va el tiempo de cada respuesta, para saber qué arreglar. */
     uint64_t t_audio = g_first_audio_at ? g_first_audio_at : t_reply;
@@ -512,6 +529,7 @@ static void conversation(const int16_t *history, int nhist)
 
 static void announce_due_reminders(void)
 {
+    ResetEvent(g_skip);
     state_lock();
     DueReminder *due;
     int n = reminders_take_due(&due);
@@ -521,7 +539,7 @@ static void announce_due_reminders(void)
         char *msg = who ? str_printf("%s, te quería recordar: %s", who, due[i].texto)
                         : str_printf("Te quería recordar: %s", due[i].texto);
         app_notify("Recordatorio", due[i].texto);
-        speak(msg, true);
+        speak(msg);
         free(msg);
         free(who);
     }
@@ -616,7 +634,7 @@ static DWORD WINAPI voice_main(LPVOID arg)
     log_msg("Calibrando nivel de silencio, no hace falta que digas nada...");
     calibrate();
 
-    speak("Sokari en línea.", false);
+    speak("Sokari en línea.");
     app_set_state(JV_IDLE);
     log_msg(ww ? "Listo. Di \"Hey Sokari\" (o Ctrl+Alt+J) para hablarle." : "Listo. Ctrl+Alt+J para hablarle.");
 
@@ -629,7 +647,8 @@ static DWORD WINAPI voice_main(LPVOID arg)
         if (InterlockedExchange(&g_settings_dirty, 0)) apply_settings();
         if (InterlockedExchange(&g_test_audio, 0)) {
             sound_chime();
-            speak("Así me escuchas por esta salida de audio.", false);
+            ResetEvent(g_skip); /* un clic viejo no corta la prueba */
+            speak("Así me escuchas por esta salida de audio.");
             app_set_state(JV_IDLE);
             if (ww) ww_reset(ww);
             nhist = 0;
@@ -639,7 +658,8 @@ static DWORD WINAPI voice_main(LPVOID arg)
         if (preview) {
             AppConfig c = config_snapshot();
             set_speech_voice(preview);
-            speak("Hola, soy Sokari. Así sueno con esta voz.", false);
+            ResetEvent(g_skip);
+            speak("Hola, soy Sokari. Así sueno con esta voz.");
             set_speech_voice(c.voice);
             config_free(&c);
             free(preview);
@@ -714,6 +734,7 @@ bool voice_start(void)
 {
     g_quit = CreateEventW(NULL, TRUE, FALSE, NULL);
     g_trigger = CreateEventW(NULL, FALSE, FALSE, NULL);
+    g_skip = CreateEventW(NULL, FALSE, FALSE, NULL);
     agent_init();
     g_thread = CreateThread(NULL, 1 << 22, voice_main, NULL, 0, NULL);
     return g_thread != NULL;
@@ -731,6 +752,11 @@ void voice_stop(void)
 bool voice_wait(unsigned ms)
 {
     return g_thread && WaitForSingleObject(g_thread, ms) == WAIT_OBJECT_0;
+}
+
+void voice_skip(void)
+{
+    if (g_skip) SetEvent(g_skip);
 }
 
 void voice_trigger(void)

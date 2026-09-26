@@ -13,6 +13,9 @@ void voice_mesh_stop(void);
 bool voice_start(void);
 void voice_stop(void);
 void voice_trigger(void);
+/* Callarla (clic en la esfera): corta lo que está diciendo y, si todavía está
+   pensando, no dice la respuesta. Lo que ya hizo no se deshace. */
+void voice_skip(void);
 void voice_settings_changed(void);
 bool voice_wait(unsigned ms);
 bool voice_running(void);

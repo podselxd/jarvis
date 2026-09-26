@@ -26,7 +26,7 @@ Se actualiza solo. Revisa GitHub al arrancar y cada 6 horas, y solo instala la v
   
   Con tu voz todavía no está medido. Si no te oye, usa **Ctrl+Alt+J**; lo que lo arregla es reentrenarlo con grabaciones de tu voz. Subir la sensibilidad ayuda poco. Detalles en [Entrenar "Hey Sokari"](#entrenar-hey-sokari).
 - Después de cada respuesta te sigue escuchando unos segundos, sin que repitas "Hey Sokari".
-- Si dices **"Hey Sokari"** (o Ctrl+Alt+J) mientras está hablando, se calla y te escucha. Otros ruidos ya no lo interrumpen.
+- Para callarla mientras habla: di **"Hey Sokari"**, aprieta **Ctrl+Alt+J** o dale **un clic a la esfera**. Todo lo que dice se puede saltar, también las explicaciones largas. Si le das clic mientras piensa, no dice la respuesta (lo que ya hizo no se deshace). Con ella quieta, un clic no hace nada, y si arrastras la esfera flotante, no cuenta como clic. Otros ruidos no la interrumpen.
 - Para cerrar la conversación dile "adiós", "ya vete" o "eso es todo". También termina cuando Sokari se despide o si dejas de hablarle. Si configuraste una palabra de apagado y la dices, Sokari se cierra al instante.
 - Con **Aparecer solo cuando le hablas** (Configuración → Pantalla, prendida de fábrica), la esfera aparece en tu modo de pantalla al hablarle y se esconde al terminar. Al abrir Sokari se ve y se queda hasta tu primera conversación.
 
