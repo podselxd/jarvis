@@ -1575,7 +1575,7 @@ char *tool_gestionar_dispositivo(const cJSON *a)
         } else {
             HttpResponse resp = post_command(ip, comando, 90000);
             MeshProbe p = classify_response(&resp);
-            if (resp.status == 200) r = *resp.body ? xstrdup(resp.body) : xstrdup("Listo.");
+            if (resp.status == 200) r = str_printf("%s: %s", n, *resp.body ? resp.body : "Listo.");
             else if (resp.status == 202) r = str_printf("'%s' recibió la orden y la está haciendo.", n);
             else if (p == MESH_BUSY) r = str_printf("'%s' está ocupado ahorita; prueba en un momento.", n);
             else if (p == MESH_ERROR) r = str_printf("'%s' respondió con un error (%d).", n, resp.status);

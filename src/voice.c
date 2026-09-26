@@ -66,6 +66,8 @@ static int g_silence = 300;
 /* Qué es voz y qué es ruido: aprende el ruido de tu cuarto con todo lo que
    oye mientras espera "Hey Sokari" (solo lo usa el hilo de voz). */
 static Listener *g_listener;
+/* Cuándo empezó a sonar la primera frase de la última respuesta. */
+static uint64_t g_first_audio_at;
 static Conversation *g_conv;
 static Conversation *g_mesh_conv;
 static char *g_mic_name;
@@ -270,6 +272,7 @@ static void speak(const char *text, bool allow_interrupt)
         LeaveCriticalSection(&S.lock);
         if (!c) break;
         bool finished = true;
+        if (!g_first_audio_at) g_first_audio_at = GetTickCount64();
         if (!g_sim_mode) finished = speaker_play(c->pcm, c->n, TTS_RATE, volume_to_gain(config_volume()), play_cb, &ctx);
         free(c->pcm);
         free(c);
@@ -413,6 +416,7 @@ static int16_t *record_command(const int16_t *seed, int nseed, size_t *out_n)
 static bool handle_turn(const int16_t *audio, size_t n)
 {
     if (n < (size_t)(MIC_RATE * 3 / 10)) return true;
+    uint64_t t_quiet = GetTickCount64(); /* te acabas de callar */
     app_set_state(JV_THINKING);
     app_status("Escuchando lo que dijiste…");
     GroqError err = {0};
@@ -433,13 +437,28 @@ static bool handle_turn(const int16_t *audio, size_t n)
     }
     log_msg("Tú: %s", text);
     app_subtitle(true, text);
+    uint64_t t_text = GetTickCount64();
 
+    turn_stats_reset();
     state_lock();
     TurnResult r = agent_process(g_conv, text);
     state_unlock();
     free(text);
+    uint64_t t_reply = GetTickCount64();
+    TurnStats ts = turn_stats_get();
+    g_first_audio_at = 0;
     if (r.reply) speak(r.reply, true);
     free(r.reply);
+    /* Dónde se va el tiempo de cada respuesta, para saber qué arreglar. */
+    uint64_t t_audio = g_first_audio_at ? g_first_audio_at : t_reply;
+    if (ts.calls)
+        log_msg("Tiempos: voz a texto %.1f s · pensar %.1f s (%d llamada%s a la IA, %d tokens) · empezar a hablar %.1f s · "
+                "total %.1f s desde que te callaste.",
+                (double)(t_text - t_quiet) / 1000, (double)(t_reply - t_text) / 1000, ts.calls, ts.calls == 1 ? "" : "s",
+                ts.tokens_in + ts.tokens_out, (double)(t_audio - t_reply) / 1000, (double)(t_audio - t_quiet) / 1000);
+    else
+        log_msg("Tiempos: voz a texto %.1f s · sin IA · empezar a hablar %.1f s · total %.1f s desde que te callaste.",
+                (double)(t_text - t_quiet) / 1000, (double)(t_audio - t_reply) / 1000, (double)(t_audio - t_quiet) / 1000);
     if (r.shutdown) {
         app_request_quit();
         return false;
