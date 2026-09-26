@@ -4,7 +4,7 @@
 #   Fedora: sudo dnf install gcc make pkgconf-pkg-config libcurl-devel pulseaudio-libs-devel
 
 CC ?= gcc
-PKGS := libcurl libpulse libpulse-simple
+PKGS := libcurl libpulse libpulse-simple gio-2.0 gio-unix-2.0
 CFLAGS := -std=gnu11 -O2 -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -D_GNU_SOURCE \
           -Isrc -Isrc/linux/include -MMD -MP $(shell pkg-config --cflags $(PKGS))
 LIBS := $(shell pkg-config --libs $(PKGS)) -lm -lpthread

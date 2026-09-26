@@ -153,26 +153,6 @@ static char *normalize_name(const char *s)
     return r ? r : xstrdup("");
 }
 
-static int edit_distance(const char *a, const char *b)
-{
-    size_t n = strlen(a), m = strlen(b);
-    if (n > 60 || m > 60) return 99;
-    int prev[61], cur[61];
-    for (size_t j = 0; j <= m; j++) prev[j] = (int)j;
-    for (size_t i = 1; i <= n; i++) {
-        cur[0] = (int)i;
-        for (size_t j = 1; j <= m; j++) {
-            int cost = a[i - 1] == b[j - 1] ? 0 : 1;
-            int v = prev[j] + 1;
-            if (cur[j - 1] + 1 < v) v = cur[j - 1] + 1;
-            if (prev[j - 1] + cost < v) v = prev[j - 1] + cost;
-            cur[j] = v;
-        }
-        memcpy(prev, cur, sizeof(int) * (m + 1));
-    }
-    return prev[m];
-}
-
 typedef struct {
     wchar_t *parsing;
     char *display;
@@ -216,7 +196,7 @@ static int find_installed_apps(const char *query, AppMatch *best, AppMatch *simi
                 best->parsing = xwcsdup(parse);
                 best->score = score;
             }
-            int dist = edit_distance(nd, q);
+            int dist = name_edit_distance(nd, q);
             if (!score && dist <= 3 + (int)strlen(q) / 4) {
                 int slot = n_similar < max_similar ? n_similar++ : -1;
                 if (slot < 0) {

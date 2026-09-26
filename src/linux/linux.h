@@ -18,6 +18,12 @@ bool app_quit_requested(void);
 bool tts_pick_catalog_voice(const char *catalog_json, char **key, char **onnx_path, char **onnx_md5, long long *onnx_size,
                             char **json_path, char **json_md5, long long *json_size);
 
+/* audio_linux.c: el volumen de la salida predeterminada, en % (puede pasar
+   de 100 si alguien la subió de más) y el silencio. */
+bool system_volume_get(int *percent, bool *muted);
+bool system_volume_set(int percent);
+bool system_mute_set(bool mute);
+
 /* MD5 en hexadecimal (heap): el que publica el catálogo de voces de Piper. */
 char *tts_md5_hex(const void *data, size_t n);
 /* "es_MX-ald-medium" -> "Ald (México, Piper)" (heap). */

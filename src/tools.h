@@ -44,6 +44,9 @@ bool open_app_targets_file(const cJSON *a);
 bool looks_like_url(const char *s);
 /* "ms-settings:", "file:"…: un esquema que no es http(s) ni una unidad (C:). */
 bool has_other_scheme(const char *s);
+/* Cuántas letras hay que cambiar para pasar de un nombre a otro (99 si alguno
+   pasa de 60): para sugerir apps parecidas a la que no encontró. */
+int name_edit_distance(const char *a, const char *b);
 bool is_terminal_window_info(const wchar_t *cls, const wchar_t *exe);
 bool foreground_is_terminal(void);
 /* El nombre de la app de una ventana (un HWND) por su programa: "Chrome",
