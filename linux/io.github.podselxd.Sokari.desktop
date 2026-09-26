@@ -1,0 +1,17 @@
+[Desktop Entry]
+Type=Application
+Name=Sokari
+GenericName=Asistente de voz
+Comment=Le dices «Hey Sokari» y hace cosas en tu PC
+Exec=sokari
+Icon=io.github.podselxd.Sokari
+Terminal=false
+Categories=Utility;Accessibility;
+Keywords=asistente;voz;hey sokari;
+StartupNotify=true
+X-GNOME-UsesNotifications=true
+Actions=hablar;
+
+[Desktop Action hablar]
+Name=Hablarle ahora
+Exec=sokari --hablar

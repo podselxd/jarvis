@@ -41,6 +41,14 @@ void ui_post_quit(void);
 char *linux_self_command(void);
 bool linux_hotkey_ensure(void);
 
+/* update_linux.c: con qué se instala aquí ("deb", "rpm" o NULL), si la
+   versión remote ("v2.5.1") es más nueva que local, y si el paquete bajado es
+   el publicado: su tipo, su tamaño (<= 0: no se sabe) y su huella SHA-256 en
+   hexadecimal (NULL: no se instala). */
+const char *linux_package_kind(void);
+bool linux_version_newer(const char *remote, const char *local);
+bool linux_package_verify(const char *path, double size, const char *sha256, const char *kind, char **error);
+
 /* MD5 en hexadecimal (heap): el que publica el catálogo de voces de Piper. */
 char *tts_md5_hex(const void *data, size_t n);
 /* "es_MX-ald-medium" -> "Ald (México, Piper)" (heap). */

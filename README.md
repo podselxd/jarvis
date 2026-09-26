@@ -1,6 +1,6 @@
 # Sokari
 
-Asistente de voz personal para Windows. Le dices **"Hey Sokari"** y te contesta con voz. Puede abrir apps, buscar en internet, controlar tu música y tus ventanas, manejar archivos, recordarte cosas y hablar con tus otras PCs.
+Asistente de voz personal para Windows (y, en beta, para Linux). Le dices **"Hey Sokari"** y te contesta con voz. Puede abrir apps, buscar en internet, controlar tu música y tus ventanas, manejar archivos, recordarte cosas y hablar con tus otras PCs.
 
 Es **un solo `Sokari.exe`** de unos 3 MB, escrito en C. No necesita Python ni instaladores, y no usa archivos `.bat` ni DLLs extra.
 
@@ -13,6 +13,23 @@ Es **un solo `Sokari.exe`** de unos 3 MB, escrito en C. No necesita Python ni in
 Cuando lo abres a mano después de la primera vez, sale la **ventana de Inicio** (abajo). Si lo pusiste a iniciar con Windows, al prender la PC arranca directo, sin esa ventana.
 
 Se actualiza solo. Revisa GitHub al arrancar y cada 6 horas, y solo instala la versión nueva cuando no le estás hablando. Antes de reemplazarse comprueba la huella SHA-256 del archivo.
+
+### En Linux (beta)
+
+Ubuntu 24.04 o más nuevo, o Fedora 44, con GNOME. **Es beta:** está probado en la CI (GNOME 46 y 50 sin pantalla), todavía no en una PC real. Lo que falle ahí se corrige en la siguiente versión.
+
+1. Baja `Sokari.deb` (Ubuntu) o `Sokari.rpm` (Fedora) de la [última versión](https://github.com/podselxd/sokari/releases/latest).
+2. Instálalo desde la carpeta donde quedó (pide tu contraseña):
+
+   ```bash
+   sudo apt install ./Sokari.deb    # Ubuntu
+   sudo dnf install ./Sokari.rpm    # Fedora
+   ```
+
+3. Cierra sesión y vuelve a entrar **una vez**. Así GNOME carga la extensión de Sokari, la que le deja ver tus ventanas y oprimir teclas. `sokari --revisar-gnome` te dice si ya funciona.
+4. Abre **Sokari** desde tus apps. La primera vez te pide tu API key de Groq, igual que en Windows.
+
+No se actualiza solo, porque instalar pide tu contraseña: te avisa cuando sale una versión nueva, y en su menú **Buscar actualización** (o `sokari --actualizar`) la baja, comprueba su huella SHA-256 y la instala. Para quitarlo: `sudo apt remove sokari` o `sudo dnf remove sokari` (tu configuración y tu memoria se quedan en `~/.config/sokari` y `~/.local/share/sokari`).
 
 ## Uso
 
@@ -163,9 +180,9 @@ mingw32-make OUT=build/Sokari.exe
 
 En cada push, GitHub Actions compila en un Windows real (una advertencia del compilador cuenta como error) y corre las pruebas, menos `test_groq`, que necesita una API key. El `Sokari.exe` de cada corrida queda en la pestaña **Actions** para probar una rama sin compilarla.
 
-### En Linux (en camino)
+### En Linux
 
-La versión de Linux (Ubuntu 24.04 o más nuevo, y Fedora 44) se está armando por partes. Tiene su ventana, la misma esfera y el mismo agente, herramientas y confirmaciones que en Windows; lo que todavía no está hecho para Linux lo dice en vez de fingir que lo hizo.
+La versión de Linux (Ubuntu 24.04 o más nuevo, y Fedora 44) tiene su ventana, la misma esfera y el mismo agente, herramientas y confirmaciones que en Windows. Para usarlo basta el paquete ([En Linux (beta)](#en-linux-beta)); esto es para compilarlo:
 
 ```bash
 # Ubuntu (Fedora: sudo dnf install gcc make pkgconf-pkg-config libcurl-devel pulseaudio-libs-devel glib2-devel
@@ -189,6 +206,7 @@ make -f Makefile.linux tests && sh tests/correr_linux.sh
 - La configuración va en `~/.config/sokari/config.env` (tu key: `GROQ_API_KEY=...`) y la memoria en `~/.local/share/sokari`; las dos solo las puede leer tu usuario.
 - El código de Linux está en `src/linux/`; `src/linux/include/windows.h` da los hilos, candados y eventos con la misma forma que en Windows, así el agente, la memoria, el detector de "Hey Sokari" y demás son el mismo código en los dos. Los programas externos (Piper, espeak-ng, paplay) se corren sin shell y con el texto por su entrada, nunca como argumento.
 - La CI también compila y prueba en Ubuntu 24.04 (con un servidor de sonido de prueba) y en Fedora 44, y prueba la extensión en un GNOME Shell de verdad sin pantalla (GNOME 46 de Ubuntu y GNOME 50 de Fedora) con dos ventanas de prueba: `make -f Makefile.linux prueba-gnome && sh tests/linux/gnome/probar_extension.sh`.
+- **Los paquetes:** `sh linux/empaquetar.sh deb` (en Ubuntu 24.04) arma `Sokari.deb` y `sh linux/empaquetar.sh rpm` (en Fedora 44, con `rpm-build`) arma `Sokari.rpm`. Instalan `/usr/bin/sokari` (de root, como lo pide la extensión), la extensión para todos los usuarios, el ícono y la entrada del menú de apps. La CI los arma, los instala y corre la prueba de GNOME contra el Sokari instalado; `sokari --revisar-gnome` es esa misma revisión.
 
 ### Publicar una versión
 
@@ -199,9 +217,9 @@ make -f Makefile.linux tests && sh tests/correr_linux.sh
 3. Actions:
    - compila y prueba el exe y la app;
    - revisa que la versión coincida con el código;
-   - crea el release con `Sokari.exe` y `Sokari.apk` (la app del celular, con la misma versión).
+   - crea el release con `Sokari.exe`, `Sokari.apk` (la app del celular, con la misma versión), `Sokari.deb` y `Sokari.rpm` (Linux, marcado como beta en las notas).
    
-   El APK necesita los secretos de su llave de firma (ver [`movil/README.md`](movil/README.md)). Sin ellos, el release sale solo con `Sokari.exe` y lo avisa en sus notas.
+   El APK necesita los secretos de su llave de firma (ver [`movil/README.md`](movil/README.md)). Sin ellos, el release sale sin `Sokari.apk` y lo avisa en sus notas.
 4. Si quedó como borrador, revísalo y publícalo. Hasta que lo publiques, nadie se actualiza.
 
 No crees el release a mano desde GitHub: te saltas las pruebas, y si el tag no coincide con la versión del código, el exe se vuelve a descargar cada 6 horas.

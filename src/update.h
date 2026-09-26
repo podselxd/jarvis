@@ -12,7 +12,8 @@ void update_start_background(void);
    mostrar (heap). Si hay versión nueva, la baja e instala en segundo plano. */
 char *update_check_now(void);
 
-/* De la lista "assets" de un release, el Sokari.exe (o NULL). */
+/* De la lista "assets" de un release, el Sokari.exe (en Linux, el Sokari.deb
+   o el Sokari.rpm, según el sistema), o NULL. */
 const cJSON *update_pick_asset(const cJSON *assets);
 
 #endif

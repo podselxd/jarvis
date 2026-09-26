@@ -111,10 +111,22 @@ jobs:
       - name: Correr las pruebas
         run: sh tests/correr_linux.sh
 
+      - name: Paquete .deb (Ubuntu 24.04 o más nuevo)
+        run: sh linux/empaquetar.sh deb
+
+      - name: Instalarlo y revisarlo
+        run: |
+          sudo apt-get install -y --no-install-recommends ./Sokari.deb
+          sokari --version
+          test "$(stat -c %U /usr/bin/sokari)" = root
+          test -f /usr/share/gnome-shell/extensions/sokari@podselxd.github.io/extension.js
+          test -f /usr/share/applications/io.github.podselxd.Sokari.desktop
+          test -f /usr/share/icons/hicolor/256x256/apps/io.github.podselxd.Sokari.png
+
       - uses: actions/upload-artifact@v4
         with:
-          name: Sokari-linux
-          path: build-linux/sokari
+          name: Sokari-deb
+          path: Sokari.deb
           if-no-files-found: error
 
   linux-fedora:
@@ -123,7 +135,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Dependencias
-        run: dnf install -y gcc make pkgconf-pkg-config libcurl-devel pulseaudio-libs-devel glib2-devel gtk3-devel libayatana-appindicator-gtk3-devel espeak-ng dbus-daemon git-core
+        run: dnf install -y gcc make pkgconf-pkg-config libcurl-devel pulseaudio-libs-devel glib2-devel gtk3-devel libayatana-appindicator-gtk3-devel espeak-ng dbus-daemon rpm-build git-core
 
       - uses: actions/checkout@v4
 
@@ -135,6 +147,23 @@ jobs:
 
       - name: Correr las pruebas
         run: sh tests/correr_linux.sh
+
+      - name: Paquete .rpm (Fedora 44)
+        run: sh linux/empaquetar.sh rpm
+
+      - name: Instalarlo y revisarlo
+        run: |
+          dnf install -y ./Sokari.rpm
+          sokari --version
+          test "$(stat -c %U /usr/bin/sokari)" = root
+          test -f /usr/share/gnome-shell/extensions/sokari@podselxd.github.io/extension.js
+          test -f /usr/share/applications/io.github.podselxd.Sokari.desktop
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Sokari-rpm
+          path: Sokari.rpm
+          if-no-files-found: error
 
   # La extensión de GNOME de verdad: GNOME Shell sin pantalla, con dos
   # ventanas de prueba, y las herramientas de Sokari contra él. GNOME 46 es el
@@ -152,11 +181,16 @@ jobs:
             libpulse-dev libglib2.0-dev libgtk-3-dev libayatana-appindicator3-dev gnome-shell gjs dbus-daemon dbus-x11 \
             libglib2.0-bin
 
-      - name: Compilar Sokari y la prueba
-        run: make -f Makefile.linux -j4 all prueba-gnome
+      - name: Compilar Sokari, su paquete y la prueba
+        run: |
+          make -f Makefile.linux -j4 all prueba-gnome
+          sh linux/empaquetar.sh deb
+          sudo apt-get install -y --no-install-recommends ./Sokari.deb
 
+      # Con el Sokari instalado: la extensión le tiene que hacer caso sin
+      # ninguna excepción de prueba (es de root y nadie más lo puede cambiar).
       - name: Probar la extensión en GNOME 46
-        run: sh tests/linux/gnome/probar_extension.sh
+        run: SOKARI_BIN=/usr/bin/sokari sh tests/linux/gnome/probar_extension.sh
 
   gnome-50-fedora:
     runs-on: ubuntu-24.04
@@ -166,12 +200,15 @@ jobs:
       - name: Dependencias (y GNOME Shell)
         run: |
           dnf install -y gcc make pkgconf-pkg-config libcurl-devel pulseaudio-libs-devel glib2-devel gtk3-devel \
-            libayatana-appindicator-gtk3-devel gnome-shell gjs dbus-daemon dbus-tools mesa-dri-drivers git-core
+            libayatana-appindicator-gtk3-devel gnome-shell gjs dbus-daemon dbus-tools mesa-dri-drivers rpm-build git-core
 
       - uses: actions/checkout@v4
 
-      - name: Compilar Sokari y la prueba
-        run: make -f Makefile.linux -j4 all prueba-gnome
+      - name: Compilar Sokari, su paquete y la prueba
+        run: |
+          make -f Makefile.linux -j4 all prueba-gnome
+          sh linux/empaquetar.sh rpm
+          dnf install -y ./Sokari.rpm
 
       - name: Probar la extensión en GNOME 50
-        run: sh tests/linux/gnome/probar_extension.sh
+        run: SOKARI_BIN=/usr/bin/sokari sh tests/linux/gnome/probar_extension.sh
