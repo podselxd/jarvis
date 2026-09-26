@@ -25,7 +25,8 @@ static const char *kind_name(IntentKind k)
 {
     static const char *const N[] = {"play", "pausa", "siguiente", "anterior", "sube", "baja", "volumen",
                                     "mute", "minimiza", "minimiza_todo", "maximiza", "pantalla_completa",
-                                    "cierra_pestana", "cierra_ventana", "explorador", "carpeta", "app", "gracias"};
+                                    "cierra_pestana", "cierra_ventana", "explorador", "carpeta", "app", "gracias",
+                                    "teclas"};
     return N[k];
 }
 
@@ -43,6 +44,8 @@ static void understood(const char *text, char *out, size_t cap)
         size_t len = strlen(out);
         snprintf(out + len, cap - len, "%s%s%s%s", i ? "+" : "", kind_name(l.items[i].kind),
                  *l.items[i].arg ? ":" : "", l.items[i].arg);
+        len = strlen(out);
+        if (l.items[i].times > 1) snprintf(out + len, cap - len, " x%d", l.items[i].times);
     }
 }
 
@@ -162,12 +165,48 @@ static void test_youtube(void)
     check(!youtube_first_video_id("<html>Antes de ir a YouTube…</html>", id), "sin resultados (aviso de cookies): nada");
 }
 
+static void test_teclas(void)
+{
+    printf("-- teclas y atajos: al momento, sin el modelo --\n");
+    expect("Oprime Windows.", "teclas:windows");
+    expect("Dale enter.", "teclas:enter");
+    expect("Oye Sokari, presiona escape por favor", "teclas:escape");
+    expect("Control zeta.", "teclas:control zeta");
+    expect("control Z", "teclas:control z");
+    expect("Alt tab", "teclas:alt tab");
+    expect("dale al enter", "teclas:al enter");
+    expect("oprime la tecla windows", "teclas:la tecla windows");
+    expect("Presiona F5.", "teclas:f5");
+    expect("Dale enter tres veces.", "teclas:enter x3");
+    expect("oprime flecha abajo 5 veces porfa", "teclas:flecha abajo x5");
+    expect("Presiona control shift T", "teclas:control shift t");
+    expect("Pícale a la barra espaciadora", "teclas:a la barra espaciadora");
+    printf("-- lo que parece tecla pero no lo es (o se confirma) --\n");
+    expect("púchale play", "play");
+    expect("Dale play.", "play");
+    expect("dale siguiente", "siguiente");
+    expect("oprime suprimir", "-");       /* borrar: siempre con un sí, por el modelo */
+    expect("presiona shift supr", "-");
+    expect("control de", "-");            /* Ctrl+D también borra en el Explorador */
+    expect("no oprimas enter", "-");
+    expect("no, dale enter", "-");
+    expect("enter", "-");                 /* sin verbo, solo combinaciones */
+    expect("abajo", "-");
+    expect("control banana", "-");
+    expect("oprime control", "-");        /* Ctrl sola no hace nada */
+    expect("¿Qué hace control zeta?", "-");
+    expect("dale enter mil veces", "-");
+    expect("abre una pestaña nueva", "-"); /* no es una app que se llame «nueva» */
+    expect("abre una ventana nueva de chrome", "app:chrome");
+}
+
 int wmain(void)
 {
     SetConsoleOutputCP(CP_UTF8);
     test_del_log();
     test_nombre();
     test_youtube();
+    test_teclas();
     printf("%d/%d pruebas %s\n", g_total - g_fail, g_total, g_fail ? "— HAY FALLAS" : "ok");
     return g_fail ? 1 : 0;
 }

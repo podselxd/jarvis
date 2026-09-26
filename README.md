@@ -86,7 +86,7 @@ Entiende de qué PC hablas aunque no digas su nombre exacto: "Chloe" es "cloe", 
 
 ## Qué puede hacer
 
-- **Comandos al instante, sin IA:** "ponle play", "pausa", "la siguiente", "sube el volumen", "volumen al 30", "minimiza la pestaña", "maximízala", "cierra la pestaña", "abre archivos", "abre mis descargas", "abre Opera" y "gracias" se hacen en tu PC, aunque vengan con saludo ("¿cómo andas? oye, ponle play"). Son inmediatos, no gastan cupo de Groq y no dependen de que el modelo entienda. Lo que trae algo más ("pon la canción de AC/DC") va al modelo.
+- **Comandos al instante, sin IA:** "ponle play", "pausa", "la siguiente", "sube el volumen", "volumen al 30", "minimiza la pestaña", "maximízala", "cierra la pestaña", "abre archivos", "abre mis descargas", "abre Opera", "oprime Windows", "dale enter", "presiona escape tres veces", "control zeta" y "gracias" se hacen en tu PC, aunque vengan con saludo ("¿cómo andas? oye, ponle play"). Son inmediatos, no gastan cupo de Groq y no dependen de que el modelo entienda. Lo que trae algo más ("pon la canción de AC/DC") va al modelo.
 - **Entiende español de México:** "púchale/pícale play", "súbele un buen", "súbele al máximo", "bájale tantito", "cámbiale a la que sigue", "ponme otra rola", "quítale el volumen"; "simón", "sale", "órale", "a huevo", "de una" cuentan como sí, y "nel", "ni madres", "ni de chiste" como no; "¿mande?" repite la pregunta; "ahí nos vidrios" o "ahí la vemos" se despiden. Todo eso se entiende en tu PC, sin gastar cupo.
 - **Habla como mexa solo si le pides:** de fábrica contesta en español neutro. "Háblame como mexa" (o "como mexicano", "como mexica", "como chilango", "en mexicano", "ponte mexa") lo cambia y se queda así; "habla normal" o "ya no hables como mexicano" lo regresa.
 - **Empezar de cero:** "ignora todo lo anterior" u "olvida lo anterior" hace que la conversación de ahora se olvide, sin pasar por el modelo. "Borra la memoria de hoy" (o "de todo") borra de la memoria lo que han hablado; como es borrar, pide un "sí". Tus datos guardados no se tocan.
@@ -99,7 +99,10 @@ Entiende de qué PC hablas aunque no digas su nombre exacto: "Chloe" es "cloe", 
 - Controlar el volumen (también a un nivel exacto) y la música: pausa, siguiente y anterior.
 - Minimizar, maximizar o cerrar la ventana de enfrente (la tuya, nunca la de Sokari), mostrar el escritorio, cambiar de ventana, minimizar todo, bloquear la PC, poner un video en pantalla completa y cerrar la pestaña.
 - Ver qué ventanas tienes abiertas y traer una al frente.
-- Escribir texto donde está el cursor y darle Enter. No ve la pantalla: te dice en qué ventana escribió, pero no puede saber si se envió. Nunca escribe en terminales.
+- Escribir texto donde está el cursor y darle Enter. No ve la pantalla: te dice en qué app escribió, pero no puede saber si se envió. Nunca escribe en terminales ni «javascript:», y en el Explorador, el escritorio, «Ejecutar» o Inicio no le da Enter a lo que escribe (ahí Enter abre o ejecuta cosas); si eso quieres, dile "dale enter".
+- **Teclado y atajos en cualquier app:** oprime cualquier tecla o combinación dicha en español o en inglés ("control zeta", "alt tab", "Windows D", "F5" o "efe cinco", "flecha abajo tres veces", "Ctrl+Shift+Esc"), en la ventana de enfrente o en la que digas ("en Discord presiona control K"). Si no sabe el atajo, tiene un acordeón del navegador, YouTube, el Explorador, Discord, Spotify, Word y Windows. Te dice en qué app oprimió. **Supr, Shift+Supr y Ctrl+D cuentan como borrar** (en el Explorador borran lo seleccionado), así que siempre piden un "sí". No le da Enter a terminales, y si la ventana corre como administrador (el Administrador de tareas, por ejemplo) te dice que Windows no lo deja en vez de decir que ya lo hizo. Windows+L bloquea la PC; Ctrl+Alt+Supr solo lo puedes oprimir tú.
+- **Cambiar de pestaña:** "ve a la pestaña de YouTube" pasa con Ctrl+Tab hasta la que diga eso (hasta 30). Si no está, te deja donde estabas y te lo dice.
+- **Subir archivos a un chat:** "sube tarea.pdf a Discord" busca el archivo, lo copia como archivo (igual que Copiar en el Explorador), va a esa app (la abre si hace falta) y lo pega con Ctrl+V; con "y mándalo" le da Enter. No ve la pantalla: te dice dónde lo pegó. Nunca sube de rutas de red ni de las carpetas de Sokari, y no lo pega en el Explorador ni en terminales.
 - Leer y copiar al portapapeles.
 - Listar, leer, buscar y mover archivos, sin sobrescribir nada. Si borra algo, siempre va a la Papelera. No toca rutas de red ni las carpetas donde Sokari guarda su configuración y su memoria.
 - Ver CPU, RAM, disco y batería.
@@ -114,11 +117,14 @@ Entiende de qué PC hablas aunque no digas su nombre exacto: "Chloe" es "cloe", 
 - La detección de "Hey Sokari" corre en tu PC y no sale nada hasta que la oye. Después, tu voz va a Groq para pasarla a texto y el texto va al modelo de Groq.
 - La voz de Sokari se genera en tu PC con las voces de Windows. Las búsquedas van a DuckDuckGo, o a Bing si DuckDuckGo falla.
 - Lo que le pidas leer (un archivo, el portapapeles o el título de una ventana) viaja a Groq como parte de la conversación. Tenlo en cuenta si es algo delicado.
-- Sokari no puede ejecutar comandos libres ni hacer clic en cualquier parte: solo tiene un set cerrado de acciones. No abre programas ni scripts sueltos y nunca escribe en terminales.
-- **Acceso completo (menos borrar)** viene prendido: Sokari hace todo sin preguntarte (mover archivos, mandar mensajes, subir archivos, guardar datos, exportar a Obsidian) y solo pide un "sí" de voz antes de **borrar**. Lo apagas en Configuración → General, en Inicio, en el menú del ícono o diciéndole "pregúntame antes"; "tienes permiso para todo" lo vuelve a prender.
+- Sokari no ejecuta comandos libres ni hace clic en cualquier parte: solo tiene un set cerrado de acciones. No abre programas ni scripts sueltos y nunca escribe en terminales. Puede oprimir las teclas que le pidas, y como con teclas se puede hacer casi todo (hasta abrir «Ejecutar» y correr un comando):
+  - Si en la conversación hay algo de afuera (una página, un archivo, el portapapeles, otra PC), **cada tecla que quiera oprimir el modelo espera tu "sí"**, aunque tengas acceso completo. La pregunta dice qué teclas y, si es Windows+R, que abre «Ejecutar».
+  - En el Explorador, el escritorio, «Ejecutar», Inicio o una terminal, lo que escribe o pega nunca lleva Enter (ahí Enter abre o ejecuta cosas). Si tú dices "dale enter", sí.
+  - Cuando dice dónde escribió u oprimió, nombra la app (Chrome, Discord), nunca el título de la ventana: los títulos los pone cada página y podrían traer instrucciones para el modelo.
+- **Acceso completo (menos borrar)** viene prendido: Sokari hace todo sin preguntarte (mover archivos, mandar mensajes, subir archivos, guardar datos, exportar a Obsidian) y solo pide un "sí" de voz antes de **borrar** (Supr y Ctrl+D también cuentan) y antes de oprimir teclas si leyó algo de afuera. Lo apagas en Configuración → General, en Inicio, en el menú del ícono o diciéndole "pregúntame antes"; "tienes permiso para todo" lo vuelve a prender.
   - El riesgo: una página, un archivo, el portapapeles o el título de una pestaña pueden traer instrucciones escondidas para el modelo. Con acceso completo, las podría seguir sin avisarte.
   - Prenderlo cuando ya leyó algo de afuera pide tu "sí": una página no puede dárselo sola.
-- Con el acceso completo apagado, mientras algo de afuera siga en la conversación, Sokari te pide un "sí" de voz antes de enviar texto, abrir un archivo, mover o borrar, crear o ejecutar comandos propios y usar la red entre tus PCs. La pregunta la arma Sokari, no el modelo, así que escuchas lo que va a hacer de verdad.
+- Con el acceso completo apagado, mientras algo de afuera siga en la conversación, Sokari te pide un "sí" de voz antes de enviar texto, oprimir teclas, subir un archivo, abrir un archivo, mover o borrar, crear o ejecutar comandos propios y usar la red entre tus PCs. La pregunta la arma Sokari, no el modelo, así que escuchas lo que va a hacer de verdad.
   - Cuenta solo la conversación actual: al volver a decir "Hey Sokari", lo que leyó antes se borra.
   - "Sí a todo" hace que no vuelva a preguntar en esa conversación. "¿Qué?" repite la pregunta.
 - No lee páginas de tu red local (router, otras PCs, localhost), ni siquiera si una página pública redirige ahí.
@@ -191,7 +197,7 @@ Si editas `tools.json` o `system_prompt.txt`, el siguiente `mingw32-make` los me
 | `voice.c` | Ciclo de voz: escuchar, grabar, hablar e interrupciones |
 | `wakeword.c`, `nn_*.c` | Detector de "Hey Sokari" (red neuronal con AVX2 si tu CPU lo tiene) |
 | `groq.c`, `http.c` | Groq (Whisper y chat) con rotación de modelos y control de cupo |
-| `agent.c`, `tools*.c`, `calc.c` | Conversación y herramientas |
+| `agent.c`, `tools*.c`, `calc.c`, `keys.c` | Conversación y herramientas (`keys.c` entiende las teclas como las dices) |
 | `tts.c`, `audio.c`, `sounds.c` | Voces de Windows, micrófono, bocinas y tonos |
 | `sphere.c`, `ui_main.c` | Esfera animada, modos de pantalla y subtítulos |
 | `ui_settings.c`, `tray.c` | Ventana de Inicio y de configuración, e ícono de la bandeja |

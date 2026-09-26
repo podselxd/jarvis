@@ -48,7 +48,7 @@ wchar_t *known_folder_alias(const char *alias)
     return r;
 }
 
-static wchar_t *resolve_path(const char *ruta)
+wchar_t *resolve_path(const char *ruta)
 {
     wchar_t *k = known_folder_alias(ruta);
     if (k) return k;

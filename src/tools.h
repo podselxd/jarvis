@@ -41,6 +41,17 @@ char *focus_window_by_title(const char *needle, bool *ok);
 bool open_target_is_dangerous(const wchar_t *path);
 bool open_app_targets_file(const cJSON *a);
 bool is_terminal_window_info(const wchar_t *cls, const wchar_t *exe);
+bool foreground_is_terminal(void);
+/* El nombre de la app de una ventana (un HWND) por su programa: "Chrome",
+   "Discord", "el Explorador" (heap; NULL si no se sabe). Nunca su título: los
+   títulos los pone cada página y podrían traer instrucciones para el modelo. */
+char *window_app_name(void *hwnd);
+/* ¿Ahí Enter abre o ejecuta cosas? Terminales, el Explorador y el escritorio
+   (Enter abre lo seleccionado y su barra de direcciones corre comandos),
+   «Ejecutar», Inicio y la búsqueda, el Administrador de tareas. */
+bool window_runs_commands(void *hwnd);
+/* OpenClipboard con reintentos (otra app puede tenerlo abierto un momento). */
+bool open_clipboard(void);
 
 /* archivos */
 char *tool_list_files(const cJSON *a);
@@ -49,6 +60,8 @@ char *tool_buscar_archivo(const cJSON *a);
 char *tool_mover_archivo(const cJSON *a);
 char *tool_borrar_archivo(const cJSON *a);
 wchar_t *known_folder_alias(const char *alias);
+/* "descargas", una ruta con %USERPROFILE% o entre comillas… (heap). */
+wchar_t *resolve_path(const char *ruta);
 bool path_is_off_limits(const wchar_t *path);
 
 /* web */
@@ -67,6 +80,15 @@ char *tool_exportar_a_obsidian(const cJSON *a);
 char *tool_crear_recordatorio(const cJSON *a);
 char *tool_create_macro(const cJSON *a);
 char *tool_run_macro(const cJSON *a);
+
+/* teclado (tools_keys.c) */
+char *tool_presionar_teclas(const cJSON *a);
+char *tool_atajos_de_app(const cJSON *a);
+char *tool_ir_a_pestana(const cJSON *a);
+char *tool_subir_archivo(const cJSON *a);
+/* El archivo en el portapapeles como archivo, igual que "Copiar" en el
+   Explorador: pegado en un chat, se adjunta. */
+bool clipboard_set_file(const wchar_t *path);
 
 /* calculadora y malla */
 char *tool_calcular(const cJSON *a);
