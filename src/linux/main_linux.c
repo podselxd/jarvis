@@ -20,6 +20,7 @@
 #include "linux/linux.h"
 #include "log.h"
 #include "memory.h"
+#include "update.h"
 #include "mesh.h"
 #include "util.h"
 #include "voice.h"
@@ -35,6 +36,8 @@ static void usage(void)
            "  sokari --revisar-malla     revisa la red con tus otras PCs (Tailscale, firewall, cada PC)\n"
            "  sokari --detectar-pcs      registra tus otras PCs de Tailscale (con Windows o Linux)\n"
            "  sokari --permitir-firewall abre el puerto de la malla solo para tu red de Tailscale\n"
+           "  sokari --revisar-gnome     revisa que la extensión de GNOME te atienda (ventanas y teclas)\n"
+           "  sokari --actualizar        baja e instala la versión nueva, si hay (pide tu contraseña)\n"
            "  sokari --version           la versión\n\n"
            "La configuración está en ~/.config/sokari/config.env (tu API key de Groq va en\n"
            "GROQ_API_KEY=...). La memoria y tus datos, en ~/.local/share/sokari.\n",
@@ -149,6 +152,19 @@ static int detect_pcs(void)
     return n ? 0 : 1;
 }
 
+/* ¿La extensión de GNOME le hace caso a este Sokari? */
+static int check_gnome(void)
+{
+    GnomeWindow *w;
+    int n = 0;
+    GnomeStatus st = gnome_list_windows(&w, &n);
+    if (st == GN_OK) printf("La extensión de GNOME funciona: veo %d ventana%s tuya%s.\n", n, n == 1 ? "" : "s",
+                            n == 1 ? "" : "s");
+    else printf("%s\n", gnome_status_message(st));
+    gnome_windows_free(w, n);
+    return st == GN_OK ? 0 : 1;
+}
+
 int main(int argc, char **argv)
 {
     bool text = false, voice = false, gui = argc == 1;
@@ -165,7 +181,8 @@ int main(int argc, char **argv)
         } else if (!strcmp(argv[i], "--simular") && i + 1 < argc) {
             wav = argv[++i];
         } else if (!strcmp(argv[i], "--revisar-malla") || !strcmp(argv[i], "--detectar-pcs") ||
-                   !strcmp(argv[i], "--permitir-firewall")) {
+                   !strcmp(argv[i], "--permitir-firewall") || !strcmp(argv[i], "--revisar-gnome") ||
+                   !strcmp(argv[i], "--actualizar")) {
             mesh_cmd = argv[i];
         } else if (!strcmp(argv[i], "--version")) {
             printf("%s\n", SOKARI_VERSION);
@@ -200,6 +217,13 @@ int main(int argc, char **argv)
             free(r);
         } else if (!strcmp(mesh_cmd, "--detectar-pcs")) {
             rc = detect_pcs();
+        } else if (!strcmp(mesh_cmd, "--revisar-gnome")) {
+            rc = check_gnome();
+        } else if (!strcmp(mesh_cmd, "--actualizar")) {
+            char *r = update_check_now();
+            printf("%s\n", r);
+            rc = str_starts_with(r, "Listo") || str_starts_with(r, "Ya tienes") ? 0 : 1;
+            free(r);
         } else {
             bool ok = mesh_allow_firewall();
             printf(ok ? "Listo: la malla puede recibir órdenes de tu red de Tailscale.\n"

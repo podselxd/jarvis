@@ -35,7 +35,7 @@ LINUX_TESTS := test_comandos test_confirmacion test_escucha test_malla test_reso
 LINUX_ONLY_TESTS := $(patsubst tests/linux/%.c,%,$(wildcard tests/linux/*.c))
 TESTS := $(addprefix build-linux/tests/,$(LINUX_TESTS) $(LINUX_ONLY_TESTS))
 
-.PHONY: all clean tests prueba-gnome
+.PHONY: all clean tests prueba-gnome install
 
 all: $(OUT)
 
@@ -75,6 +75,20 @@ build-linux/tests/test_confirmacion: tests/test_confirmacion.c \
 		$(filter-out build-linux/obj/groq.o build-linux/obj/tools.o,$(LIB_OBJ))
 	@mkdir -p $(dir $@)
 	$(CC) $(TEST_CFLAGS) -o $@ $^ $(LIBS)
+
+# Lo que va en el paquete (.deb o .rpm): make -f Makefile.linux install DESTDIR=... PREFIX=/usr
+PREFIX ?= /usr/local
+DESTDIR ?=
+EXT := sokari@podselxd.github.io
+ICON_SIZES := 16 24 32 48 64 128 256
+install: $(OUT)
+	install -Dm755 $(OUT) $(DESTDIR)$(PREFIX)/bin/sokari
+	install -Dm644 linux/io.github.podselxd.Sokari.desktop $(DESTDIR)$(PREFIX)/share/applications/io.github.podselxd.Sokari.desktop
+	for s in $(ICON_SIZES); do \
+		install -Dm644 linux/iconos/$$s.png $(DESTDIR)$(PREFIX)/share/icons/hicolor/$${s}x$${s}/apps/io.github.podselxd.Sokari.png; \
+	done
+	install -Dm644 linux/extension/$(EXT)/metadata.json $(DESTDIR)$(PREFIX)/share/gnome-shell/extensions/$(EXT)/metadata.json
+	install -Dm644 linux/extension/$(EXT)/extension.js $(DESTDIR)$(PREFIX)/share/gnome-shell/extensions/$(EXT)/extension.js
 
 # La extensión de GNOME de verdad, con GNOME Shell sin pantalla (necesita
 # gnome-shell y GTK 3): make -f Makefile.linux prueba-gnome && sh tests/linux/gnome/probar_extension.sh

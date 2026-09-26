@@ -17,3 +17,6 @@ icono.ico
 
 # Caché de Python (herramientas/)
 __pycache__/
+# Los paquetes de Linux (sh linux/empaquetar.sh)
+Sokari.deb
+Sokari.rpm

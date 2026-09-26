@@ -64,7 +64,7 @@ Para que cada versión se instale encima de la anterior, el APK del release se f
 
 Se agregan en *Settings → Secrets and variables → Actions → New repository secret*.
 
-- **Si faltan**, el release sale solo con `Sokari.exe` y lo avisa en sus notas: nunca publica un APK que obligue a desinstalar. En las ramas, el CI prueba la firma con una llave temporal.
+- **Si faltan**, el release sale sin `Sokari.apk` y lo avisa en sus notas: nunca publica un APK que obligue a desinstalar. En las ramas, el CI prueba la firma con una llave temporal.
 - **Si pierdes la llave**, crea una nueva y cambia los dos secretos. La siguiente versión habrá que instalarla desinstalando la anterior una vez.
 
 Para crear una:

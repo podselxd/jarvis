@@ -28,6 +28,7 @@
 #include "resource.h"
 #include "resources.h"
 #include "sphere.h"
+#include "update.h"
 #include "util.h"
 #include "voice.h"
 
@@ -289,6 +290,7 @@ static void start_voice(bool first_run)
     if (U.voice_started) return;
     U.voice_started = voice_start();
     if (!U.voice_started) return;
+    update_start_background();
     if (first_run)
         app_notify("Sokari", res_has_wake_word() ? "Listo. Di «Hey Sokari» (o Ctrl+Alt+J) cuando quieras hablarle."
                                                  : "Listo. Háblame con Ctrl+Alt+J.");
@@ -627,6 +629,30 @@ static void act_quit(GSimpleAction *a, GVariant *p, gpointer u)
     g_application_quit(G_APPLICATION(U.app));
 }
 
+static void update_work(GTask *t, gpointer src, gpointer data, GCancellable *c)
+{
+    g_task_return_pointer(t, update_check_now(), free);
+}
+
+static void update_done(GObject *src, GAsyncResult *res, gpointer data)
+{
+    char *msg = g_task_propagate_pointer(G_TASK(res), NULL);
+    GtkWidget *m = gtk_message_dialog_new(GTK_WINDOW(U.win), GTK_DIALOG_DESTROY_WITH_PARENT, GTK_MESSAGE_INFO,
+                                          GTK_BUTTONS_OK, "%s", msg ? msg : "No pude revisar.");
+    g_signal_connect(m, "response", G_CALLBACK(gtk_widget_destroy), NULL);
+    gtk_widget_show(m);
+    free(msg);
+}
+
+static void act_update(GSimpleAction *a, GVariant *p, gpointer u)
+{
+    show_window();
+    app_notify("Sokari", "Busco si hay versión nueva…");
+    GTask *t = g_task_new(NULL, NULL, update_done, NULL);
+    g_task_run_in_thread(t, update_work);
+    g_object_unref(t);
+}
+
 static void act_mute(GSimpleAction *a, GVariant *p, gpointer u)
 {
     bool muted = !config_mic_muted();
@@ -641,6 +667,7 @@ static const GActionEntry ACTIONS[] = {
     {"mostrar", act_show, NULL, NULL, NULL, {0}},    {"hablar", act_talk, NULL, NULL, NULL, {0}},
     {"configuracion", act_settings, NULL, NULL, NULL, {0}}, {"malla", act_mesh, NULL, NULL, NULL, {0}},
     {"salir", act_quit, NULL, NULL, NULL, {0}},      {"silencio", act_mute, NULL, "false", NULL, {0}},
+    {"actualizar", act_update, NULL, NULL, NULL, {0}},
 };
 
 /* ------------------------------------------------------ el ícono de arriba --- */
@@ -799,6 +826,7 @@ static void build_window(void)
     g_menu_append(menu, "Micrófono en silencio", "app.silencio");
     g_menu_append(menu, "Configuración", "app.configuracion");
     g_menu_append(menu, "Tus PCs", "app.malla");
+    g_menu_append(menu, "Buscar actualización", "app.actualizar");
     g_menu_append(menu, "Salir", "app.salir");
     GtkWidget *mb = gtk_menu_button_new();
     gtk_menu_button_set_menu_model(GTK_MENU_BUTTON(mb), G_MENU_MODEL(menu));

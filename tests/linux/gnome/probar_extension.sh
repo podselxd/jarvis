@@ -23,7 +23,14 @@ export SOKARI_EXTENSION_ALLOW="$tests/"
 mkdir -p "$XDG_RUNTIME_DIR" "$HOME/.local/share/gnome-shell/extensions" "$HOME/.local/share/applications" \
     "$HOME/.config/glib-2.0/settings" "$T/bin"
 chmod 700 "$XDG_RUNTIME_DIR"
-cp -r "$root/linux/extension/sokari@podselxd.github.io" "$HOME/.local/share/gnome-shell/extensions/"
+# Con SOKARI_BIN=/usr/bin/sokari se prueba lo que instaló el paquete: ese
+# Sokari y la extensión que dejó en /usr/share. Si no, lo compilado aquí.
+export SOKARI_BIN="${SOKARI_BIN:-$root/build-linux/sokari}"
+case "$SOKARI_BIN" in
+/usr/*) [ -f /usr/share/gnome-shell/extensions/sokari@podselxd.github.io/extension.js ] ||
+    { echo "FALLA el paquete no instaló la extensión en /usr/share/gnome-shell/extensions"; rm -rf "${T:?}"; exit 1; } ;;
+*) cp -r "$root/linux/extension/sokari@podselxd.github.io" "$HOME/.local/share/gnome-shell/extensions/" ;;
+esac
 cat > "$HOME/.config/glib-2.0/settings/keyfile" <<EOF
 [org/gnome/shell]
 enabled-extensions=['sokari@podselxd.github.io']
@@ -42,8 +49,7 @@ app() { # id nombre archivo categorías
 app io.github.podselxd.SokariPrueba "Prueba de Sokari" prueba "Utility;"
 # Y la de Sokari mismo, para que GNOME sepa que su ventana es «Sokari».
 printf '[Desktop Entry]\nType=Application\nName=Sokari\nExec=%s\nCategories=Utility;\n' \
-    "$root/build-linux/sokari" > "$HOME/.local/share/applications/io.github.podselxd.Sokari.desktop"
-export SOKARI_BIN="$root/build-linux/sokari"
+    "$SOKARI_BIN" > "$HOME/.local/share/applications/io.github.podselxd.Sokari.desktop"
 app io.github.podselxd.SokariTerminal "Terminal de prueba" terminal "System;TerminalEmulator;"
 # Los títulos de las ventanas ("Inicio - Prueba de Sokari") salen de aquí.
 sed -i 's/"Prueba de Sokari" > /"Ventana de prueba" > /' "$T/bin/prueba"
@@ -73,8 +79,14 @@ if [ $ready = 1 ]; then
     # Alguien que no es Sokari (gdbus) no puede usarla.
     if gdbus call $D --method io.github.podselxd.SokariShell1.ListWindows 2>&1 | grep -q AccessDenied; then
         echo "ok    la extensión no atiende a otros programas (gdbus: AccessDenied)"
-        "$tests/test_gnome_real"
-        rc=$?
+        rc=0
+        case "$SOKARI_BIN" in
+        /usr/*)
+            # El instalado no está en la excepción de prueba: le hace caso por ser de root.
+            if out=$("$SOKARI_BIN" --revisar-gnome); then echo "ok    el Sokari instalado: $out"
+            else echo "FALLA el Sokari instalado: $out"; rc=1; fi ;;
+        esac
+        "$tests/test_gnome_real" || rc=1
     else
         echo "FALLA la extensión le contestó a gdbus, que no es Sokari"
     fi
