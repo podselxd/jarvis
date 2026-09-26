@@ -697,9 +697,13 @@ static void tray_init(void)
         return;
     }
     char *dir = icon_dir();
+    /* En Fedora 44 la librería marca esta forma como vieja (quiere su versión
+       sin GTK), pero es la que hay en Ubuntu 24.04 y funciona en las dos. */
+    G_GNUC_BEGIN_IGNORE_DEPRECATIONS
     U.tray = app_indicator_new(APP_ID, "sokari", APP_INDICATOR_CATEGORY_APPLICATION_STATUS);
     app_indicator_set_icon_theme_path(U.tray, dir);
     app_indicator_set_title(U.tray, "Sokari");
+    G_GNUC_END_IGNORE_DEPRECATIONS
     free(dir);
     GtkWidget *menu = gtk_menu_new();
     tray_item(menu, "Mostrar Sokari", "app.mostrar");
@@ -713,8 +717,10 @@ static void tray_init(void)
     tray_item(menu, "Salir", "app.salir");
     gtk_widget_insert_action_group(menu, "app", G_ACTION_GROUP(U.app));
     gtk_widget_show_all(menu);
+    G_GNUC_BEGIN_IGNORE_DEPRECATIONS
     app_indicator_set_menu(U.tray, GTK_MENU(menu));
     app_indicator_set_status(U.tray, APP_INDICATOR_STATUS_ACTIVE);
+    G_GNUC_END_IGNORE_DEPRECATIONS
 }
 
 /* ------------------------------------------------------------ la ventana --- */
