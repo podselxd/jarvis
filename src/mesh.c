@@ -1,20 +1,27 @@
 /* Malla entre tus propios dispositivos vía Tailscale: un servidor HTTP mínimo
    que escucha SOLO en la IP de Tailscale de esta PC (nunca en 0.0.0.0), y
-   exige el secreto de malla en cada pedido. */
+   exige el secreto de malla en cada pedido. Lo mismo en Windows y en Linux;
+   lo que cambia (dónde está Tailscale, el firewall) está en mesh_win.c y en
+   src/linux/mesh_linux.c. */
 #define WIN32_LEAN_AND_MEAN
 #include <winsock2.h>
 #include <ws2tcpip.h>
-#include <iphlpapi.h>
 #include <windows.h>
-#include <shellapi.h>
+#include <objbase.h>
+#ifdef _WIN32
 #include <winhttp.h>
-#include <oleauto.h>
-#include <netfw.h>
+#else
+#define ERROR_WINHTTP_CANNOT_CONNECT 12029 /* el que pone http_linux.c al no poder conectar */
+#endif
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+
+#ifndef MSG_NOSIGNAL
+#define MSG_NOSIGNAL 0
+#endif
 
 #include "config.h"
 #include "http.h"
@@ -22,10 +29,25 @@
 #include "log.h"
 #include "memory.h"
 #include "mesh.h"
+#include "mesh_os.h"
 #include "tools.h"
 #include "util.h"
 
-#define MESH_PORT 8765
+#ifdef _WIN32
+#define TAILSCALE_NAME "tailscale.exe"
+#define INSTALL_TAILSCALE "Instálalo (botón Instalar Tailscale) y entra con tu cuenta."
+#else
+#define TAILSCALE_NAME "tailscale"
+#define INSTALL_TAILSCALE "Instálalo (https://tailscale.com/download/linux) y entra con «sudo tailscale up»."
+#endif
+#define INSTALL_TAILSCALE_SHORT "instálalo y entra con tu cuenta."
+#ifdef _WIN32
+#define DETECT_PCS "dale a «Detectar mis PCs»"
+#define DIAGNOSE_MESH "Dale a «Revisar la malla»"
+#else
+#define DETECT_PCS "corre «sokari --detectar-pcs»"
+#define DIAGNOSE_MESH "Corre «sokari --revisar-malla»"
+#endif
 #define MAX_HEADER 16384
 #define MAX_BODY 65536
 
@@ -44,67 +66,6 @@ static char *g_listen_ip; /* donde escucha ahora, NULL si no escucha */
 static volatile LONG g_clients;
 /* Si una orden tarda más que esto, se contesta «recibido» y se sigue. */
 static volatile LONG g_ack_ms = 5000;
-/* -1 sin revisar, 0 el firewall no deja entrar las órdenes, 1 sí. */
-static volatile LONG g_fw_ok = -1;
-
-/* Dónde está tailscale.exe: donde lo deja su instalador o, si no, en el PATH
-   (nunca en la carpeta actual). NULL si no está. */
-static wchar_t *tailscale_exe(void)
-{
-    static const wchar_t *const CANDIDATES[] = {L"%ProgramFiles%\\Tailscale\\tailscale.exe",
-                                                L"%ProgramW6432%\\Tailscale\\tailscale.exe",
-                                                L"%ProgramFiles(x86)%\\Tailscale\\tailscale.exe"};
-    for (size_t i = 0; i < sizeof CANDIDATES / sizeof *CANDIDATES; i++) {
-        wchar_t *p = expand_env(CANDIDATES[i]);
-        if (file_exists(p)) return p;
-        free(p);
-    }
-    /* Lo pueden buscar a la vez el servidor y la ventana: nada estático. */
-    DWORD cap = 32768;
-    wchar_t *path = xmalloc(cap * sizeof *path), found[MAX_PATH];
-    DWORD n = GetEnvironmentVariableW(L"PATH", path, cap);
-    wchar_t *r = n && n < cap && SearchPathW(path, L"tailscale.exe", NULL, MAX_PATH, found, NULL) ? xwcsdup(found) : NULL;
-    free(path);
-    return r;
-}
-
-bool tailscale_installed(void)
-{
-    wchar_t *p = tailscale_exe();
-    bool ok = p != NULL;
-    free(p);
-    return ok;
-}
-
-/* La IP de Tailscale está en 100.64.0.0/10 (CGNAT); se busca en el adaptador
-   de Tailscale directamente, sin tener que ejecutar "tailscale ip". */
-char *mesh_tailscale_ip(void)
-{
-    ULONG size = 32 * 1024;
-    IP_ADAPTER_ADDRESSES *addrs = xmalloc(size);
-    ULONG rc = GetAdaptersAddresses(AF_INET, GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER,
-                                    NULL, addrs, &size);
-    if (rc == ERROR_BUFFER_OVERFLOW) {
-        addrs = xrealloc(addrs, size);
-        rc = GetAdaptersAddresses(AF_INET, GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER,
-                                  NULL, addrs, &size);
-    }
-    char *ip = NULL;
-    if (rc == NO_ERROR) {
-        for (IP_ADAPTER_ADDRESSES *a = addrs; a && !ip; a = a->Next) {
-            if (a->OperStatus != IfOperStatusUp) continue;
-            bool tail = (a->FriendlyName && wcsstr(a->FriendlyName, L"Tailscale")) ||
-                        (a->Description && wcsstr(a->Description, L"Tailscale"));
-            for (IP_ADAPTER_UNICAST_ADDRESS *u = a->FirstUnicastAddress; u && !ip; u = u->Next) {
-                struct sockaddr_in *sin = (struct sockaddr_in *)u->Address.lpSockaddr;
-                unsigned char *b = (unsigned char *)&sin->sin_addr;
-                if (mesh_is_tailscale_v4(b) && tail) ip = str_printf("%u.%u.%u.%u", b[0], b[1], b[2], b[3]);
-            }
-        }
-    }
-    free(addrs);
-    return ip;
-}
 
 /* Resuelve host y devuelve su IP de Tailscale ("100.x.y.z"), o NULL si no
    resuelve o si alguna de sus direcciones está fuera de 100.64.0.0/10. */
@@ -136,7 +97,8 @@ static char *resolve_tailscale(const char *host)
 static void send_all(SOCKET s, const char *data, size_t len)
 {
     while (len) {
-        int n = send(s, data, (int)(len > 65536 ? 65536 : len), 0);
+        /* MSG_NOSIGNAL: en Linux, escribirle a quien ya colgó no tira abajo a Sokari. */
+        int n = send(s, data, (int)(len > 65536 ? 65536 : len), MSG_NOSIGNAL);
         if (n <= 0) return;
         data += n;
         len -= (size_t)n;
@@ -281,7 +243,11 @@ void mesh_set_ack_ms(int ms)
 
 static void handle_client(SOCKET c, const char *origin, const char *ip)
 {
+#ifdef _WIN32
     DWORD timeout = 10000;
+#else
+    struct timeval timeout = {10, 0};
+#endif
     setsockopt(c, SOL_SOCKET, SO_RCVTIMEO, (const char *)&timeout, sizeof timeout);
     char *buf = xmalloc(MAX_HEADER + MAX_BODY + 1);
     size_t got = 0;
@@ -373,7 +339,7 @@ static DWORD WINAPI server_thread(LPVOID arg)
     SOCKET listen_socket = (SOCKET)(ULONG_PTR)arg;
     while (InterlockedCompareExchange(&g_running, 1, 1)) {
         struct sockaddr_in peer = {0};
-        int plen = sizeof peer;
+        socklen_t plen = sizeof peer;
         SOCKET c = accept(listen_socket, (struct sockaddr *)&peer, &plen);
         if (c == INVALID_SOCKET) {
             if (!InterlockedCompareExchange(&g_running, 1, 1)) break;
@@ -408,8 +374,15 @@ static bool listen_on(const char *ip)
     addr.sin_family = AF_INET;
     addr.sin_port = htons(MESH_PORT);
     inet_pton(AF_INET, ip, &addr.sin_addr);
+#ifdef _WIN32
     BOOL excl = TRUE;
     setsockopt(ls, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, (const char *)&excl, sizeof excl);
+#else
+    /* Que al volver a abrir Sokari no haya que esperar a que se suelten las
+       conexiones de antes; otro programa igual no puede usar el mismo puerto. */
+    int on = 1;
+    setsockopt(ls, SOL_SOCKET, SO_REUSEADDR, &on, sizeof on);
+#endif
     if (bind(ls, (struct sockaddr *)&addr, sizeof addr) != 0 || listen(ls, 8) != 0) {
         closesocket(ls);
         return false;
@@ -429,6 +402,9 @@ static void stop_listening(void)
 {
     if (g_listen == INVALID_SOCKET) return;
     InterlockedExchange(&g_running, 0);
+#ifndef _WIN32
+    shutdown(g_listen, SHUT_RDWR); /* en Linux, cerrarlo no despierta al accept() que espera */
+#endif
     closesocket(g_listen);
     g_listen = INVALID_SOCKET;
     if (g_thread) {
@@ -441,8 +417,6 @@ static void stop_listening(void)
     g_listen_ip = NULL;
     ReleaseSRWLockExclusive(&g_ip_lock);
 }
-
-static void check_firewall_on_listen(void);
 
 static DWORD WINAPI watch_thread(LPVOID arg)
 {
@@ -464,7 +438,7 @@ static DWORD WINAPI watch_thread(LPVOID arg)
                 warned = false;
                 if (!fw_checked) {
                     fw_checked = true;
-                    check_firewall_on_listen();
+                    mesh_firewall_on_listen();
                 }
             } else if (!warned) {
                 log_msg("No pude levantar el servidor de malla en %s:%d; lo vuelvo a intentar.", ip, MESH_PORT);
@@ -601,87 +575,6 @@ MeshProbe mesh_send_ip(const char *ip, const char *comando, int timeout_ms, char
 
 /* ------------------------------------------------ tailscale y firewall --- */
 
-/* Lee lo que haya en el tubo; hasta el final si el proceso ya terminó. */
-static void drain(HANDLE rd, StrBuf *sb, bool to_end)
-{
-    char buf[4097];
-    for (;;) {
-        DWORD avail = 0, got = 0;
-        if (!to_end && (!PeekNamedPipe(rd, NULL, 0, NULL, &avail, NULL) || !avail)) return;
-        DWORD want = to_end || avail > sizeof buf - 1 ? sizeof buf - 1 : avail;
-        if (sb->len > (1u << 22) || !ReadFile(rd, buf, want, &got, NULL) || !got) return;
-        buf[got] = 0;
-        sb_append(sb, buf);
-    }
-}
-
-/* Corre exe con esos argumentos, sin ventana, y devuelve lo que imprime
-   (heap; NULL si no arrancó). Lo que imprime como error va aparte en *err:
-   mezclado, cualquier advertencia de Tailscale rompía su JSON. Si tarda más
-   de timeout_ms, lo termina. */
-static char *run_capture(const wchar_t *exe, const wchar_t *args, int timeout_ms, DWORD *exit_code, char **err)
-{
-    if (exit_code) *exit_code = (DWORD)-1;
-    if (err) *err = NULL;
-    SECURITY_ATTRIBUTES sa = {sizeof sa, NULL, TRUE};
-    HANDLE out_rd = NULL, out_wr = NULL, err_rd = NULL, err_wr = NULL;
-    char *out = NULL;
-    if (CreatePipe(&out_rd, &out_wr, &sa, 1 << 16) && CreatePipe(&err_rd, &err_wr, &sa, 1 << 16)) {
-        SetHandleInformation(out_rd, HANDLE_FLAG_INHERIT, 0);
-        SetHandleInformation(err_rd, HANDLE_FLAG_INHERIT, 0);
-        size_t len = wcslen(exe) + wcslen(args) + 8;
-        wchar_t *cmd = xmalloc(len * sizeof *cmd);
-        swprintf(cmd, len, L"\"%ls\" %ls", exe, args);
-        STARTUPINFOW si = {sizeof si};
-        si.dwFlags = STARTF_USESTDHANDLES;
-        si.hStdOutput = out_wr;
-        si.hStdError = err_wr;
-        PROCESS_INFORMATION pi;
-        if (CreateProcessW(NULL, cmd, NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
-            CloseHandle(out_wr);
-            CloseHandle(err_wr);
-            out_wr = err_wr = NULL;
-            StrBuf so, se;
-            sb_init(&so);
-            sb_init(&se);
-            uint64_t end = GetTickCount64() + (uint64_t)timeout_ms;
-            bool done = false;
-            while (!done) {
-                done = WaitForSingleObject(pi.hProcess, 20) != WAIT_TIMEOUT;
-                if (!done && GetTickCount64() > end) {
-                    TerminateProcess(pi.hProcess, 1);
-                    WaitForSingleObject(pi.hProcess, 1000);
-                    done = true;
-                }
-                drain(out_rd, &so, done);
-            }
-            drain(err_rd, &se, true);
-            if (exit_code) GetExitCodeProcess(pi.hProcess, exit_code);
-            CloseHandle(pi.hThread);
-            CloseHandle(pi.hProcess);
-            out = so.data;
-            if (err) *err = se.data;
-            else sb_free(&se);
-        }
-        free(cmd);
-    }
-    if (out_wr) CloseHandle(out_wr);
-    if (err_wr) CloseHandle(err_wr);
-    if (out_rd) CloseHandle(out_rd);
-    if (err_rd) CloseHandle(err_rd);
-    return out;
-}
-
-static char *run_tailscale(const wchar_t *args, DWORD *exit_code, char **err)
-{
-    wchar_t *exe = tailscale_exe();
-    char *out = exe ? run_capture(exe, args, 8000, exit_code, err) : NULL;
-    if (!exe && exit_code) *exit_code = (DWORD)-1;
-    if (!exe && err) *err = NULL;
-    free(exe);
-    return out;
-}
-
 /* El JSON empieza en la primera llave: antes puede venir una advertencia
    ("Warning: client version ... != tailscaled server version ..."). */
 static const char *json_start(const char *s)
@@ -742,7 +635,8 @@ static char *my_account(void)
     uint64_t now = GetTickCount64();
     AcquireSRWLockExclusive(&g_account_lock);
     if (!g_account || now - g_account_at > 10 * 60 * 1000) {
-        char *out = run_tailscale(L"status --json", NULL, NULL);
+        static const char *const STATUS[] = {"status", "--json", NULL};
+        char *out = mesh_run_tailscale(STATUS, 8000, NULL, NULL);
         TailscaleStatus st;
         if (tailscale_parse_status(out, &st) && st.account) {
             free(g_account);
@@ -786,9 +680,8 @@ static bool peer_is_mine(const char *ip)
     char *me = my_account();
     bool mine = false;
     if (me && strchr(me, '@')) {
-        wchar_t args[64];
-        swprintf(args, 64, L"whois --json %hs", ip);
-        char *out = run_tailscale(args, NULL, NULL);
+        const char *args[] = {"whois", "--json", ip, NULL};
+        char *out = mesh_run_tailscale(args, 8000, NULL, NULL);
         char *owner = tailscale_parse_whois_account(out);
         mine = owner && !_stricmp(owner, me);
         free(owner);
@@ -838,9 +731,8 @@ bool tailscale_parse_shields_up(const char *out)
 
 static int tailscale_ping(const char *ip)
 {
-    wchar_t args[96];
-    swprintf(args, 96, L"ping --c=1 --timeout=4s --until-direct=false %hs", ip);
-    char *out = run_tailscale(args, NULL, NULL);
+    const char *args[] = {"ping", "--c=1", "--timeout=4s", "--until-direct=false", ip, NULL};
+    char *out = mesh_run_tailscale(args, 8000, NULL, NULL);
     int r = tailscale_parse_ping(out);
     free(out);
     return r;
@@ -865,9 +757,8 @@ static char *explain_no_answer(const char *ip, const char *name)
         sb_appendf(&sb, "(%s sí te mandó algo a las %02d:%02d, así que su salida funciona: lo que falla es su entrada.) ",
                    name, tm.tm_hour, tm.tm_min);
     }
-    wchar_t args[64];
-    swprintf(args, 64, L"whois --json %hs", ip);
-    char *who = run_tailscale(args, NULL, NULL);
+    const char *args[] = {"whois", "--json", ip, NULL};
+    char *who = mesh_run_tailscale(args, 8000, NULL, NULL);
     if (tailscale_parse_shields_up(who))
         sb_appendf(&sb, "En %s, Tailscale tiene apagado «Allow incoming connections»: actívalo en su ícono de Tailscale. ",
                    name);
@@ -915,7 +806,8 @@ int tailscale_parse_peers(const char *json, MeshDevice **out)
     {
         const char *os = cJSON_GetStringValue(cJSON_GetObjectItem(p, "OS"));
         const char *hn = cJSON_GetStringValue(cJSON_GetObjectItem(p, "HostName"));
-        if (!os || !hn || _stricmp(os, "windows")) continue; /* Sokari solo escucha en Windows */
+        /* Sokari escucha en Windows y en Linux (no en celulares ni tabletas). */
+        if (!os || !hn || (_stricmp(os, "windows") && _stricmp(os, "linux"))) continue;
         const cJSON *addr;
         const char *ip4 = NULL;
         cJSON_ArrayForEach(addr, cJSON_GetObjectItem(p, "TailscaleIPs"))
@@ -938,15 +830,15 @@ int tailscale_parse_peers(const char *json, MeshDevice **out)
 }
 
 /* Por qué Detectar no encontró ninguna PC, en palabras para el usuario. */
-static char *peers_problem(const char *out, DWORD code, const char *err)
+static char *peers_problem(const char *out, long code, const char *err)
 {
-    if (!tailscale_installed()) return xstrdup("No encontré Tailscale en esta PC: instálalo y entra con tu cuenta.");
+    if (!tailscale_installed()) return xstrdup("No encontré Tailscale en esta PC: " INSTALL_TAILSCALE_SHORT);
     TailscaleStatus st;
     char *r;
     if (!tailscale_parse_status(out, &st)) {
         char *line = err ? xstrndup(err, strcspn(err, "\r\n")) : xstrdup("");
-        r = *line ? str_printf("Tailscale no me contestó bien (código %lu: %s).", (unsigned long)code, line)
-                  : str_printf("Tailscale no me contestó bien (código %lu).", (unsigned long)code);
+        r = *line ? str_printf("Tailscale no me contestó bien (código %ld: %s).", code, line)
+                  : str_printf("Tailscale no me contestó bien (código %ld).", code);
         free(line);
         return r;
     }
@@ -958,8 +850,8 @@ static char *peers_problem(const char *out, DWORD code, const char *err)
                        "misma cuenta.",
                        st.account ? st.account : "sin nombre");
     else
-        r = str_printf("Tailscale ve %d dispositivo%s, pero ninguno con Windows. Dale a «Revisar la malla» para ver "
-                       "cuáles son.",
+        r = str_printf("Tailscale ve %d dispositivo%s, pero ninguno con Windows ni Linux. " DIAGNOSE_MESH
+                       " para ver cuáles son.",
                        st.peers, st.peers == 1 ? "" : "s");
     tailscale_status_free(&st);
     return r;
@@ -967,9 +859,10 @@ static char *peers_problem(const char *out, DWORD code, const char *err)
 
 int tailscale_windows_peers(MeshDevice **out, char **why)
 {
-    DWORD code;
+    long code;
     char *err;
-    char *json = run_tailscale(L"status --json", &code, &err);
+    static const char *const STATUS[] = {"status", "--json", NULL};
+    char *json = mesh_run_tailscale(STATUS, 8000, &code, &err);
     int n = tailscale_parse_peers(json, out);
     if (why) *why = n ? NULL : peers_problem(json, code, err);
     free(json);
@@ -977,214 +870,7 @@ int tailscale_windows_peers(MeshDevice **out, char **why)
     return n;
 }
 
-/* ------------------------------------------------------------ firewall --- */
-
-/* Lo que dice el firewall de Windows de Sokari.exe (por COM, sin permisos de
-   administrador y sin depender del idioma de Windows). */
-typedef struct {
-    bool known;     /* se pudo leer */
-    bool off;       /* el firewall de Windows está apagado */
-    bool allow;     /* hay una regla que deja entrar a Sokari.exe */
-    bool block;     /* hay una que lo bloquea (le gana a cualquier permiso) */
-    bool block_all; /* «Bloquear todas las conexiones entrantes» */
-} FwState;
-
-#define FW_PROTOCOL_ANY 256 /* NET_FW_IP_PROTOCOL_ANY, que el netfw.h de MinGW no trae */
-static const CLSID CLSID_FwPolicy2 = {0xE2B3C97F, 0x6AE1, 0x41AC, {0x81, 0x7A, 0xF6, 0xF9, 0x21, 0x66, 0xD7, 0xDD}};
-static const IID IID_FwPolicy2 = {0x98325047, 0xC671, 0x4174, {0x8D, 0x81, 0xDE, 0xFC, 0xD3, 0xF0, 0x31, 0x86}};
-static const IID IID_FwRule = {0xAF230D27, 0xBABA, 0x4E42, {0xAC, 0xED, 0xF5, 0x24, 0xF2, 0x2C, 0xFC, 0xE2}};
-
-static void long_path(const wchar_t *in, wchar_t out[MAX_PATH])
-{
-    wchar_t tmp[MAX_PATH];
-    if (!ExpandEnvironmentStringsW(in, tmp, MAX_PATH)) wcsncpy(tmp, in, MAX_PATH - 1), tmp[MAX_PATH - 1] = 0;
-    if (!GetLongPathNameW(tmp, out, MAX_PATH)) wcscpy(out, tmp);
-}
-
-static void check_rule(INetFwRule *r, const wchar_t *exe, FwState *st)
-{
-    VARIANT_BOOL enabled = VARIANT_FALSE;
-    NET_FW_RULE_DIRECTION dir = NET_FW_RULE_DIR_OUT;
-    BSTR app = NULL;
-    if (FAILED(INetFwRule_get_Enabled(r, &enabled)) || !enabled) return;
-    if (FAILED(INetFwRule_get_Direction(r, &dir)) || dir != NET_FW_RULE_DIR_IN) return;
-    if (FAILED(INetFwRule_get_ApplicationName(r, &app)) || !app) return;
-    wchar_t rule_exe[MAX_PATH];
-    long_path(app, rule_exe);
-    SysFreeString(app);
-    if (_wcsicmp(rule_exe, exe)) return;
-    NET_FW_ACTION action = NET_FW_ACTION_ALLOW;
-    long proto = FW_PROTOCOL_ANY;
-    BSTR ports = NULL;
-    INetFwRule_get_Action(r, &action);
-    INetFwRule_get_Protocol(r, &proto);
-    INetFwRule_get_LocalPorts(r, &ports);
-    bool tcp = proto == NET_FW_IP_PROTOCOL_TCP || proto == FW_PROTOCOL_ANY;
-    bool port = !ports || !*ports || !wcscmp(ports, L"*") || wcsstr(ports, L"8765");
-    SysFreeString(ports);
-    if (!tcp || !port) return;
-    if (action == NET_FW_ACTION_BLOCK) st->block = true;
-    else st->allow = true;
-}
-
-/* Recorre las reglas (unos cientos de milisegundos): no llamar en cada pedido. */
-static FwState firewall_state(void)
-{
-    FwState st = {0};
-    wchar_t raw[MAX_PATH], exe[MAX_PATH];
-    if (!GetModuleFileNameW(NULL, raw, MAX_PATH)) return st;
-    long_path(raw, exe);
-    INetFwPolicy2 *pol = NULL;
-    if (FAILED(CoCreateInstance(&CLSID_FwPolicy2, NULL, CLSCTX_INPROC_SERVER, &IID_FwPolicy2, (void **)&pol)))
-        return st;
-    long profiles = 0;
-    INetFwPolicy2_get_CurrentProfileTypes(pol, &profiles);
-    static const NET_FW_PROFILE_TYPE2 KINDS[] = {NET_FW_PROFILE2_DOMAIN, NET_FW_PROFILE2_PRIVATE, NET_FW_PROFILE2_PUBLIC};
-    bool any_on = false;
-    for (int i = 0; i < 3; i++) {
-        if (!(profiles & KINDS[i])) continue;
-        VARIANT_BOOL on = VARIANT_FALSE, block_all = VARIANT_FALSE;
-        INetFwPolicy2_get_FirewallEnabled(pol, KINDS[i], &on);
-        INetFwPolicy2_get_BlockAllInboundTraffic(pol, KINDS[i], &block_all);
-        if (on) any_on = true;
-        if (on && block_all) st.block_all = true;
-    }
-    st.off = !any_on;
-    INetFwRules *rules = NULL;
-    if (SUCCEEDED(INetFwPolicy2_get_Rules(pol, &rules))) {
-        IUnknown *unk = NULL;
-        IEnumVARIANT *en = NULL;
-        if (SUCCEEDED(INetFwRules_get__NewEnum(rules, &unk)) &&
-            SUCCEEDED(IUnknown_QueryInterface(unk, &IID_IEnumVARIANT, (void **)&en))) {
-            VARIANT v;
-            VariantInit(&v);
-            ULONG got = 0;
-            while (IEnumVARIANT_Next(en, 1, &v, &got) == S_OK && got) {
-                INetFwRule *r = NULL;
-                if (v.vt == VT_DISPATCH && v.pdispVal &&
-                    SUCCEEDED(IDispatch_QueryInterface(v.pdispVal, &IID_FwRule, (void **)&r))) {
-                    check_rule(r, exe, &st);
-                    INetFwRule_Release(r);
-                }
-                VariantClear(&v);
-            }
-            st.known = true;
-        }
-        if (en) IEnumVARIANT_Release(en);
-        if (unk) IUnknown_Release(unk);
-        INetFwRules_Release(rules);
-    }
-    INetFwPolicy2_Release(pol);
-    return st;
-}
-
-/* 1 si el firewall de Windows deja entrar las órdenes, 0 si no, -1 si no se sabe. */
-static int firewall_ok(const FwState *st)
-{
-    if (!st->known) return -1;
-    if (st->off) return 1;
-    return st->allow && !st->block && !st->block_all ? 1 : 0;
-}
-
-int mesh_firewall_ok(void)
-{
-    return (int)InterlockedCompareExchange(&g_fw_ok, 0, 0);
-}
-
-int mesh_firewall_check(void)
-{
-    FwState st = firewall_state();
-    int ok = firewall_ok(&st);
-    InterlockedExchange(&g_fw_ok, ok);
-    return ok;
-}
-
-/* Al empezar a escuchar: si el firewall no deja entrar las órdenes, pide
-   permiso de administrador UNA sola vez por exe (si dices que no, no vuelve
-   a insistir; el botón «Permitir en el firewall» sigue ahí). */
-static void check_firewall_on_listen(void)
-{
-    FwState st = firewall_state();
-    int ok = firewall_ok(&st);
-    InterlockedExchange(&g_fw_ok, ok);
-    if (ok != 0 || st.block_all) return; /* bloquear todo lo quita el usuario en Windows, no un permiso */
-    wchar_t exe[MAX_PATH];
-    if (!GetModuleFileNameW(NULL, exe, MAX_PATH)) return;
-    char *exe8 = wide_to_utf8(exe), *asked = config_fw_asked();
-    if (_stricmp(exe8, asked)) {
-        config_set_fw_asked(exe8);
-        log_msg(st.block ? "Firewall: Windows tiene una regla que bloquea a Sokari; pido permiso (una sola vez) para quitarla."
-                         : "Firewall: todavía no deja entrar las órdenes de tus otras PCs; pido permiso (una sola vez).");
-        if (mesh_allow_firewall()) InterlockedExchange(&g_fw_ok, 1);
-    } else {
-        log_msg("Firewall: sigue sin dejar entrar las órdenes (ya pedí permiso una vez; está el botón «Permitir en el "
-                "firewall»).");
-    }
-    free(exe8);
-    free(asked);
-}
-
-/* Abre el puerto de la malla en el firewall de Windows, solo para tu red de
-   Tailscale. Antes borra las reglas de Sokari.exe que Windows haya creado
-   (si alguna vez le diste "Cancelar" a su aviso, creó una que bloquea, y
-   un bloqueo le gana a cualquier permiso). Pide permiso de administrador. */
-bool mesh_allow_firewall(void)
-{
-    wchar_t exe[MAX_PATH];
-    if (!GetModuleFileNameW(NULL, exe, MAX_PATH)) return false;
-    wchar_t params[2 * MAX_PATH + 400];
-    swprintf(params, sizeof params / sizeof *params,
-             L"/c netsh advfirewall firewall delete rule name=all program=\"%ls\" >nul 2>&1 & "
-             L"netsh advfirewall firewall add rule name=\"Sokari (malla)\" dir=in action=allow program=\"%ls\" "
-             L"protocol=TCP localport=%d remoteip=100.64.0.0/10 profile=any enable=yes",
-             exe, exe, MESH_PORT);
-    SHELLEXECUTEINFOW sei = {sizeof sei};
-    sei.fMask = SEE_MASK_NOCLOSEPROCESS;
-    sei.lpVerb = L"runas";
-    sei.lpFile = L"cmd.exe";
-    sei.lpParameters = params;
-    sei.nShow = SW_HIDE;
-    if (!ShellExecuteExW(&sei) || !sei.hProcess) return false; /* también si dijiste que no al permiso */
-    DWORD code = 1;
-    WaitForSingleObject(sei.hProcess, 30000);
-    GetExitCodeProcess(sei.hProcess, &code);
-    CloseHandle(sei.hProcess);
-    log_msg(code == 0 ? "Firewall: la malla quedó permitida para tu red de Tailscale." : "Firewall: netsh falló (%lu).",
-            (unsigned long)code);
-    if (code == 0) InterlockedExchange(&g_fw_ok, 1);
-    return code == 0;
-}
-
 /* ------------------------------------------------------ revisar malla --- */
-
-/* Los firewalls de antivirus (McAfee, Norton…) que Windows conoce, separados
-   por comas; "" si no hay ninguno, NULL si no se pudo preguntar. */
-static char *other_firewalls(void)
-{
-    wchar_t *ps = expand_env(L"%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe");
-    DWORD code = (DWORD)-1;
-    char *out = run_capture(ps,
-                            L"-NoProfile -NonInteractive -Command \"Get-CimInstance -Namespace root/SecurityCenter2 "
-                            L"-ClassName FirewallProduct | ForEach-Object { $_.displayName }\"",
-                            10000, &code, NULL);
-    free(ps);
-    if (!out || code != 0) {
-        free(out);
-        return NULL;
-    }
-    StrBuf sb;
-    sb_init(&sb);
-    for (char *line = strtok(out, "\r\n"); line; line = strtok(NULL, "\r\n")) {
-        char *t = str_trim(line);
-        char *low = str_lower(t);
-        /* El de Windows no cuenta: ese ya se revisó arriba. */
-        if (*t && !strstr(low, "windows") && !strstr(low, "microsoft")) sb_appendf(&sb, "%s%s", sb.len ? ", " : "", t);
-        free(low);
-        free(t);
-    }
-    free(out);
-    return sb.data ? sb.data : xstrdup("");
-}
 
 /* Lo que ve tu red de Tailscale: "laptop (windows, en línea), pixel (android,
    desconectado)". Devuelve cuántos son. */
@@ -1212,25 +898,23 @@ char *mesh_diagnose(void)
     sb_init(&r);
     sb_appendf(&r, "Revisión de la malla (Sokari %s)\n\n", SOKARI_VERSION);
 
-    wchar_t *exe = tailscale_exe();
-    char *exe8 = exe ? wide_to_utf8(exe) : NULL;
+    char *exe8 = mesh_tailscale_path();
     if (exe8) sb_appendf(&r, "✓ Tailscale instalado: %s\n", exe8);
-    else sb_append(&r, "✗ No encontré Tailscale en esta PC. Instálalo (botón Instalar Tailscale) y entra con tu cuenta.\n");
-    free(exe8);
+    else sb_append(&r, "✗ No encontré Tailscale en esta PC. " INSTALL_TAILSCALE "\n");
 
-    DWORD code = 0;
+    long code = 0;
     char *err = NULL;
-    char *out = exe ? run_capture(exe, L"status --json", 8000, &code, &err) : NULL;
-    free(exe);
+    static const char *const STATUS[] = {"status", "--json", NULL};
+    char *out = exe8 ? mesh_run_tailscale(STATUS, 8000, &code, &err) : NULL;
+    free(exe8);
     TailscaleStatus st;
     bool parsed = tailscale_parse_status(out, &st);
     if (out && !parsed) {
         char *first = err ? xstrndup(err, strcspn(err, "\r\n")) : xstrdup("");
-        sb_appendf(&r, "✗ Tailscale no contestó bien (código %lu)%s%s\n", (unsigned long)code, *first ? ": " : "",
-                   first);
+        sb_appendf(&r, "✗ Tailscale no contestó bien (código %ld)%s%s\n", code, *first ? ": " : "", first);
         free(first);
     } else if (!out && tailscale_installed()) {
-        sb_append(&r, "✗ No pude correr tailscale.exe\n");
+        sb_append(&r, "✗ No pude correr " TAILSCALE_NAME "\n");
     } else if (parsed && strcmp(st.state, "Running")) {
         sb_appendf(&r, "✗ Tailscale no está conectado (estado: %s). Ábrelo y entra con tu cuenta.\n",
                    *st.state ? st.state : "desconocido");
@@ -1254,38 +938,10 @@ char *mesh_diagnose(void)
     free(ip);
     free(listening);
 
-    FwState fw = firewall_state();
-    InterlockedExchange(&g_fw_ok, firewall_ok(&fw));
-    if (!fw.known) {
-        wchar_t *netsh = expand_env(L"%SystemRoot%\\System32\\netsh.exe");
-        DWORD fw_code = (DWORD)-1;
-        free(run_capture(netsh, L"advfirewall firewall show rule name=\"Sokari (malla)\"", 8000, &fw_code, NULL));
-        free(netsh);
-        if (fw_code == 0) sb_append(&r, "✓ El firewall tiene la regla «Sokari (malla)»\n");
-        else sb_append(&r, "✗ Falta la regla del firewall: dale «Permitir en el firewall» en esta PC\n");
-    } else if (fw.off) {
-        sb_append(&r, "✓ El firewall de Windows está apagado: no bloquea la malla\n");
-    } else if (fw.block_all) {
-        sb_append(&r, "✗ Windows está bloqueando TODAS las conexiones entrantes: en Seguridad de Windows → Firewall, "
-                      "quita «Bloquear todas las conexiones entrantes» (si no, nadie te puede mandar órdenes)\n");
-    } else if (fw.block) {
-        sb_append(&r, "✗ El firewall de Windows tiene una regla que BLOQUEA a Sokari (pasa si alguna vez le diste "
-                      "«Cancelar» a su aviso): dale «Permitir en el firewall» y la quito\n");
-    } else if (fw.allow) {
-        sb_append(&r, "✓ El firewall de Windows deja pasar las órdenes (regla «Sokari (malla)»)\n");
-    } else {
-        sb_append(&r, "✗ Falta permitir a Sokari en el firewall: dale «Permitir en el firewall» en esta PC\n");
-    }
-    char *others = other_firewalls();
-    if (others && *others)
-        sb_appendf(&r, "✗ Tienes otro firewall: %s. Ese no usa la regla de Windows: en su configuración permite a "
-                       "Sokari.exe (TCP 8765) o apágalo\n",
-                   others);
-    else if (others)
-        sb_append(&r, "✓ No hay otro firewall (de antivirus) aparte del de Windows\n");
-    free(others);
+    mesh_diagnose_firewall(&r);
     if (parsed && !strcmp(st.state, "Running")) {
-        char *prefs = run_tailscale(L"debug prefs", NULL, NULL);
+        static const char *const PREFS[] = {"debug", "prefs", NULL};
+        char *prefs = mesh_run_tailscale(PREFS, 8000, NULL, NULL);
         if (prefs && json_start(prefs)) {
             if (tailscale_parse_shields_up(prefs))
                 sb_append(&r, "✗ Tailscale tiene apagado «Allow incoming connections»: actívalo en su ícono (si no, "
@@ -1311,7 +967,7 @@ char *mesh_diagnose(void)
 
     MeshDevice *devs;
     int nd = mesh_devices(&devs);
-    if (!nd) sb_append(&r, "· Todavía no tienes PCs registradas: dale a «Detectar mis PCs».\n");
+    if (!nd) sb_append(&r, "· Todavía no tienes PCs registradas: " DETECT_PCS ".\n");
     for (int i = 0; i < nd; i++) {
         MeshProbe p = mesh_probe(devs[i].host);
         char *ip = p == MESH_NO_ANSWER ? resolve_tailscale(devs[i].host) : NULL;

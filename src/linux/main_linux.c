@@ -19,6 +19,7 @@
 #include "linux/linux.h"
 #include "log.h"
 #include "memory.h"
+#include "mesh.h"
 #include "util.h"
 #include "voice.h"
 
@@ -28,6 +29,9 @@ static void usage(void)
            "  sokari --voz               escucharte (\"Hey Sokari\") y contestarte hablando; Ctrl+C para salir\n"
            "  sokari --texto             platicar escribiendo (Ctrl+D para salir)\n"
            "  sokari --simular x.wav     como --voz, pero con ese audio (16 kHz) en vez del micrófono\n"
+           "  sokari --revisar-malla     revisa la red con tus otras PCs (Tailscale, firewall, cada PC)\n"
+           "  sokari --detectar-pcs      registra tus otras PCs de Tailscale (con Windows o Linux)\n"
+           "  sokari --permitir-firewall abre el puerto de la malla solo para tu red de Tailscale\n"
            "  sokari --version           la versión\n\n"
            "La configuración está en ~/.config/sokari/config.env (tu API key de Groq va en\n"
            "GROQ_API_KEY=...). La memoria y tus datos, en ~/.local/share/sokari.\n",
@@ -125,10 +129,27 @@ static int run_voice(const char *wav)
     return 0;
 }
 
+/* «Detectar mis PCs» de la ventana de Windows: las otras PCs de tu Tailscale. */
+static int detect_pcs(void)
+{
+    MeshDevice *list;
+    char *why = NULL;
+    int n = tailscale_windows_peers(&list, &why);
+    if (!n) printf("%s\n", why ? why : "No encontré otras PCs en tu red de Tailscale.");
+    for (int i = 0; i < n; i++) {
+        bool ok = mesh_device_set(list[i].name, list[i].host);
+        printf("%s %s (%s)\n", ok ? "Registré" : "No pude registrar", list[i].name, list[i].host);
+    }
+    if (n) printf("\nYa les puedes decir: «Sokari, en %s abre Spotify».\n", list[0].name);
+    free(why);
+    mesh_devices_free(list, n);
+    return n ? 0 : 1;
+}
+
 int main(int argc, char **argv)
 {
     bool text = false, voice = false;
-    const char *wav = NULL;
+    const char *wav = NULL, *mesh_cmd = NULL;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--texto")) {
             text = true;
@@ -136,6 +157,9 @@ int main(int argc, char **argv)
             voice = true;
         } else if (!strcmp(argv[i], "--simular") && i + 1 < argc) {
             wav = argv[++i];
+        } else if (!strcmp(argv[i], "--revisar-malla") || !strcmp(argv[i], "--detectar-pcs") ||
+                   !strcmp(argv[i], "--permitir-firewall")) {
+            mesh_cmd = argv[i];
         } else if (!strcmp(argv[i], "--version")) {
             printf("%s\n", SOKARI_VERSION);
             return 0;
@@ -144,16 +168,34 @@ int main(int argc, char **argv)
             return strcmp(argv[i], "--ayuda") && strcmp(argv[i], "--help") ? 1 : 0;
         }
     }
-    if (!text && !voice && !wav) {
+    if (!text && !voice && !wav && !mesh_cmd) {
         usage();
         return 0;
     }
     paths_init();
     log_init(g_paths.log_file);
-    log_msg("Sokari %s arrancando (Linux, modo %s).", SOKARI_VERSION, text ? "texto" : wav ? "simulación" : "voz");
+    log_msg("Sokari %s arrancando (Linux, modo %s).", SOKARI_VERSION,
+            mesh_cmd ? mesh_cmd + 2 : text ? "texto" : wav ? "simulación" : "voz");
     config_load();
     memory_init();
     http_init();
+    if (mesh_cmd) {
+        int rc = 0;
+        if (!strcmp(mesh_cmd, "--revisar-malla")) {
+            char *r = mesh_diagnose();
+            printf("%s", r);
+            free(r);
+        } else if (!strcmp(mesh_cmd, "--detectar-pcs")) {
+            rc = detect_pcs();
+        } else {
+            bool ok = mesh_allow_firewall();
+            printf(ok ? "Listo: la malla puede recibir órdenes de tu red de Tailscale.\n"
+                      : "No pude cambiar el firewall (¿cancelaste la contraseña?). Los detalles están en el registro.\n");
+            rc = ok ? 0 : 1;
+        }
+        log_msg("Sokari cerrado.");
+        return rc;
+    }
     /* Sin la extensión de GNOME no puede ver ventanas ni oprimir teclas. */
     if (!wav) gnome_extension_enable();
     int rc = text ? run_text() : run_voice(wav);
