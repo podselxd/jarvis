@@ -24,6 +24,23 @@ bool system_volume_get(int *percent, bool *muted);
 bool system_volume_set(int percent);
 bool system_mute_set(bool mute);
 
+/* ui_linux.c: la ventana. ui_run la abre (y se queda hasta Salir); lo demás
+   lo usa app_linux.c para mandarle lo que pasa desde cualquier hilo. */
+int ui_run(int argc, char **argv);
+bool ui_active(void);
+bool ui_own_window_active(void);
+void ui_post_state(int state);
+void ui_post_level(float level);
+void ui_post_subtitle(bool from_user, const char *text);
+void ui_post_status(const char *text);
+void ui_post_notify(const char *title, const char *text);
+void ui_post_quit(void);
+
+/* autostart_linux.c: cómo se llama a este Sokari ("sokari" o su ruta, heap)
+   y el atajo Ctrl+Alt+J de GNOME (false si no se pudo o no es GNOME). */
+char *linux_self_command(void);
+bool linux_hotkey_ensure(void);
+
 /* MD5 en hexadecimal (heap): el que publica el catálogo de voces de Piper. */
 char *tts_md5_hex(const void *data, size_t n);
 /* "es_MX-ald-medium" -> "Ald (México, Piper)" (heap). */

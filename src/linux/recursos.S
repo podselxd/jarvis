@@ -24,4 +24,9 @@ sokari_res_hey:
     .incbin "hey_sokari.jww"
 #endif
 sokari_res_hey_end:
+    .balign 16
+    .global sokari_res_icon, sokari_res_icon_end
+sokari_res_icon:
+    .incbin "sokari.png"
+sokari_res_icon_end:
     .section .note.GNU-stack,"",@progbits

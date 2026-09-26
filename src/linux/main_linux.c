@@ -1,9 +1,10 @@
-/* Sokari en Linux. Por ahora sin ventanas: en modo voz (sokari --voz) te
-   escucha como en Windows ("Hey Sokari") y te contesta hablando, con los
-   avisos en la terminal; en modo texto (sokari --texto) le escribes. El mismo
-   agente, las mismas herramientas y las mismas confirmaciones que en
+/* Sokari en Linux. Sin opciones abre su ventana (ui_linux.c): la esfera, lo
+   que dices y lo que contesta, Configuración y Tus PCs. Sin ventana: en modo
+   voz (sokari --voz) te escucha ("Hey Sokari") y te contesta hablando, con
+   los avisos en la terminal; en modo texto (sokari --texto) le escribes. El
+   mismo agente, las mismas herramientas y las mismas confirmaciones que en
    Windows; las ventanas, las teclas y el portapapeles, con su extensión de
-   GNOME. La interfaz llega en la parte 6. */
+   GNOME. */
 #include <windows.h>
 
 #include <signal.h>
@@ -26,7 +27,9 @@
 static void usage(void)
 {
     printf("Sokari %s para Linux\n\n"
-           "  sokari --voz               escucharte (\"Hey Sokari\") y contestarte hablando; Ctrl+C para salir\n"
+           "  sokari                     abrir Sokari (la ventana con la esfera; si ya está abierta, la muestra)\n"
+           "  sokari --hablar            que te escuche ahora (lo mismo que Ctrl+Alt+J)\n"
+           "  sokari --voz               sin ventana: escucharte y contestarte hablando; Ctrl+C para salir\n"
            "  sokari --texto             platicar escribiendo (Ctrl+D para salir)\n"
            "  sokari --simular x.wav     como --voz, pero con ese audio (16 kHz) en vez del micrófono\n"
            "  sokari --revisar-malla     revisa la red con tus otras PCs (Tailscale, firewall, cada PC)\n"
@@ -148,9 +151,13 @@ static int detect_pcs(void)
 
 int main(int argc, char **argv)
 {
-    bool text = false, voice = false;
+    bool text = false, voice = false, gui = argc == 1;
     const char *wav = NULL, *mesh_cmd = NULL;
     for (int i = 1; i < argc; i++) {
+        if (!strcmp(argv[i], "--hablar") || !strcmp(argv[i], "--autostart") || !strcmp(argv[i], "--mostrar")) {
+            gui = true;
+            continue;
+        }
         if (!strcmp(argv[i], "--texto")) {
             text = true;
         } else if (!strcmp(argv[i], "--voz")) {
@@ -168,17 +175,23 @@ int main(int argc, char **argv)
             return strcmp(argv[i], "--ayuda") && strcmp(argv[i], "--help") ? 1 : 0;
         }
     }
-    if (!text && !voice && !wav && !mesh_cmd) {
+    if (!text && !voice && !wav && !mesh_cmd && !gui) {
         usage();
         return 0;
     }
     paths_init();
     log_init(g_paths.log_file);
     log_msg("Sokari %s arrancando (Linux, modo %s).", SOKARI_VERSION,
-            mesh_cmd ? mesh_cmd + 2 : text ? "texto" : wav ? "simulación" : "voz");
+            gui ? "ventana" : mesh_cmd ? mesh_cmd + 2 : text ? "texto" : wav ? "simulación" : "voz");
     config_load();
     memory_init();
     http_init();
+    if (gui && !text && !voice && !wav && !mesh_cmd) {
+        /* Una sola Sokari: si ya hay una abierta, esto solo le avisa (y sale). */
+        int rc = ui_run(argc, argv);
+        log_msg("Sokari cerrado.");
+        return rc;
+    }
     if (mesh_cmd) {
         int rc = 0;
         if (!strcmp(mesh_cmd, "--revisar-malla")) {

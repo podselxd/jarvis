@@ -40,6 +40,10 @@ app() { # id nombre archivo categorías
         "$2" "$T/bin/$3" "$4" > "$HOME/.local/share/applications/$1.desktop"
 }
 app io.github.podselxd.SokariPrueba "Prueba de Sokari" prueba "Utility;"
+# Y la de Sokari mismo, para que GNOME sepa que su ventana es «Sokari».
+printf '[Desktop Entry]\nType=Application\nName=Sokari\nExec=%s\nCategories=Utility;\n' \
+    "$root/build-linux/sokari" > "$HOME/.local/share/applications/io.github.podselxd.Sokari.desktop"
+export SOKARI_BIN="$root/build-linux/sokari"
 app io.github.podselxd.SokariTerminal "Terminal de prueba" terminal "System;TerminalEmulator;"
 # Los títulos de las ventanas ("Inicio - Prueba de Sokari") salen de aquí.
 sed -i 's/"Prueba de Sokari" > /"Ventana de prueba" > /' "$T/bin/prueba"
