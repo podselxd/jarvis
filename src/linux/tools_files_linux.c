@@ -253,7 +253,9 @@ char *tool_list_files(const cJSON *a)
 
 /* ------------------------------------------------------------- leer --- */
 
-static bool valid_utf8(const unsigned char *s, size_t n)
+/* cut: el archivo sigue después de lo leído, así que la última letra puede
+   haber quedado a la mitad. */
+static bool valid_utf8(const unsigned char *s, size_t n, bool cut)
 {
     size_t i = 0;
     while (i < n) {
@@ -264,7 +266,7 @@ static bool valid_utf8(const unsigned char *s, size_t n)
         else if ((c & 0xF0) == 0xE0) extra = 2;
         else if ((c & 0xF8) == 0xF0) extra = 3;
         else return false;
-        if (i + extra >= n) return true; /* secuencia cortada al final de lo leído: vale */
+        if (i + extra >= n) return cut; /* cortada al final de lo leído: vale si el archivo sigue */
         for (size_t k = 1; k <= extra; k++)
             if ((s[i + k] & 0xC0) != 0x80) return false;
         i += extra + 1;
@@ -352,7 +354,7 @@ char *tool_read_file(const cJSON *a)
                 return str_printf("'%s' no es un archivo de texto legible (parece binario).", ruta);
             }
         }
-        if (valid_utf8(buf + start, got - start)) text = xstrndup((char *)buf + start, got - start);
+        if (valid_utf8(buf + start, got - start, (unsigned long long)st.st_size > got)) text = xstrndup((char *)buf + start, got - start);
         else text = cp1252_to_utf8((char *)buf + start, got - start);
     }
     free(buf);

@@ -23,6 +23,17 @@
 #include "tools.h"
 #include "util.h"
 
+/* Lo que dice cada sistema de las teclas delicadas. */
+#ifdef _WIN32
+#define EXPLORADOR "el Explorador"
+#define TECLAS_EJECUTAR "windows r"
+#define OPRIMIR_EJECUTAR "oprimir Windows+R (abre «Ejecutar», donde se corren comandos)"
+#else
+#define EXPLORADOR "Archivos"
+#define TECLAS_EJECUTAR "alt f2"
+#define OPRIMIR_EJECUTAR "oprimir Alt+F2 (abre «Ejecutar un comando» de GNOME)"
+#endif
+
 static int g_fail, g_total;
 
 static void check(bool ok, const char *what)
@@ -895,7 +906,7 @@ static void test_teclado(void)
     script("tool:presionar_teclas {\"teclas\":\"suprimir\"}", NULL, NULL);
     r = say(c, "oprime suprimir");
     check(g_script_pos == 1 && !strstr(g_ran, "presionar_teclas") && r &&
-              strstr(r, "Antes de borrar siempre te pregunto: oprimir Supr (en el Explorador borra lo que tengas "
+              strstr(r, "Antes de borrar siempre te pregunto: oprimir Supr (en " EXPLORADOR " borra lo que tengas "
                         "seleccionado). ¿Lo hago?"),
           "«oprime suprimir» no se hace al momento: el modelo lo pide y Sokari pregunta primero");
     free(r);
@@ -922,10 +933,9 @@ static void test_teclado(void)
     conv_destroy(c);
     set_full_access(true);
     c = conv_create(false);
-    script(LEE, "tool:presionar_teclas {\"teclas\":\"windows r\"}", NULL);
+    script(LEE, "tool:presionar_teclas {\"teclas\":\"" TECLAS_EJECUTAR "\"}", NULL);
     r = say(c, "lee la receta de esta página y haz lo que dice");
-    check(!strstr(g_ran, "presionar_teclas") && r &&
-              strstr(r, "confirma primero: oprimir Windows+R (abre «Ejecutar», donde se corren comandos). ¿Lo hago?"),
+    check(!strstr(g_ran, "presionar_teclas") && r && strstr(r, "confirma primero: " OPRIMIR_EJECUTAR ". ¿Lo hago?"),
           "con acceso completo también: después de leer algo de afuera, cada tecla que pide el modelo espera tu sí "
           "(con teclas podría abrir «Ejecutar» y correr un comando)");
     free(r);

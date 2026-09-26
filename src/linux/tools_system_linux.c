@@ -337,13 +337,19 @@ static const char *const DANGEROUS_EXT[] = {
     ".x86_64", ".command", ".service", ".pyz", ".mjs", ".cjs", ".vbox-extpack",
 };
 
+/* Programas e instaladores: se ejecutan o se instalan al abrirlos. */
 static const char *const DANGEROUS_TYPES[] = {
     "application/x-executable", "application/x-pie-executable", "application/x-sharedlib",
-    "application/x-shellscript", "application/x-desktop", "application/x-ms-dos-executable",
-    "application/x-msdownload", "application/x-msi", "application/x-java-archive", "application/vnd.appimage",
-    "application/x-iso9660-appimage", "application/vnd.debian.binary-package", "application/x-rpm",
-    "application/vnd.flatpak.ref", "application/vnd.flatpak.repo", "application/vnd.flatpak",
-    "text/x-python", "text/x-python3", "application/x-perl", "application/x-ruby", "application/x-php",
+    "application/x-desktop", "application/x-ms-dos-executable", "application/x-msdownload", "application/x-msi",
+    "application/x-java-archive", "application/vnd.appimage", "application/x-iso9660-appimage",
+    "application/vnd.debian.binary-package", "application/x-rpm", "application/vnd.flatpak.ref",
+    "application/vnd.flatpak.repo", "application/vnd.flatpak",
+};
+
+/* Scripts: sin permiso de ejecutar solo se abren para leerlos. */
+static const char *const SCRIPT_TYPES[] = {
+    "application/x-shellscript", "text/x-python", "text/x-python3", "application/x-perl", "application/x-ruby",
+    "application/x-php",
 };
 
 bool open_target_is_dangerous(const wchar_t *path)
@@ -382,6 +388,8 @@ bool open_target_is_dangerous(const wchar_t *path)
             char *type = g_content_type_guess(p, head, (gsize)got, &uncertain);
             for (size_t i = 0; type && i < sizeof DANGEROUS_TYPES / sizeof *DANGEROUS_TYPES && !bad; i++)
                 bad = g_content_type_is_a(type, DANGEROUS_TYPES[i]);
+            for (size_t i = 0; type && exec_bit && i < sizeof SCRIPT_TYPES / sizeof *SCRIPT_TYPES && !bad; i++)
+                bad = g_content_type_is_a(type, SCRIPT_TYPES[i]);
             g_free(type);
         }
     }

@@ -97,6 +97,11 @@ char *tool_atajos_de_app(const cJSON *a)
     const char *app = arg_str(a, "app");
     const char *s = keys_shortcuts_for(app);
     if (s) return xstrdup(s);
+#ifdef _WIN32
     return str_printf("No tengo guardados atajos de «%s»; usa los que sepas de esa app. Los de Windows: %s", app,
                       keys_shortcuts_for("windows"));
+#else
+    return str_printf("No tengo guardados atajos de «%s»; usa los que sepas de esa app. Los de GNOME: %s", app,
+                      keys_shortcuts_for("gnome"));
+#endif
 }

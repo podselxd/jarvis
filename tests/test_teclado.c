@@ -171,12 +171,21 @@ static void test_atajos(void)
     check(s && strstr(s, "Windows+D"), "Windows: Windows+D el escritorio");
     check(!keys_shortcuts_for("banana"), "una app que no conoce: nada inventado");
     char *r = run_tool("atajos_de_app", "{\"app\":\"banana\"}");
+#ifdef _WIN32
     check(strstr(r, "No tengo guardados") && strstr(r, "Windows+D"), "la herramienta lo dice y da los de Windows");
+#else
+    check(strstr(r, "No tengo guardados") && strstr(r, "Los de GNOME") && strstr(r, "Alt+F2"),
+          "la herramienta lo dice y da los de GNOME");
+    s = keys_shortcuts_for("ubuntu");
+    check(s && strstr(s, "Actividades"), "Ubuntu y Fedora: los de GNOME (Actividades, Alt+F2…)");
+    s = keys_shortcuts_for("nautilus");
+    check(s && strstr(s, "Ctrl+H"), "Archivos: Ctrl+H muestra los ocultos");
+#endif
     free(r);
 }
 
-/* Lo que toca el portapapeles y las ventanas de verdad: en Linux llega con
-   las acciones (parte 4). */
+/* Lo que toca el portapapeles y las ventanas de verdad. En Linux eso lo prueba
+   tests/linux/gnome/ contra un GNOME de verdad. */
 #ifdef _WIN32
 static void test_portapapeles(void)
 {
@@ -204,6 +213,19 @@ static void test_portapapeles(void)
     check(effect == DROPEFFECT_COPY, "como copiar, no cortar: el archivo se queda donde está");
 }
 
+static void test_donde_no_da_enter(void)
+{
+    printf("-- dónde Enter abre o ejecuta cosas --\n");
+    HWND shell = GetShellWindow(), console = GetConsoleWindow();
+    printf("      (escritorio: %s; consola: %s)\n", shell ? "sí" : "no hay", console ? "sí" : "no hay");
+    check(!shell || window_runs_commands(shell), "el escritorio (del Explorador): ahí Enter abre lo seleccionado");
+    char *app = shell ? window_app_name(shell) : NULL;
+    check(!shell || (app && !strcmp(app, "el Explorador")), "y se llama «el Explorador», no por su título");
+    free(app);
+    check(!window_runs_commands(NULL) && !window_app_name(NULL), "sin ventana: ni ejecuta ni tiene nombre");
+}
+#endif
+
 static void says(const char *tool, const char *args, const char *start, const char *what)
 {
     char *r = run_tool(tool, args);
@@ -229,19 +251,6 @@ static void test_sin_efectos(void)
          "Por seguridad no escribo «javascript:»", "no escribe «javascript:» (en la barra de direcciones correría código)");
 }
 
-static void test_donde_no_da_enter(void)
-{
-    printf("-- dónde Enter abre o ejecuta cosas --\n");
-    HWND shell = GetShellWindow(), console = GetConsoleWindow();
-    printf("      (escritorio: %s; consola: %s)\n", shell ? "sí" : "no hay", console ? "sí" : "no hay");
-    check(!shell || window_runs_commands(shell), "el escritorio (del Explorador): ahí Enter abre lo seleccionado");
-    char *app = shell ? window_app_name(shell) : NULL;
-    check(!shell || (app && !strcmp(app, "el Explorador")), "y se llama «el Explorador», no por su título");
-    free(app);
-    check(!window_runs_commands(NULL) && !window_app_name(NULL), "sin ventana: ni ejecuta ni tiene nombre");
-}
-#endif
-
 static void test_confirmaciones(void)
 {
     printf("-- cuándo pide un sí --\n");
@@ -259,6 +268,7 @@ static void test_confirmaciones(void)
           "y cualquier otra tecla también: «oprimir Ctrl+T 2 veces»");
     free(d);
     cJSON_Delete(a);
+#ifdef _WIN32
     a = cJSON_Parse("{\"teclas\":\"windows r\"}");
     d = tool_describe_action("presionar_teclas", a);
     check(!strcmp(d, "oprimir Windows+R (abre «Ejecutar», donde se corren comandos)"), d);
@@ -269,6 +279,23 @@ static void test_confirmaciones(void)
     check(!strcmp(d, "oprimir Shift+Supr en Explorador (en el Explorador borra lo que tengas seleccionado)"), d);
     free(d);
     cJSON_Delete(a);
+#else
+    a = cJSON_Parse("{\"teclas\":\"alt f2\"}");
+    d = tool_describe_action("presionar_teclas", a);
+    check(!strcmp(d, "oprimir Alt+F2 (abre «Ejecutar un comando» de GNOME)"), d);
+    free(d);
+    cJSON_Delete(a);
+    a = cJSON_Parse("{\"teclas\":\"alt control t\"}");
+    d = tool_describe_action("presionar_teclas", a);
+    check(!strcmp(d, "oprimir Alt+Ctrl+T (abre una terminal)"), d);
+    free(d);
+    cJSON_Delete(a);
+    a = cJSON_Parse("{\"teclas\":\"shift supr\",\"ventana\":\"Archivos\"}");
+    d = tool_describe_action("presionar_teclas", a);
+    check(!strcmp(d, "oprimir Shift+Supr en Archivos (en Archivos borra lo que tengas seleccionado)"), d);
+    free(d);
+    cJSON_Delete(a);
+#endif
     a = cJSON_Parse("{\"ruta\":\"C:\\\\Users\\\\yo\\\\Documents\\\\tarea.pdf\",\"ventana\":\"Discord\",\"enviar\":true}");
     d = tool_describe_action("subir_archivo", a);
     check(tool_needs_confirmation("subir_archivo", a) && !strcmp(d, "subir tarea.pdf a Discord y mandarlo"),
@@ -313,9 +340,9 @@ int wmain(void)
     test_atajos();
 #ifdef _WIN32
     test_portapapeles();
-    test_sin_efectos();
     test_donde_no_da_enter();
 #endif
+    test_sin_efectos();
     test_confirmaciones();
     test_registradas();
     printf("%d/%d pruebas %s\n", g_total - g_fail, g_total, g_fail ? "— HAY FALLAS" : "ok");

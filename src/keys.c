@@ -282,9 +282,16 @@ static const Shortcuts SHORTCUTS[] = {
     {" youtube video videos ",
      "YouTube (con la página enfrente): K play/pausa; J y L 10 s atrás/adelante; flechas 5 s; F pantalla completa; M "
      "silencio; Shift+N siguiente video; / va a la búsqueda."},
+#ifdef _WIN32
     {" explorador archivos carpeta carpetas descargas documentos ",
      "Explorador: Ctrl+L barra de direcciones; Ctrl+E buscar; Ctrl+N ventana nueva; Ctrl+Shift+N carpeta nueva; F2 "
      "renombrar; Alt+Flecha arriba subir una carpeta; Alt+Enter propiedades; Ctrl+C / Ctrl+V copiar y pegar."},
+#else
+    {" explorador archivos nautilus carpeta carpetas descargas documentos ",
+     "Archivos (Nautilus): Ctrl+L barra de direcciones; Ctrl+F buscar; Ctrl+N ventana nueva; Ctrl+T pestaña nueva; "
+     "Ctrl+Shift+N carpeta nueva; F2 renombrar; Alt+Flecha arriba subir una carpeta; Ctrl+H mostrar los ocultos; "
+     "Supr manda a la papelera; Ctrl+C / Ctrl+V copiar y pegar."},
+#endif
     {" discord ",
      "Discord: Ctrl+K busca un chat o canal (escribe el nombre y Enter); Alt+Flecha arriba/abajo canal anterior o "
      "siguiente; Ctrl+Shift+M silencia tu micrófono; Ctrl+Shift+D ensordece; Esc marca como leído. Para mandar un "
@@ -296,11 +303,20 @@ static const Shortcuts SHORTCUTS[] = {
      "Word y Office: Ctrl+Z deshacer; Ctrl+C/Ctrl+V copiar y pegar; Ctrl+P imprimir. Guardar y formato cambian con el "
      "idioma: en español Ctrl+G guarda, Ctrl+N negrita, Ctrl+K cursiva, Ctrl+S subrayado; en inglés Ctrl+S guarda, "
      "Ctrl+B negrita, Ctrl+I cursiva, Ctrl+U subrayado."},
+#ifdef _WIN32
     {" windows escritorio ventana ventanas pc compu computadora sistema ",
      "Windows: Windows abre Inicio; Windows+D escritorio; Windows+E Explorador; Windows+L bloquear; Alt+Tab cambiar "
      "de ventana; Alt+F4 cerrar; Windows+Shift+S recorte de pantalla; Windows+V historial del portapapeles; Windows+. "
      "emojis; Ctrl+Shift+Esc administrador de tareas; Windows+flechas acomodar la ventana; Windows+Tab vista de "
      "tareas."},
+#else
+    {" gnome linux ubuntu fedora windows escritorio ventana ventanas pc compu computadora sistema ",
+     "GNOME (Ubuntu y Fedora): Windows (la tecla Super) abre Actividades y la búsqueda; Windows+A todas las apps; "
+     "Alt+Tab cambia de app; Alt+F4 cierra; Windows+L bloquear; Windows+flecha arriba maximiza y Windows+flechas "
+     "izquierda/derecha la acomodan a media pantalla; Windows+H minimiza; Windows+D muestra el escritorio (en "
+     "Ubuntu); Impr Pant captura de pantalla; Windows+V notificaciones; Ctrl+Alt+T terminal; Alt+F2 «Ejecutar un "
+     "comando»."},
+#endif
 };
 
 const char *keys_shortcuts_for(const char *app)
