@@ -45,12 +45,22 @@ bool str_is_blank(const char *s);
 void str_collapse_spaces(char *s);
 size_t utf8_truncate_len(const char *s, size_t max_bytes);
 
+/* Avisa (en Windows, con una ventana) y cierra Sokari con ese código. */
+void fatal_error(const char *msg, int code) __attribute__((noreturn));
+
 char *read_file_all(const wchar_t *path, size_t *out_len);
 bool write_file_atomic(const wchar_t *path, const void *data, size_t len);
 bool append_file(const wchar_t *path, const void *data, size_t len);
 bool file_exists(const wchar_t *path);
 bool dir_exists(const wchar_t *path);
 bool ensure_dir(const wchar_t *path);
+bool copy_file(const wchar_t *src, const wchar_t *dst, bool overwrite);
+/* Renombra o mueve, reemplazando el destino si existe. */
+bool move_file(const wchar_t *from, const wchar_t *to);
+/* Bytes del archivo, o -1 si no existe. */
+long long file_size(const wchar_t *path);
+/* A la consola (UTF-8), para el modo con --consola. */
+void console_write(const char *utf8);
 wchar_t *path_join(const wchar_t *a, const wchar_t *b);
 wchar_t *path_dirname(const wchar_t *p);
 const wchar_t *path_basename(const wchar_t *p);
@@ -63,6 +73,8 @@ uint64_t now_ms(void);
 char *local_iso_now(void);
 char *format_epoch_local(double ts, const char *fmt);
 bool parse_iso_local(const char *s, double *out_epoch);
+/* Fecha y hora (hora local, o UTC si utc) a segundos desde 1970. */
+bool civil_to_epoch(int Y, int M, int D, int h, int m, int sec, bool utc, double *out_epoch);
 
 bool secure_equal(const char *a, const char *b);
 void random_bytes(void *buf, size_t n);
