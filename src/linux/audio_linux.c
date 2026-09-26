@@ -13,6 +13,7 @@
 #include <string.h>
 
 #include "audio.h"
+#include "linux/linux.h"
 #include "log.h"
 #include "util.h"
 
@@ -31,6 +32,7 @@ typedef struct {
     char *default_sink;
     pa_cvolume vol;
     bool have_vol;
+    int mute;
 } PaQuery;
 
 static void add_dev(PaQuery *q, const char *name, const char *desc)
@@ -81,6 +83,7 @@ static void on_sink_volume(pa_context *c, const pa_sink_info *i, int eol, void *
         return;
     }
     q->vol = i->volume;
+    q->mute = i->mute;
     q->have_vol = q->ok = true;
 }
 
@@ -91,7 +94,7 @@ static void on_success(pa_context *c, int success, void *u)
     q->done = true;
 }
 
-typedef enum { Q_SINKS, Q_SOURCES, Q_SERVER, Q_SINK_VOLUME, Q_SET_SINK_VOLUME } QueryKind;
+typedef enum { Q_SINKS, Q_SOURCES, Q_SERVER, Q_SINK_VOLUME, Q_SET_SINK_VOLUME, Q_SET_SINK_MUTE } QueryKind;
 
 /* name: el sink para leer o poner el volumen. */
 static bool pa_query(QueryKind kind, const char *name, PaQuery *q)
@@ -113,6 +116,7 @@ static bool pa_query(QueryKind kind, const char *name, PaQuery *q)
             case Q_SERVER: op = pa_context_get_server_info(ctx, on_server, q); break;
             case Q_SINK_VOLUME: op = pa_context_get_sink_info_by_name(ctx, name, on_sink_volume, q); break;
             case Q_SET_SINK_VOLUME: op = pa_context_set_sink_volume_by_name(ctx, name, &q->vol, on_success, q); break;
+            case Q_SET_SINK_MUTE: op = pa_context_set_sink_mute_by_name(ctx, name, q->mute, on_success, q); break;
             }
             while (op && !q->done && GetTickCount64() < until) pa_mainloop_iterate(ml, 0, NULL), Sleep(2);
             if (op) pa_operation_unref(op);
@@ -479,4 +483,50 @@ void system_unduck(DuckState d)
     }
     query_free(&q);
     query_free(&srv);
+}
+
+/* ------------------------------------------ el volumen de la PC (control_media) --- */
+
+static int percent_of(const pa_cvolume *v)
+{
+    return (int)((double)pa_cvolume_max(v) * 100.0 / (double)PA_VOLUME_NORM + 0.5);
+}
+
+bool system_volume_get(int *percent, bool *muted)
+{
+    PaQuery q = {0};
+    bool ok = pa_query(Q_SINK_VOLUME, "@DEFAULT_SINK@", &q) && q.have_vol;
+    if (ok) {
+        if (percent) *percent = percent_of(&q.vol);
+        if (muted) *muted = q.mute != 0;
+    }
+    query_free(&q);
+    return ok;
+}
+
+bool system_volume_set(int percent)
+{
+    PaQuery q = {0};
+    bool ok = false;
+    if (pa_query(Q_SINK_VOLUME, "@DEFAULT_SINK@", &q) && q.have_vol) {
+        PaQuery set = {0};
+        set.vol = q.vol;
+        /* Igual en todas las bocinas, sin cambiar el balance. */
+        pa_cvolume_scale(&set.vol, (pa_volume_t)((double)PA_VOLUME_NORM * percent / 100.0 + 0.5));
+        ok = pa_query(Q_SET_SINK_VOLUME, "@DEFAULT_SINK@", &set);
+        query_free(&set);
+        /* Como en Windows: si lo subes, deja de estar en silencio. */
+        if (ok && percent > 0 && q.mute) system_mute_set(false);
+    }
+    query_free(&q);
+    return ok;
+}
+
+bool system_mute_set(bool mute)
+{
+    PaQuery q = {0};
+    q.mute = mute;
+    bool ok = pa_query(Q_SET_SINK_MUTE, "@DEFAULT_SINK@", &q);
+    query_free(&q);
+    return ok;
 }

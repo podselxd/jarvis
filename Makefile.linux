@@ -4,7 +4,7 @@
 #   Fedora: sudo dnf install gcc make pkgconf-pkg-config libcurl-devel pulseaudio-libs-devel
 
 CC ?= gcc
-PKGS := libcurl libpulse libpulse-simple
+PKGS := libcurl libpulse libpulse-simple gio-2.0 gio-unix-2.0
 CFLAGS := -std=gnu11 -O2 -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -D_GNU_SOURCE \
           -Isrc -Isrc/linux/include -MMD -MP $(shell pkg-config --cflags $(PKGS))
 LIBS := $(shell pkg-config --libs $(PKGS)) -lm -lpthread
@@ -33,7 +33,7 @@ LINUX_TESTS := test_comandos test_confirmacion test_escucha test_resources test_
 LINUX_ONLY_TESTS := $(patsubst tests/linux/%.c,%,$(wildcard tests/linux/*.c))
 TESTS := $(addprefix build-linux/tests/,$(LINUX_TESTS) $(LINUX_ONLY_TESTS))
 
-.PHONY: all clean tests
+.PHONY: all clean tests prueba-gnome
 
 all: $(OUT)
 
@@ -73,6 +73,19 @@ build-linux/tests/test_confirmacion: tests/test_confirmacion.c \
 		$(filter-out build-linux/obj/groq.o build-linux/obj/tools.o,$(LIB_OBJ))
 	@mkdir -p $(dir $@)
 	$(CC) $(TEST_CFLAGS) -o $@ $^ $(LIBS)
+
+# La extensión de GNOME de verdad, con GNOME Shell sin pantalla (necesita
+# gnome-shell y GTK 3): make -f Makefile.linux prueba-gnome && sh tests/linux/gnome/probar_extension.sh
+GNOME_TESTS := build-linux/tests-gnome
+prueba-gnome: $(GNOME_TESTS)/test_gnome_real $(GNOME_TESTS)/ventana_de_prueba
+
+$(GNOME_TESTS)/test_gnome_real: tests/linux/gnome/test_gnome_real.c $(LIB_OBJ)
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_CFLAGS) -o $@ $^ $(LIBS)
+
+$(GNOME_TESTS)/ventana_de_prueba: tests/linux/gnome/ventana_de_prueba.c
+	@mkdir -p $(dir $@)
+	$(CC) -O2 -Wall -Wextra -Wno-unused-parameter -o $@ $< $(shell pkg-config --cflags --libs gtk+-3.0)
 
 clean:
 	rm -rf build-linux

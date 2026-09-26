@@ -103,10 +103,27 @@ char *tool_describe_action(const char *name, const cJSON *args)
         if (times > 1) snprintf(t, sizeof t, " %d veces", times > 20 ? 20 : times);
         bool win = k.n == 2 && k.vk[0] == VK_LWIN;
         const char *note = "";
+#ifdef _WIN32
         if (k.has_delete) note = " (en el Explorador borra lo que tengas seleccionado)";
         else if (k.has_enter) note = " (manda o ejecuta lo que esté escrito)";
         else if (win && k.vk[1] == 'R') note = " (abre «Ejecutar», donde se corren comandos)";
         else if (win && k.vk[1] == 'X') note = " (abre el menú de administrador de Windows)";
+#else
+        bool alt = false, ctrl = false, f2 = false, t_key = false;
+        for (int i = 0; i < k.n; i++) {
+            alt |= k.vk[i] == VK_MENU;
+            ctrl |= k.vk[i] == VK_CONTROL;
+            f2 |= k.vk[i] == VK_F1 + 1;
+            t_key |= k.vk[i] == 'T';
+        }
+        bool alt_f2 = k.n == 2 && alt && f2;
+        bool ctrl_alt_t = k.n == 3 && ctrl && alt && t_key;
+        (void)win;
+        if (k.has_delete) note = " (en Archivos borra lo que tengas seleccionado)";
+        else if (k.has_enter) note = " (manda o ejecuta lo que esté escrito)";
+        else if (alt_f2) note = " (abre «Ejecutar un comando» de GNOME)";
+        else if (ctrl_alt_t) note = " (abre una terminal)";
+#endif
         r = str_printf("oprimir %s%s%s%s%s", keys, t, *v ? " en " : "", v, note);
         free(v);
         free(keys);

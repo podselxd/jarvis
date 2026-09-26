@@ -2,7 +2,8 @@
    escucha como en Windows ("Hey Sokari") y te contesta hablando, con los
    avisos en la terminal; en modo texto (sokari --texto) le escribes. El mismo
    agente, las mismas herramientas y las mismas confirmaciones que en
-   Windows. La interfaz llega en la parte 6. */
+   Windows; las ventanas, las teclas y el portapapeles, con su extensión de
+   GNOME. La interfaz llega en la parte 6. */
 #include <windows.h>
 
 #include <signal.h>
@@ -14,6 +15,7 @@
 #include "audio.h"
 #include "config.h"
 #include "http.h"
+#include "linux/gnome.h"
 #include "linux/linux.h"
 #include "log.h"
 #include "memory.h"
@@ -152,6 +154,8 @@ int main(int argc, char **argv)
     config_load();
     memory_init();
     http_init();
+    /* Sin la extensión de GNOME no puede ver ventanas ni oprimir teclas. */
+    if (!wav) gnome_extension_enable();
     int rc = text ? run_text() : run_voice(wav);
     log_msg("Sokari cerrado.");
     return rc;

@@ -59,6 +59,28 @@ bool open_app_targets_file(const cJSON *a)
     return file;
 }
 
+/* Cuántas letras hay que cambiar para pasar de un nombre a otro
+   (Levenshtein): "discrod" está a 2 de "discord". */
+int name_edit_distance(const char *a, const char *b)
+{
+    size_t n = strlen(a), m = strlen(b);
+    if (n > 60 || m > 60) return 99;
+    int prev[61], cur[61];
+    for (size_t j = 0; j <= m; j++) prev[j] = (int)j;
+    for (size_t i = 1; i <= n; i++) {
+        cur[0] = (int)i;
+        for (size_t j = 1; j <= m; j++) {
+            int cost = a[i - 1] == b[j - 1] ? 0 : 1;
+            int v = prev[j] + 1;
+            if (cur[j - 1] + 1 < v) v = cur[j - 1] + 1;
+            if (prev[j - 1] + cost < v) v = prev[j - 1] + cost;
+            cur[j] = v;
+        }
+        memcpy(prev, cur, sizeof(int) * (m + 1));
+    }
+    return prev[m];
+}
+
 /* "Tienes permiso para todo" / "pregúntame antes". Prenderlo con texto de
    afuera en la conversación pide un sí de voz (ver tool_needs_confirmation). */
 char *tool_cambiar_permisos(const cJSON *a)
@@ -75,6 +97,11 @@ char *tool_atajos_de_app(const cJSON *a)
     const char *app = arg_str(a, "app");
     const char *s = keys_shortcuts_for(app);
     if (s) return xstrdup(s);
+#ifdef _WIN32
     return str_printf("No tengo guardados atajos de «%s»; usa los que sepas de esa app. Los de Windows: %s", app,
                       keys_shortcuts_for("windows"));
+#else
+    return str_printf("No tengo guardados atajos de «%s»; usa los que sepas de esa app. Los de GNOME: %s", app,
+                      keys_shortcuts_for("gnome"));
+#endif
 }
