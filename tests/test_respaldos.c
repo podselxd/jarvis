@@ -1,8 +1,11 @@
 /* Las IA de respaldo: qué modelos se escogen de cada proveedor y, con un
    servidor falso en 127.0.0.1 que hace de Groq y de NVIDIA, que cuando Groq
    se queda sin cupo contesta la siguiente al instante (sin esperar), que una
-   key mala se salta y que sin ninguna con cupo se dice cuánto falta. La
-   configuración va en una carpeta temporal: nunca toca la tuya. */
+   key mala se salta y que sin ninguna con cupo se dice cuánto falta. Y
+   cuando Groq falla (se cae, retira un modelo o no te deja usar uno), que no
+   se culpa a tu key, que se sigue con otro modelo (también el de tu voz) y
+   que en cuanto Groq vuelve, contesta. La configuración va en una carpeta
+   temporal: nunca toca la tuya. */
 #define WIN32_LEAN_AND_MEAN
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -85,8 +88,14 @@ static void test_escoger(void)
 
 #define PORT 18777
 static SOCKET g_ls = INVALID_SOCKET;
-static volatile LONG g_groq_chats, g_nvidia_chats, g_deepseek_chats;
-static volatile LONG g_groq_mode; /* 0 sin cupo por hoy, 1 key mala, 2 contesta */
+static volatile LONG g_groq_chats, g_nvidia_chats, g_deepseek_chats, g_gptoss_chats, g_turbo_asks;
+/* 0 sin cupo por hoy, 1 key rechazada (401), 2 contesta, 3 gpt-oss vetado
+   (403) y llama contesta, 4 Groq caído (503), 5 gpt-oss retirado (400) y
+   llama contesta. */
+static volatile LONG g_groq_mode;
+/* La voz: 0 contesta, 1 el turbo retirado (400) y el otro contesta, 2 key
+   rechazada (401), 3 Groq caído (503). */
+static volatile LONG g_stt_mode;
 static volatile LONG g_nvidia_mode; /* 0 contesta, 1 sin cupo */
 
 static void reply(SOCKET c, int code, const char *extra, const char *body)
@@ -121,12 +130,43 @@ static DWORD WINAPI server(LPVOID arg)
         buf[got > 0 ? got : 0] = 0;
         char body[512];
         if (strstr(buf, "GET /groq/models")) {
-            reply(c, 200, NULL, "{\"data\":[{\"id\":\"openai/gpt-oss-120b\",\"active\":true}]}");
+            if (g_groq_mode == 1)
+                reply(c, 401, NULL, "{\"error\":{\"message\":\"Invalid API Key\"}}");
+            else
+                reply(c, 200, NULL,
+                      "{\"data\":[{\"id\":\"openai/gpt-oss-120b\",\"active\":true},"
+                      "{\"id\":\"llama-3.3-70b-versatile\",\"active\":true}]}");
+        } else if (strstr(buf, "POST /groq/audio/transcriptions")) {
+            bool turbo = strstr(buf, "whisper-large-v3-turbo") != NULL;
+            if (turbo) InterlockedIncrement(&g_turbo_asks);
+            if (g_stt_mode == 1 && turbo)
+                reply(c, 400, NULL,
+                      "{\"error\":{\"message\":\"The model `whisper-large-v3-turbo` has been decommissioned\","
+                      "\"code\":\"model_decommissioned\"}}");
+            else if (g_stt_mode == 2)
+                reply(c, 401, NULL, "{\"error\":{\"message\":\"Invalid API Key\"}}");
+            else if (g_stt_mode == 3)
+                reply(c, 503, NULL, "{\"error\":{\"message\":\"Service Unavailable\"}}");
+            else
+                reply(c, 200, NULL, turbo ? "{\"text\":\"hola\"}" : "{\"text\":\"hola desde v3\"}");
         } else if (strstr(buf, "GET /nvidia/models")) {
             reply(c, 200, NULL, "{\"data\":[{\"id\":\"openai/gpt-oss-120b\"},{\"id\":\"nvidia/nv-embed-v1\"}]}");
         } else if (strstr(buf, "POST /groq/chat/completions")) {
             InterlockedIncrement(&g_groq_chats);
-            if (g_groq_mode == 0)
+            bool gptoss = strstr(buf, "gpt-oss-120b") != NULL;
+            if (gptoss) InterlockedIncrement(&g_gptoss_chats);
+            if ((g_groq_mode == 3 || g_groq_mode == 5) && !gptoss) {
+                snprintf(body, sizeof body, ANSWER, "hola desde llama");
+                reply(c, 200, NULL, body);
+            } else if (g_groq_mode == 3)
+                reply(c, 403, NULL, "{\"error\":{\"message\":\"The model is blocked at the project level\"}}");
+            else if (g_groq_mode == 5)
+                reply(c, 400, NULL,
+                      "{\"error\":{\"message\":\"The model `openai/gpt-oss-120b` has been decommissioned\","
+                      "\"code\":\"model_decommissioned\"}}");
+            else if (g_groq_mode == 4)
+                reply(c, 503, NULL, "{\"error\":{\"message\":\"Service Unavailable\"}}");
+            else if (g_groq_mode == 0)
                 reply(c, 429, "Retry-After: 456\r\n",
                       "{\"error\":{\"message\":\"Rate limit reached ... tokens per day (TPD): Limit 200000\"}}");
             else if (g_groq_mode == 1)
@@ -270,6 +310,151 @@ static void test_respaldo(void)
     check(!t && err.status == GROQ_AUTH_ERROR, "sin respaldos y con la key de Groq mala: dice que la revises");
     free(t);
     groq_error_free(&err);
+}
+
+/* Como lo hace Configuración: cambia la key sin rearmar nada a mano. */
+static void change_key(const char *which, const char *key)
+{
+    AppConfig c = config_snapshot();
+    char **field = !strcmp(which, "groq") ? &c.groq_api_key : &c.deepseek_key;
+    free(*field);
+    *field = xstrdup(key);
+    config_apply(&c);
+    config_free(&c);
+}
+
+static char *hear(GroqError *err)
+{
+    static int16_t pcm[1600]; /* 0.1 s de silencio: al servidor falso le da igual */
+    return groq_transcribe(pcm, sizeof pcm / sizeof *pcm, 16000, err);
+}
+
+static bool says(const GroqError *e, bool transcribing, const char *part)
+{
+    char *t = groq_error_text(e, transcribing);
+    bool ok = t && strstr(t, part);
+    if (!ok) printf("      dijo: %s\n", t ? t : "(nada)");
+    free(t);
+    return ok;
+}
+
+static void test_caida(void)
+{
+    printf("-- cuando Groq falla, no es tu key --\n");
+    if (g_ls == INVALID_SOCKET) return;
+    GroqError err = {0};
+    double secs;
+    char what[200];
+    g_nvidia_mode = 0;
+    set_keys("gsk_buena", "", "");
+    AppConfig c = config_snapshot();
+    free(c.ai_order);
+    c.ai_order = xstrdup("groq");
+    config_apply(&c);
+    config_free(&c);
+
+    g_groq_mode = 2;
+    char *t = ask(&err, &secs);
+    check(t && !strcmp(t, "hola desde groq"), "con tu key, Groq contesta (así Sokari ya sabe que tu key sirve)");
+    free(t);
+
+    g_groq_mode = 1;
+    t = ask(&err, &secs);
+    snprintf(what, sizeof what, "Groq se cae y rechaza tu key, que sí servía: no espera (%.1f s)", secs);
+    check(!t && err.status == GROQ_AUTH_ERROR && err.key_worked && secs < 5, what);
+    check(says(&err, false, "Groq está fallando"), "y te dice que es Groq, no que revises tu key");
+    free(t);
+    groq_error_free(&err);
+
+    g_groq_mode = 2;
+    t = ask(&err, &secs);
+    check(t && !strcmp(t, "hola desde groq"), "en cuanto Groq vuelve, contesta (antes lo apartaba 30 minutos)");
+    free(t);
+
+    g_groq_mode = 4;
+    t = ask(&err, &secs);
+    check(!t && err.status == GROQ_SERVER_ERROR && says(&err, false, "no es tu key"),
+          "Groq caído (503): «Groq está fallando ahorita; no es tu key»");
+    free(t);
+    groq_error_free(&err);
+
+    g_groq_mode = 3;
+    t = ask(&err, &secs);
+    check(t && !strcmp(t, "hola desde llama"), "un modelo que Groq no te deja usar (403): contesta el siguiente");
+    free(t);
+
+    g_groq_mode = 5;
+    t = ask(&err, &secs);
+    check(t && !strcmp(t, "hola desde llama"), "un modelo que Groq retiró (400): contesta el siguiente");
+    free(t);
+    LONG before = g_gptoss_chats;
+    t = ask(&err, &secs);
+    check(t && !strcmp(t, "hola desde llama") && g_gptoss_chats == before, "y al retirado ya no se le vuelve a pedir");
+    free(t);
+
+    /* Una key que Groq nunca ha aceptado (su lista de modelos también la rechaza). */
+    g_groq_mode = 1;
+    change_key("groq", "gsk_mal_copiada");
+    t = ask(&err, &secs);
+    check(!t && err.status == GROQ_AUTH_ERROR && !err.key_worked && says(&err, false, "Revísala en Configuración"),
+          "una key que Groq nunca ha aceptado: te dice que la revises");
+    free(t);
+    groq_error_free(&err);
+    t = ask(&err, &secs);
+    check(!t && err.status == GROQ_AUTH_ERROR, "y el siguiente pedido dice lo mismo (no «sin cupo»)");
+    free(t);
+    groq_error_free(&err);
+
+    g_groq_mode = 2;
+    change_key("groq", "gsk_corregida");
+    t = ask(&err, &secs);
+    check(t && !strcmp(t, "hola desde groq"), "la corriges en Configuración y contesta al instante");
+    free(t);
+
+    /* Una key de respaldo mala descansa 30 min, pero si la cambias se vuelve a probar. */
+    g_groq_mode = 0;
+    c = config_snapshot();
+    free(c.ai_order);
+    c.ai_order = xstrdup("groq,deepseek");
+    config_apply(&c);
+    config_free(&c);
+    change_key("deepseek", "sk-mala");
+    t = ask(&err, &secs);
+    free(t);
+    groq_error_free(&err);
+    before = g_deepseek_chats;
+    change_key("deepseek", "sk-otra");
+    t = ask(&err, &secs);
+    check(g_deepseek_chats > before, "cambias una key de respaldo que no servía y se vuelve a probar al instante");
+    free(t);
+    groq_error_free(&err);
+
+    printf("-- tu voz (Whisper) --\n");
+    g_groq_mode = 2;
+    g_stt_mode = 1;
+    t = hear(&err);
+    check(t && !strcmp(t, "hola desde v3"), "si Groq retira el Whisper rápido, usa el otro");
+    free(t);
+    groq_error_free(&err);
+    before = g_turbo_asks;
+    t = hear(&err);
+    check(t && !strcmp(t, "hola desde v3") && g_turbo_asks == before, "y se queda con el que sí sirve");
+    free(t);
+    groq_error_free(&err);
+
+    g_stt_mode = 3;
+    t = hear(&err);
+    check(!t && err.status == GROQ_SERVER_ERROR && says(&err, true, "Groq está fallando"),
+          "Groq caído: te dice que es Groq (antes: «No pude transcribir el audio»)");
+    free(t);
+    groq_error_free(&err);
+
+    g_stt_mode = 2;
+    t = hear(&err);
+    check(!t && err.status == GROQ_AUTH_ERROR && err.key_worked && says(&err, true, "Groq está fallando"),
+          "rechaza tu key, que ya sirvió: tampoco te dice que la revises");
+    free(t);
+    groq_error_free(&err);
     closesocket(g_ls);
 }
 
@@ -309,6 +494,7 @@ int wmain(void)
 
     test_escoger();
     test_respaldo();
+    test_caida();
     test_orden();
 
     DeleteFileW(g_paths.config_file);

@@ -918,18 +918,7 @@ static cJSON *build_request(Conversation *c)
 
 static char *error_reply(const GroqError *e)
 {
-    switch (e->status) {
-    case GROQ_RATE_LIMITED:
-        if (e->retry_after > 0 && e->retry_after < 120)
-            return str_printf("Me quedé sin cupo de peticiones por ahora; dame unos %d segundos.", e->retry_after);
-        return xstrdup("Me quedé sin cupo de peticiones por ahora, dame un momento.");
-    case GROQ_AUTH_ERROR:
-        return xstrdup("Tu API key de Groq no es válida o expiró. Revísala en Configuración.");
-    case GROQ_NETWORK_ERROR:
-        return xstrdup("No puedo conectar con Groq ahora mismo, ¿hay internet?");
-    default:
-        return xstrdup("No puedo conectar con Groq ahora mismo.");
-    }
+    return groq_error_text(e, false);
 }
 
 static TurnResult process_turn(Conversation *c, const char *text);

@@ -118,6 +118,11 @@ void groq_error_free(GroqError *e)
     e->detail = NULL;
 }
 
+char *groq_error_text(const GroqError *e, bool transcribing)
+{
+    return xstrdup("Groq falló.");
+}
+
 char *groq_transcribe(const int16_t *pcm, size_t samples, int sample_rate, GroqError *err)
 {
     return NULL;

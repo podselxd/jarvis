@@ -442,8 +442,9 @@ static bool handle_turn(const int16_t *audio, size_t n)
     app_status("");
     if (!text) {
         log_msg("Error transcribiendo: %s", err.detail ? err.detail : "?");
-        speak(err.status == GROQ_AUTH_ERROR ? "Tu API key de Groq no es válida. Revísala en Configuración."
-                                            : "No pude transcribir el audio.");
+        char *say = groq_error_text(&err, true);
+        speak(say);
+        free(say);
         groq_error_free(&err);
         return true;
     }

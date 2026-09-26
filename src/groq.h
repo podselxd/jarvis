@@ -1,6 +1,7 @@
 #ifndef SOKARI_GROQ_H
 #define SOKARI_GROQ_H
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -20,9 +21,17 @@ typedef struct {
     int http_status;
     int retry_after;
     char *detail;
+    /* GROQ_AUTH_ERROR con una key que ya contestó bien en esta sesión: no es
+       la key, es Groq que está fallando. */
+    bool key_worked;
 } GroqError;
 
 void groq_error_free(GroqError *e);
+
+/* Lo que Sokari te dice cuando Groq falla (heap), sin echarle la culpa a tu
+   key si no es ella: sin cupo, key rechazada, Groq caído o sin internet.
+   transcribing: falló al pasar tu voz a texto (no al contestar). */
+char *groq_error_text(const GroqError *e, bool transcribing);
 
 /* Texto transcripto (puede ser "" si no había voz real), o NULL si falló. */
 char *groq_transcribe(const int16_t *pcm, size_t samples, int sample_rate, GroqError *err);
