@@ -68,11 +68,14 @@ char *mesh_probe_report(const char *name, const char *host);
 int mesh_firewall_ok(void);
 int mesh_firewall_check(void);
 
-/* Las otras PCs con Windows de tu red de Tailscale (nombre y IP), leídas de
-   "tailscale status --json". Si no encuentra ninguna, *why (heap, si no es
-   NULL) dice por qué, en palabras para el usuario. */
+/* Las otras PCs de tu red de Tailscale donde puede estar Sokari (nombre e
+   IP), leídas de "tailscale status --json": las de Windows, y las de Linux
+   solo si Sokari ya les contesta (un servidor con Linux no cuenta). Si no
+   encuentra ninguna, *why (heap, si no es NULL) dice por qué, en palabras
+   para el usuario. */
 int tailscale_windows_peers(MeshDevice **out, char **why);
-/* La parte que lee ese JSON (aparte para poder probarla sin Tailscale). */
+/* La parte que lee ese JSON (aparte para poder probarla sin Tailscale): las
+   PCs con Windows. */
 int tailscale_parse_peers(const char *json, MeshDevice **out);
 
 /* Lo que "tailscale status --json" dice de esta PC. */
