@@ -9,6 +9,7 @@ extern const char sokari_res_tools[], sokari_res_tools_end[];
 extern const char sokari_res_prompt[], sokari_res_prompt_end[];
 extern const char sokari_res_wakeword[], sokari_res_wakeword_end[];
 extern const char sokari_res_hey[], sokari_res_hey_end[];
+extern const char sokari_res_icon[], sokari_res_icon_end[];
 
 const void *res_data(int id, size_t *len)
 {
@@ -18,6 +19,7 @@ const void *res_data(int id, size_t *len)
     case IDR_SYSTEM_PROMPT: start = sokari_res_prompt, end = sokari_res_prompt_end; break;
     case IDR_WAKEWORD: start = sokari_res_wakeword, end = sokari_res_wakeword_end; break;
     case IDR_HEY_SOKARI: start = sokari_res_hey, end = sokari_res_hey_end; break;
+    case IDR_ICON_PNG: start = sokari_res_icon, end = sokari_res_icon_end; break;
     default: return NULL;
     }
     if (end == start) return NULL;

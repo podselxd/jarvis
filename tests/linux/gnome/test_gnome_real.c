@@ -9,11 +9,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <signal.h>
 #include <sys/stat.h>
+#include <gio/gio.h>
 
 #include "config.h"
 #include "linux/acciones.h"
 #include "linux/gnome.h"
+#include "linux/proc.h"
 #include "tools.h"
 #include "util.h"
 
@@ -270,6 +273,81 @@ static void test_ventanas(void)
     check(wait_for("prueba", "", "cerrada", 3000), "como darle a la X");
 }
 
+
+static int count_titled(const char *title)
+{
+    GnomeWindow *w;
+    int n, c = 0;
+    if (gnome_list_windows(&w, &n) == GN_OK)
+        for (int i = 0; i < n; i++)
+            if (!strcmp(w[i].title, title)) c++;
+    gnome_windows_free(w, n);
+    return c;
+}
+
+static bool wait_titled(const char *title, int want, int ms)
+{
+    for (int t = 0; t <= ms; t += 100) {
+        if (count_titled(title) == want) return true;
+        Sleep(100);
+    }
+    return false;
+}
+
+static pid_t start_sokari(const char *arg)
+{
+    const char *bin = getenv("SOKARI_BIN");
+    const char *argv[] = {bin, arg, NULL};
+    return proc_spawn(argv, NULL, NULL, NULL, NULL);
+}
+
+static void test_ventana_de_sokari(void)
+{
+    printf("-- la ventana de Sokari --\n");
+    if (!getenv("SOKARI_BIN")) {
+        printf("      (sin SOKARI_BIN: se omite)\n");
+        return;
+    }
+    pid_t pid = start_sokari(NULL);
+    check(wait_titled("Sokari", 1, 10000), "abre su ventana con la esfera");
+    check(wait_titled("Configuración de Sokari", 1, 3000), "la primera vez (sin API key) abre también Configuración");
+    Sleep(2500);
+    check(pid > 0 && kill(pid, 0) == 0, "la esfera se dibuja unos segundos sin problemas");
+    pid_t again = start_sokari(NULL);
+    int code = proc_finish(again, 8000);
+    check(code == 0 && count_titled("Sokari") == 1, "abrirla otra vez no abre otra: muestra la que ya está");
+    uint64_t id = 0;
+    GnomeWindow *w;
+    int n;
+    if (gnome_list_windows(&w, &n) == GN_OK)
+        for (int i = 0; i < n; i++)
+            if (!strcmp(w[i].title, "Configuración de Sokari")) id = w[i].id;
+    gnome_windows_free(w, n);
+    bool ok = false;
+    gnome_window_action(id, "close", &ok);
+    check(wait_titled("Configuración de Sokari", 0, 3000), "Configuración se cierra");
+    if (gnome_list_windows(&w, &n) == GN_OK)
+        for (int i = 0; i < n; i++)
+            if (!strcmp(w[i].title, "Sokari")) id = w[i].id;
+    gnome_windows_free(w, n);
+    gnome_window_action(id, "close", &ok);
+    check(wait_titled("Sokari", 0, 3000) && kill(pid, 0) == 0,
+          "cerrar la ventana la esconde, pero Sokari sigue corriendo (y escuchando)");
+    again = start_sokari("--mostrar");
+    proc_finish(again, 8000);
+    check(wait_titled("Sokari", 1, 5000), "abrirla otra vez la vuelve a mostrar");
+    GDBusConnection *bus = g_bus_get_sync(G_BUS_TYPE_SESSION, NULL, NULL);
+    GVariant *r = bus ? g_dbus_connection_call_sync(bus, "io.github.podselxd.Sokari", "/io/github/podselxd/Sokari",
+                                                    "org.gtk.Actions", "Activate",
+                                                    g_variant_new("(sava{sv})", "salir", NULL, NULL), NULL,
+                                                    G_DBUS_CALL_FLAGS_NONE, 5000, NULL, NULL)
+                      : NULL;
+    if (r) g_variant_unref(r);
+    if (bus) g_object_unref(bus);
+    code = proc_finish(pid, 6000);
+    check(r && code == 0, "«Salir» de su menú la cierra del todo");
+}
+
 int wmain(void)
 {
     g_dir = getenv("SOKARI_PRUEBA_DIR");
@@ -293,6 +371,7 @@ int wmain(void)
     test_subir();
     test_terminal();
     test_ventanas();
+    test_ventana_de_sokari();
     printf("%d/%d pruebas %s\n", g_total - g_fail, g_total, g_fail ? "— HAY FALLAS" : "ok");
     return g_fail ? 1 : 0;
 }

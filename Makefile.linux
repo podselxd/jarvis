@@ -1,10 +1,12 @@
 # Sokari para Linux (Ubuntu 24.04+ y Fedora 44):  make -f Makefile.linux
 # Necesita gcc, make, pkg-config y las cabeceras de libcurl:
-#   Ubuntu: sudo apt install build-essential pkg-config libcurl4-openssl-dev libpulse-dev
-#   Fedora: sudo dnf install gcc make pkgconf-pkg-config libcurl-devel pulseaudio-libs-devel
+#   Ubuntu: sudo apt install build-essential pkg-config libcurl4-openssl-dev libpulse-dev libgtk-3-dev
+#           libayatana-appindicator3-dev
+#   Fedora: sudo dnf install gcc make pkgconf-pkg-config libcurl-devel pulseaudio-libs-devel gtk3-devel
+#           libayatana-appindicator-gtk3-devel
 
 CC ?= gcc
-PKGS := libcurl libpulse libpulse-simple gio-2.0 gio-unix-2.0
+PKGS := libcurl libpulse libpulse-simple gio-2.0 gio-unix-2.0 gtk+-3.0 ayatana-appindicator3-0.1
 CFLAGS := -std=gnu11 -O2 -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -D_GNU_SOURCE \
           -Isrc -Isrc/linux/include -MMD -MP $(shell pkg-config --cflags $(PKGS))
 LIBS := $(shell pkg-config --libs $(PKGS)) -lm -lpthread
@@ -12,7 +14,7 @@ LIBS := $(shell pkg-config --libs $(PKGS)) -lm -lpthread
 # Del código compartido con Windows, lo que no depende del sistema. Lo propio
 # de Linux está en src/linux/ (y src/linux/include/windows.h da los hilos y
 # candados con la misma forma que en Windows).
-SHARED := agent audio_common calc config groq http_common intents keys log memory mesh mesh_devices sounds_common \
+SHARED := agent audio_common calc config groq http_common intents keys log memory mesh mesh_devices sounds_common sphere \
           tool_policy tools tools_common tools_memory tools_web tts_common util vad voice wakeword nn_generic nn_avx2
 # Detector de voz de WebRTC (C puro, licencia BSD): ver src/third_party/webrtc_vad.
 VAD_SRC := $(wildcard src/third_party/webrtc_vad/webrtc/common_audio/vad/*.c) \
@@ -25,7 +27,7 @@ OUT ?= build-linux/sokari
 
 # El modelo de "Hey Sokari" entra solo si res/hey_sokari.jww existe.
 HEY_SOKARI := $(wildcard res/hey_sokari.jww)
-RES_FILES := res/tools.json res/system_prompt.txt res/wakeword.bin $(HEY_SOKARI)
+RES_FILES := res/tools.json res/system_prompt.txt res/wakeword.bin res/sokari.png $(HEY_SOKARI)
 
 # Las pruebas que ya corren en Linux (las demás llegan con cada parte).
 LINUX_TESTS := test_comandos test_confirmacion test_escucha test_malla test_resources test_respaldos test_teclado test_util test_voice test_wakeword test_groq

@@ -89,7 +89,7 @@ jobs:
       - name: Dependencias
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential pkg-config libcurl4-openssl-dev libpulse-dev libglib2.0-dev espeak-ng pulseaudio dbus-daemon
+          sudo apt-get install -y build-essential pkg-config libcurl4-openssl-dev libpulse-dev libglib2.0-dev libgtk-3-dev libayatana-appindicator3-dev espeak-ng pulseaudio dbus-daemon
 
       - name: Servidor de sonido de prueba (bocinas y micrófono de mentira)
         run: |
@@ -123,7 +123,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Dependencias
-        run: dnf install -y gcc make pkgconf-pkg-config libcurl-devel pulseaudio-libs-devel glib2-devel espeak-ng dbus-daemon git-core
+        run: dnf install -y gcc make pkgconf-pkg-config libcurl-devel pulseaudio-libs-devel glib2-devel gtk3-devel libayatana-appindicator-gtk3-devel espeak-ng dbus-daemon git-core
 
       - uses: actions/checkout@v4
 
@@ -149,10 +149,11 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends build-essential pkg-config libcurl4-openssl-dev \
-            libpulse-dev libglib2.0-dev libgtk-3-dev gnome-shell gjs dbus-daemon dbus-x11 libglib2.0-bin
+            libpulse-dev libglib2.0-dev libgtk-3-dev libayatana-appindicator3-dev gnome-shell gjs dbus-daemon dbus-x11 \
+            libglib2.0-bin
 
-      - name: Compilar la prueba
-        run: make -f Makefile.linux -j4 prueba-gnome
+      - name: Compilar Sokari y la prueba
+        run: make -f Makefile.linux -j4 all prueba-gnome
 
       - name: Probar la extensión en GNOME 46
         run: sh tests/linux/gnome/probar_extension.sh
@@ -165,12 +166,12 @@ jobs:
       - name: Dependencias (y GNOME Shell)
         run: |
           dnf install -y gcc make pkgconf-pkg-config libcurl-devel pulseaudio-libs-devel glib2-devel gtk3-devel \
-            gnome-shell gjs dbus-daemon dbus-tools mesa-dri-drivers git-core
+            libayatana-appindicator-gtk3-devel gnome-shell gjs dbus-daemon dbus-tools mesa-dri-drivers git-core
 
       - uses: actions/checkout@v4
 
-      - name: Compilar la prueba
-        run: make -f Makefile.linux -j4 prueba-gnome
+      - name: Compilar Sokari y la prueba
+        run: make -f Makefile.linux -j4 all prueba-gnome
 
       - name: Probar la extensión en GNOME 50
         run: sh tests/linux/gnome/probar_extension.sh
