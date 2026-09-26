@@ -1,5 +1,6 @@
 # Compilación
 build/
+build-linux/
 dist/
 
 # Datos locales que dejaban las versiones viejas en esta carpeta.

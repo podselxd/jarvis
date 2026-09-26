@@ -350,3 +350,31 @@ char *hex_encode(const unsigned char *data, size_t n)
     return r;
 }
 
+/* Windows-1252 (las páginas viejas en español) a UTF-8: igual que Latin-1
+   salvo 0x80-0x9F, donde van comillas, guiones, € y demás. Los cinco huecos
+   del juego se dejan como el control C1 del mismo número, como Windows. */
+char *cp1252_to_utf8(const char *s, size_t n)
+{
+    static const unsigned short HIGH[32] = {
+        0x20AC, 0x81,   0x201A, 0x0192, 0x201E, 0x2026, 0x2020, 0x2021, 0x02C6, 0x2030, 0x0160,
+        0x2039, 0x0152, 0x8D,   0x017D, 0x8F,   0x90,   0x2018, 0x2019, 0x201C, 0x201D, 0x2022,
+        0x2013, 0x2014, 0x02DC, 0x2122, 0x0161, 0x203A, 0x0153, 0x9D,   0x017E, 0x0178};
+    StrBuf sb;
+    sb_init(&sb);
+    sb_reserve(&sb, n + n / 4 + 1);
+    for (size_t i = 0; i < n; i++) {
+        unsigned c = (unsigned char)s[i];
+        if (c >= 0x80 && c < 0xA0) c = HIGH[c - 0x80];
+        if (c < 0x80) {
+            sb_append_char(&sb, (char)c);
+        } else if (c < 0x800) {
+            sb_append_char(&sb, (char)(0xC0 | (c >> 6)));
+            sb_append_char(&sb, (char)(0x80 | (c & 0x3F)));
+        } else {
+            sb_append_char(&sb, (char)(0xE0 | (c >> 12)));
+            sb_append_char(&sb, (char)(0x80 | ((c >> 6) & 0x3F)));
+            sb_append_char(&sb, (char)(0x80 | (c & 0x3F)));
+        }
+    }
+    return sb.data ? sb_steal(&sb) : xstrdup("");
+}

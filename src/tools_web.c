@@ -1,9 +1,3 @@
-#define WIN32_LEAN_AND_MEAN
-#include <winsock2.h>
-#include <ws2tcpip.h>
-#include <windows.h>
-#include <shlwapi.h>
-#include <winhttp.h>
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -12,6 +6,7 @@
 #include "app.h"
 #include "http.h"
 #include "log.h"
+#include "net.h"
 #include "sounds.h"
 #include "tools.h"
 #include "util.h"
@@ -360,11 +355,11 @@ static bool v4_is_private(const unsigned char b[4])
            (b[0] == 198 && (b[1] == 18 || b[1] == 19)) || b[0] >= 224;
 }
 
-static bool addr_is_private(const struct sockaddr *sa)
+static bool addr_is_private(const NetAddr *a)
 {
-    if (sa->sa_family == AF_INET) return v4_is_private((const unsigned char *)&((const struct sockaddr_in *)sa)->sin_addr);
-    if (sa->sa_family != AF_INET6) return true;
-    const unsigned char *b = ((const struct sockaddr_in6 *)sa)->sin6_addr.s6_addr;
+    if (a->family == 4) return v4_is_private(a->b);
+    if (a->family != 6) return true;
+    const unsigned char *b = a->b;
     static const unsigned char zero[10] = {0};
     /* ::, ::1, ::a.b.c.d y ::ffff:a.b.c.d se juzgan por su IPv4 */
     if (!memcmp(b, zero, 10) && ((b[10] == 0xff && b[11] == 0xff) || (!b[10] && !b[11]))) return v4_is_private(b + 12);
@@ -376,54 +371,42 @@ static bool addr_is_private(const struct sockaddr *sa)
 
 /* Defensa: una página que el modelo quiera abrir nunca puede apuntar a tu red
    local (router, Tailscale, localhost, otras PCs). El host se saca como lo
-   entiende WinHTTP (así "http://x@127.0.0.1" no engaña) y se revisan todas las
-   IPs a las que resuelve, así un dominio que apunte a 192.168.x.x o formas
-   raras de IP como 127.1 o 2130706433 tampoco pasan. */
+   entiende el cliente HTTP (así "http://x@127.0.0.1" no engaña) y se revisan
+   todas las IPs a las que resuelve, así un dominio que apunte a 192.168.x.x o
+   formas raras de IP como 127.1 o 2130706433 tampoco pasan. */
 UrlCheck web_url_check(const char *url)
 {
-    wchar_t *w = utf8_to_wide(url);
-    URL_COMPONENTS uc = {0};
-    uc.dwStructSize = sizeof uc;
-    wchar_t host[512];
-    uc.lpszHostName = host;
-    uc.dwHostNameLength = 512;
-    UrlCheck res = URL_BAD;
-    if (WinHttpCrackUrl(w, 0, 0, &uc) && (uc.nScheme == INTERNET_SCHEME_HTTP || uc.nScheme == INTERNET_SCHEME_HTTPS) &&
-        uc.dwHostNameLength) {
-        host[uc.dwHostNameLength] = 0;
-        wchar_t *h = host;
-        size_t n = wcslen(h);
-        if (h[0] == L'[' && n > 2 && h[n - 1] == L']') h[--n] = 0, h++, n--;
-        while (n && h[n - 1] == L'.') h[--n] = 0;
-        char *low = wide_to_utf8(h);
-        char *t = str_lower(low);
-        free(low);
-        /* Nombres de una sola palabra ("router", "nas") los resuelve la red de
-           tu casa, no internet. */
-        bool local_name = !strchr(t, '.') && !strchr(t, ':');
-        if (local_name || !strcmp(t, "localhost") || str_ends_with(t, ".localhost") || str_ends_with(t, ".local") ||
-            str_ends_with(t, ".internal") || str_ends_with(t, ".lan") || str_ends_with(t, ".home.arpa") ||
-            str_ends_with(t, ".ts.net")) {
-            res = URL_PRIVATE;
-        } else {
-            WSADATA wsa;
-            WSAStartup(MAKEWORD(2, 2), &wsa);
-            ADDRINFOW hints = {0}, *ai = NULL;
-            hints.ai_family = AF_UNSPEC;
-            hints.ai_socktype = SOCK_STREAM;
-            if (GetAddrInfoW(h, NULL, &hints, &ai) != 0 || !ai) {
-                res = URL_UNRESOLVED;
-            } else {
-                res = URL_OK;
-                for (ADDRINFOW *p = ai; p; p = p->ai_next)
-                    if (addr_is_private(p->ai_addr)) res = URL_PRIVATE;
-                FreeAddrInfoW(ai);
-            }
-            WSACleanup();
-        }
-        free(t);
+    char *raw = url_host(url);
+    if (!raw || !*raw) {
+        free(raw);
+        return URL_BAD;
     }
-    free(w);
+    char *h = raw;
+    size_t n = strlen(h);
+    if (h[0] == '[' && n > 2 && h[n - 1] == ']') h[--n] = 0, h++, n--;
+    while (n && h[n - 1] == '.') h[--n] = 0;
+    char *t = str_lower(h);
+    UrlCheck res;
+    /* Nombres de una sola palabra ("router", "nas") los resuelve la red de
+       tu casa, no internet. */
+    bool local_name = !strchr(t, '.') && !strchr(t, ':');
+    if (local_name || !strcmp(t, "localhost") || str_ends_with(t, ".localhost") || str_ends_with(t, ".local") ||
+        str_ends_with(t, ".internal") || str_ends_with(t, ".lan") || str_ends_with(t, ".home.arpa") ||
+        str_ends_with(t, ".ts.net")) {
+        res = URL_PRIVATE;
+    } else {
+        NetAddr addrs[32];
+        int got = net_resolve(h, addrs, 32);
+        if (got <= 0) {
+            res = URL_UNRESOLVED;
+        } else {
+            res = URL_OK;
+            for (int i = 0; i < got; i++)
+                if (addr_is_private(&addrs[i])) res = URL_PRIVATE;
+        }
+    }
+    free(t);
+    free(raw);
     return res;
 }
 
@@ -477,19 +460,14 @@ char *tool_leer_pagina(const cJSON *a)
             result = xstrdup("Esa página redirige demasiadas veces, no la pude leer.");
             break;
         }
-        wchar_t *base = utf8_to_wide(url), *rel = utf8_to_wide(r.location);
-        wchar_t next[4096];
-        DWORD len = 4096;
-        bool ok = SUCCEEDED(UrlCombineW(base, rel, next, &len, 0));
-        free(base);
-        free(rel);
+        char *next = url_resolve(url, r.location);
         http_response_free(&r);
-        if (!ok) {
+        if (!next) {
             result = xstrdup("Esa página redirige a una dirección que no entiendo.");
             break;
         }
         free(url);
-        url = wide_to_utf8(next);
+        url = next;
     }
     if (!result && r.status != 200) {
         result = r.error ? str_printf("No pude abrir esa página: %s", r.error)
@@ -497,14 +475,7 @@ char *tool_leer_pagina(const cJSON *a)
     } else if (!result) {
         char *html = r.body;
         char *converted = NULL;
-        if (!is_utf8_content(&r)) {
-            int wn = MultiByteToWideChar(1252, 0, r.body, (int)r.body_len, NULL, 0);
-            wchar_t *w = xmalloc(sizeof(wchar_t) * (size_t)(wn + 1));
-            MultiByteToWideChar(1252, 0, r.body, (int)r.body_len, w, wn);
-            converted = wide_n_to_utf8(w, wn);
-            free(w);
-            html = converted;
-        }
+        if (!is_utf8_content(&r)) html = converted = cp1252_to_utf8(r.body, r.body_len);
         char *text = html_to_text(html);
         free(converted);
         if (str_is_blank(text)) {

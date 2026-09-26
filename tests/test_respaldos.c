@@ -164,6 +164,12 @@ static bool start_server(void)
     a.sin_family = AF_INET;
     a.sin_port = htons(PORT);
     inet_pton(AF_INET, "127.0.0.1", &a.sin_addr);
+#ifndef _WIN32
+    /* En Linux el puerto queda apartado un minuto después de cada conexión
+       (TIME_WAIT): sin esto, correr la prueba dos veces seguidas falla. */
+    int one = 1;
+    setsockopt(g_ls, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+#endif
     if (bind(g_ls, (struct sockaddr *)&a, sizeof a) || listen(g_ls, 16)) return false;
     HANDLE t = CreateThread(NULL, 0, server, NULL, 0, NULL);
     if (t) CloseHandle(t);

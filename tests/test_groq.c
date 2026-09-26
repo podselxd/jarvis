@@ -11,7 +11,11 @@
 #include "resources.h"
 #include "util.h"
 
+#ifdef _WIN32
 int wmain(int argc, wchar_t **argv)
+#else
+int main(int argc, char **argv)
+#endif
 {
     SetConsoleOutputCP(CP_UTF8);
     log_to_console(1);
@@ -36,7 +40,11 @@ int wmain(int argc, wchar_t **argv)
     cJSON_AddItemToArray(msgs, sys);
     cJSON *user = cJSON_CreateObject();
     cJSON_AddStringToObject(user, "role", "user");
+#ifdef _WIN32
     char *q = argc > 1 ? wide_to_utf8(argv[1]) : xstrdup("Hola Sokari, ¿cuánto es 17 por 23?");
+#else
+    char *q = xstrdup(argc > 1 ? argv[1] : "Hola Sokari, ¿cuánto es 17 por 23?");
+#endif
     cJSON_AddStringToObject(user, "content", q);
     cJSON_AddItemToArray(msgs, user);
 

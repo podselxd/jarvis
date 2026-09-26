@@ -1,6 +1,7 @@
 # Compila Sokari.exe y corre las pruebas en un Windows real en cada push. El
 # exe y las capturas de la interfaz quedan como artefactos de la corrida, así
-# se puede probar una rama sin compilarla.
+# se puede probar una rama sin compilarla. También compila y prueba la versión
+# de Linux en Ubuntu 24.04 y en Fedora 44.
 name: Compilar y probar
 
 on:
@@ -76,3 +77,48 @@ jobs:
           name: capturas-interfaz
           path: build/capturas
           if-no-files-found: ignore
+
+  linux-ubuntu:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Dependencias
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config libcurl4-openssl-dev
+
+      - name: Compilar Sokari y las pruebas (una advertencia cuenta como error)
+        run: |
+          set -o pipefail
+          make -f Makefile.linux -j4 all tests 2>&1 | tee build.log
+          if grep -q "warning:" build.log; then echo "::error::El compilador dio advertencias"; exit 1; fi
+
+      - name: Correr las pruebas
+        run: sh tests/correr_linux.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Sokari-linux
+          path: build-linux/sokari
+          if-no-files-found: error
+
+  linux-fedora:
+    runs-on: ubuntu-24.04
+    container: fedora:44
+    timeout-minutes: 20
+    steps:
+      - name: Dependencias
+        run: dnf install -y gcc make pkgconf-pkg-config libcurl-devel git-core
+
+      - uses: actions/checkout@v4
+
+      - name: Compilar Sokari y las pruebas (una advertencia cuenta como error)
+        run: |
+          set -o pipefail
+          make -f Makefile.linux -j4 all tests 2>&1 | tee build.log
+          if grep -q "warning:" build.log; then echo "::error::El compilador dio advertencias"; exit 1; fi
+
+      - name: Correr las pruebas
+        run: sh tests/correr_linux.sh

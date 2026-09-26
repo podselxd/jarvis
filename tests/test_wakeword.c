@@ -21,7 +21,10 @@ static float *read_vec(FILE *f, int *n)
     uint32_t count;
     if (fread(&count, 4, 1, f) != 1) return NULL;
     float *v = malloc(sizeof(float) * count);
-    fread(v, sizeof(float), count, f);
+    if (fread(v, sizeof(float), count, f) != count) {
+        free(v);
+        return NULL;
+    }
     *n = (int)count;
     return v;
 }
@@ -64,7 +67,7 @@ static int16_t *load_wav16k(const wchar_t *path, size_t *samples)
    Devuelve -1 si no está el archivo. */
 static float best_score(WakeWord *w, const wchar_t *name)
 {
-    wchar_t *dir = exe_dir(), *rel = path_join(L"..\\..\\tests\\datos", name), *path = path_join(dir, rel);
+    wchar_t *dir = exe_dir(), *rel = path_join(L"../../tests/datos", name), *path = path_join(dir, rel);
     size_t n = 0;
     int16_t *pcm = load_wav16k(path, &n);
     free(dir);
@@ -208,7 +211,11 @@ static float ref_classify(const Clf *c, const float *feat)
     return 1.0f / (1.0f + expf(-z));
 }
 
+#ifdef _WIN32
 int wmain(int argc, wchar_t **argv)
+#else
+int main(int argc, char **argv)
+#endif
 {
     SetConsoleOutputCP(CP_UTF8);
     setvbuf(stdout, NULL, _IONBF, 0);
@@ -244,7 +251,11 @@ int wmain(int argc, wchar_t **argv)
     check(worst < 1e-4, "el clasificador da lo mismo que la cuenta hecha a mano");
 
     if (argc > 1) {
+#ifdef _WIN32
         FILE *f = _wfopen(argv[1], L"rb");
+#else
+        FILE *f = fopen(argv[1], "rb");
+#endif
         int n;
         float *mel_in = read_vec(f, &n), *mel_out = read_vec(f, &n);
         float *emb_in = read_vec(f, &n), *emb_out = read_vec(f, &n);
@@ -305,7 +316,13 @@ int wmain(int argc, wchar_t **argv)
         }
         if (hs && argc > 2) {
             size_t n;
+#ifdef _WIN32
             int16_t *pcm = load_wav16k(argv[2], &n);
+#else
+            wchar_t *wav = utf8_to_wide(argv[2]);
+            int16_t *pcm = load_wav16k(wav, &n);
+            free(wav);
+#endif
             float best = 0;
             for (size_t off = 0; pcm && off + WW_CHUNK <= n; off += WW_CHUNK) {
                 float sc = ww_process(hs, pcm + off);

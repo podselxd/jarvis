@@ -163,6 +163,19 @@ mingw32-make OUT=build/Sokari.exe
 
 En cada push, GitHub Actions compila en un Windows real (una advertencia del compilador cuenta como error) y corre las pruebas, menos `test_groq`, que necesita una API key. El `Sokari.exe` de cada corrida queda en la pestaña **Actions** para probar una rama sin compilarla.
 
+### En Linux (en camino)
+
+La versión de Linux (Ubuntu 24.04 o más nuevo, y Fedora 44) se está armando por partes. Por ahora corre en modo texto: le escribes lo que le dirías y te contesta en la terminal, con el mismo agente, las mismas herramientas y las mismas confirmaciones; lo que todavía no está hecho para Linux lo dice en vez de fingir que lo hizo.
+
+```bash
+sudo apt install build-essential pkg-config libcurl4-openssl-dev   # Fedora: sudo dnf install gcc make pkgconf-pkg-config libcurl-devel
+make -f Makefile.linux            # build-linux/sokari
+make -f Makefile.linux tests && sh tests/correr_linux.sh
+./build-linux/sokari --texto
+```
+
+La configuración va en `~/.config/sokari/config.env` (tu key: `GROQ_API_KEY=...`) y la memoria en `~/.local/share/sokari`; las dos solo las puede leer tu usuario. El código de Linux está en `src/linux/`; `src/linux/include/windows.h` da los hilos, candados y eventos con la misma forma que en Windows, así el agente, la memoria y demás son el mismo código en los dos. La CI también compila y prueba en Ubuntu 24.04 y en Fedora 44.
+
 ### Publicar una versión
 
 1. Sube la versión en `src/config.h` (`SOKARI_VERSION` y `SOKARI_VERSION_W`), en `res/sokari.rc` (las cuatro) y en `res/sokari.manifest`. `sh tests/check_version.sh` revisa que coincidan.

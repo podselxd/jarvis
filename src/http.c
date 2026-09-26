@@ -282,20 +282,3 @@ HttpResponse http_get(const char *url, int timeout_ms, bool browser_ua)
     HttpRequest r = {.method = "GET", .url = url, .timeout_ms = timeout_ms, .browser_ua = browser_ua};
     return http_request(&r);
 }
-
-char *url_encode(const char *s)
-{
-    static const char hex[] = "0123456789ABCDEF";
-    StrBuf sb;
-    sb_init(&sb);
-    for (const unsigned char *p = (const unsigned char *)s; *p; p++) {
-        if ((*p >= 'A' && *p <= 'Z') || (*p >= 'a' && *p <= 'z') || (*p >= '0' && *p <= '9') || *p == '-' ||
-            *p == '_' || *p == '.' || *p == '~') {
-            sb_append_char(&sb, (char)*p);
-        } else {
-            char e[3] = {'%', hex[*p >> 4], hex[*p & 15]};
-            sb_append_n(&sb, e, 3);
-        }
-    }
-    return sb_steal(&sb);
-}
