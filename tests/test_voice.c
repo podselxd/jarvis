@@ -31,7 +31,11 @@ static int16_t *load_wav(const wchar_t *path, size_t *samples)
     return NULL;
 }
 
+#ifdef _WIN32
 int wmain(int argc, wchar_t **argv)
+#else
+int main(int argc, char **argv)
+#endif
 {
     SetConsoleOutputCP(CP_UTF8);
     setvbuf(stdout, NULL, _IONBF, 0);
@@ -56,12 +60,24 @@ int wmain(int argc, wchar_t **argv)
     if (argc > 2 && pcm) {
         size_t wl;
         unsigned char *wav = wav_encode(pcm, samples, TTS_RATE, &wl);
+#ifdef _WIN32
         write_file_atomic(argv[2], wav, wl);
+#else
+        wchar_t *out = utf8_to_wide(argv[2]);
+        write_file_atomic(out, wav, wl);
+        free(out);
+#endif
         printf("wav escrito\n");
     }
     if (argc > 1) {
         size_t s16;
+#ifdef _WIN32
         int16_t *in = load_wav(argv[1], &s16);
+#else
+        wchar_t *inw = utf8_to_wide(argv[1]);
+        int16_t *in = load_wav(inw, &s16);
+        free(inw);
+#endif
         GroqError err = {0};
         t0 = now_ms();
         char *txt = in ? groq_transcribe(in, s16, 16000, &err) : NULL;

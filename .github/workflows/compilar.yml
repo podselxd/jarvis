@@ -81,13 +81,26 @@ jobs:
   linux-ubuntu:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    env:
+      XDG_RUNTIME_DIR: /tmp/xdg-runtime
     steps:
       - uses: actions/checkout@v4
 
       - name: Dependencias
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential pkg-config libcurl4-openssl-dev
+          sudo apt-get install -y build-essential pkg-config libcurl4-openssl-dev libpulse-dev espeak-ng pulseaudio
+
+      - name: Servidor de sonido de prueba (bocinas y micrófono de mentira)
+        run: |
+          mkdir -p "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR"
+          # Sin clave: las pruebas corren con otra carpeta personal y no ven la de PulseAudio.
+          pulseaudio --start --exit-idle-time=-1 -n --load="module-native-protocol-unix auth-anonymous=1" \
+            --load="module-null-sink sink_name=bocinas sink_properties=device.description=Bocinas" \
+            --load="module-null-sink sink_name=mic sink_properties=device.description=Microfono"
+          pactl set-default-sink bocinas
+          pactl set-default-source mic.monitor
+          pactl info | grep -E "Server String|Default"
 
       - name: Compilar Sokari y las pruebas (una advertencia cuenta como error)
         run: |
@@ -110,7 +123,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Dependencias
-        run: dnf install -y gcc make pkgconf-pkg-config libcurl-devel git-core
+        run: dnf install -y gcc make pkgconf-pkg-config libcurl-devel pulseaudio-libs-devel espeak-ng git-core
 
       - uses: actions/checkout@v4
 

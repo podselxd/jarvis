@@ -165,16 +165,22 @@ En cada push, GitHub Actions compila en un Windows real (una advertencia del com
 
 ### En Linux (en camino)
 
-La versión de Linux (Ubuntu 24.04 o más nuevo, y Fedora 44) se está armando por partes. Por ahora corre en modo texto: le escribes lo que le dirías y te contesta en la terminal, con el mismo agente, las mismas herramientas y las mismas confirmaciones; lo que todavía no está hecho para Linux lo dice en vez de fingir que lo hizo.
+La versión de Linux (Ubuntu 24.04 o más nuevo, y Fedora 44) se está armando por partes. Por ahora corre sin ventanas, desde la terminal, con el mismo agente, las mismas herramientas y las mismas confirmaciones que en Windows; lo que todavía no está hecho para Linux lo dice en vez de fingir que lo hizo.
 
 ```bash
-sudo apt install build-essential pkg-config libcurl4-openssl-dev   # Fedora: sudo dnf install gcc make pkgconf-pkg-config libcurl-devel
+# Ubuntu (Fedora: sudo dnf install gcc make pkgconf-pkg-config libcurl-devel pulseaudio-libs-devel espeak-ng)
+sudo apt install build-essential pkg-config libcurl4-openssl-dev libpulse-dev espeak-ng
 make -f Makefile.linux            # build-linux/sokari
 make -f Makefile.linux tests && sh tests/correr_linux.sh
-./build-linux/sokari --texto
+./build-linux/sokari --voz        # "Hey Sokari" y te contesta hablando (Ctrl+C para salir)
+./build-linux/sokari --texto      # o escribiéndole
 ```
 
-La configuración va en `~/.config/sokari/config.env` (tu key: `GROQ_API_KEY=...`) y la memoria en `~/.local/share/sokari`; las dos solo las puede leer tu usuario. El código de Linux está en `src/linux/`; `src/linux/include/windows.h` da los hilos, candados y eventos con la misma forma que en Windows, así el agente, la memoria y demás son el mismo código en los dos. La CI también compila y prueba en Ubuntu 24.04 y en Fedora 44.
+- **Voz:** el micrófono y las bocinas van por PulseAudio (en Ubuntu y Fedora lo atiende PipeWire). Mientras te escucha baja el volumen de la PC y luego lo regresa, salvo que tú le hayas movido. Por ahora solo se le habla con "Hey Sokari": el atajo de teclado llega con la interfaz.
+- **Su voz:** la primera vez se baja [Piper](https://github.com/rhasspy/piper) (voces neuronales que corren en tu PC; el programa, revisado con su SHA-256) y una voz de México de su [catálogo](https://huggingface.co/rhasspy/piper-voices) (revisada con el tamaño y el MD5 que publica el catálogo): unos 90 MB, una sola vez, en `~/.local/share/sokari`. Mientras se baja, o si no se pudo, habla con espeak-ng (más robótica).
+- La configuración va en `~/.config/sokari/config.env` (tu key: `GROQ_API_KEY=...`) y la memoria en `~/.local/share/sokari`; las dos solo las puede leer tu usuario.
+- El código de Linux está en `src/linux/`; `src/linux/include/windows.h` da los hilos, candados y eventos con la misma forma que en Windows, así el agente, la memoria, el detector de "Hey Sokari" y demás son el mismo código en los dos. Los programas externos (Piper, espeak-ng, paplay) se corren sin shell y con el texto por su entrada, nunca como argumento.
+- La CI también compila y prueba en Ubuntu 24.04 (con un servidor de sonido de prueba) y en Fedora 44.
 
 ### Publicar una versión
 

@@ -13,7 +13,7 @@ for t in build-linux/tests/*; do
         continue
     fi
     [ -n "${GITHUB_ACTIONS:-}" ] && echo "::group::$n"
-    if HOME="$home" XDG_CONFIG_HOME= XDG_DATA_HOME= "$t"; then
+    if HOME="$home" XDG_CONFIG_HOME= XDG_DATA_HOME= SOKARI_SIN_DESCARGAS=1 "$t"; then
         [ -n "${GITHUB_ACTIONS:-}" ] && echo "::endgroup::"
     else
         rc=$?

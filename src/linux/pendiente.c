@@ -3,7 +3,7 @@
    las siguientes partes (voz, acciones, malla). */
 #include <stdlib.h>
 
-#include "sounds.h"
+#include "mesh.h"
 #include "tools.h"
 #include "util.h"
 
@@ -45,5 +45,12 @@ bool open_url(const char *url, const char *browser)
     return false;
 }
 
-void sound_search_start(void) {}
-void sound_search_stop(void) {}
+
+/* La red de la malla (recibir órdenes de tus otras PCs) llega en la parte 5. */
+bool mesh_start(MeshHandler handler)
+{
+    (void)handler;
+    return false;
+}
+
+void mesh_stop(void) {}
